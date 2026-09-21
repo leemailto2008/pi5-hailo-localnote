@@ -76,12 +76,18 @@ def speech_to_text(audio_oga_path: str) -> Optional[str]:
             print("[VoicePipeline] Whisper model unavailable.")
             return None
 
-        # Transcribe with language hint for Traditional Chinese
+        # High-accuracy domain vocabulary prompt for Traditional Chinese
+        domain_prompt = (
+            "以下為台灣繁體中文語音對話，常見詞彙包括：樹莓派、Raspberry Pi、語音助理、"
+            "就緒、記憶體、向量庫、模型部署、人工智慧、繁體中文、Python、代碼、狀態查詢。"
+        )
         segments, info = model.transcribe(
             wav_path,
-            beam_size=3,
+            beam_size=5,
             language="zh",
-            initial_prompt="以下是繁體中文語音輸入，請以繁體中文轉錄。"
+            initial_prompt=domain_prompt,
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=500)
         )
         text = "".join([segment.text for segment in segments]).strip()
         return text if text else None

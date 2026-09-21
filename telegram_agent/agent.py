@@ -332,6 +332,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.RECORD_VOICE)
         base_instruction = (
             "你是部署於樹莓派 5 上的邊緣語音個人助理。使用者正使用語音與你交談。"
+            "使用者語音轉文字若含有同音或相近錯別字，請依據上下文與樹莓派專案語境自動對齊其真實意圖。"
             "請以繁體中文 (Traditional Chinese, 台灣語音習慣) 回應，語言力求自然、生動、簡潔，"
             "避免過多複雜的排版符號，以便於語音合成流暢朗讀。"
         )
