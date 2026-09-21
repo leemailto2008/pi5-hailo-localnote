@@ -343,10 +343,17 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             "避免過多複雜的排版符號，以便於語音合成流暢朗讀。"
         )
 
-        # Check tool execution (Web search / Taiwan news)
+        # Check tool execution (Skills / Tools / Power / Hardware)
         tool_context = execute_tool_call_if_needed(transcribed_text)
         if tool_context:
-            await update.message.reply_text("🌐 *正在為您連線檢索最新台灣即時資訊...*", parse_mode=ParseMode.MARKDOWN)
+            if "電源管理" in tool_context:
+                await update.message.reply_text("⚡ *正在排程系統電源生命週期控制 (RTC / Power Control)...*", parse_mode=ParseMode.MARKDOWN)
+            elif "硬體監控" in tool_context:
+                await update.message.reply_text("🌡️ *正在讀取板載感測器與硬體數據...*", parse_mode=ParseMode.MARKDOWN)
+            elif "即時新聞" in tool_context or "聯網搜尋" in tool_context:
+                await update.message.reply_text("🌐 *正在為您連線檢索最新台灣即時資訊...*", parse_mode=ParseMode.MARKDOWN)
+            elif "自我進化" in tool_context:
+                await update.message.reply_text("🛠️ *正在調用代碼模型自建新技能模組並熱載入...*", parse_mode=ParseMode.MARKDOWN)
             base_instruction = f"{base_instruction}\n\n{tool_context}"
 
         messages = memory_mgr.build_prompt_messages(chat_id, transcribed_text, base_instruction)

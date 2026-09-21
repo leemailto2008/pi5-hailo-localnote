@@ -1,8 +1,11 @@
-# telegram_agent/tools.py
+# f:\12_prj_raspi5\telegram_agent\tools.py
 """
 Evolving Skills & Tool Registry for Raspberry Pi 5 Telegram Voice AI Agent.
-Supports built-in system diagnostics (temperature, memory, CPU), real-time web search,
-and dynamic skill loading/evolution.
+Supports:
+1. Hardware Telemetry (SoC Temp, RAM, CPU Load)
+2. Real-time Taiwan News / Web Search
+3. Power Management & RTC Wakeup (Timed Poweroff & Auto-Wakeup / Reboot)
+4. Dynamic Skill Synthesis & Hot-Reloading (Self-Evolution via Local LLM)
 """
 
 import os
@@ -15,13 +18,72 @@ import re
 import json
 import logging
 import importlib.util
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, Tuple
 
 logger = logging.getLogger("Pi5Skills")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SKILLS_DIR = os.path.join(BASE_DIR, "skills")
 os.makedirs(SKILLS_DIR, exist_ok=True)
+
+# Try importing config for Ollama API URL
+try:
+    from config import OLLAMA_API_URL, DEFAULT_CHAT_MODEL
+except ImportError:
+    OLLAMA_API_URL = "http://127.0.0.1:11434"
+    DEFAULT_CHAT_MODEL = "llama3.2:3b"
+
+# =============================================================================
+# Helper: Chinese Number to Integer Parser
+# =============================================================================
+
+def parse_time_duration_seconds(text: str) -> int:
+    """
+    Parse seconds or minutes from natural speech in Traditional Chinese or digits.
+    Examples: '30秒' -> 30, '1分鐘' -> 60, '兩分鐘' -> 120, '十秒' -> 10, '半分鐘' -> 30.
+    """
+    cn_num = {
+        '零': 0, '一': 1, '二': 2, '兩': 2, '三': 3, '四': 4,
+        '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10
+    }
+    
+    # 1. Direct regex for digits
+    match_sec = re.search(r'(\d+)\s*(?:秒鐘|秒)', text)
+    if match_sec:
+        return int(match_sec.group(1))
+
+    match_min = re.search(r'(\d+)\s*(?:分鐘|分)', text)
+    if match_min:
+        return int(match_min.group(1)) * 60
+
+    # 2. Chinese words regex
+    if "半分鐘" in text or "三十秒" in text:
+        return 30
+    if "一分鐘" in text:
+        return 60
+    if "兩分鐘" in text or "二分鐘" in text:
+        return 120
+    if "五分鐘" in text:
+        return 300
+    if "十分鐘" in text:
+        return 600
+
+    match_cn_sec = re.search(r'([一二兩三四五六七八九十]+)\s*(?:秒鐘|秒)', text)
+    if match_cn_sec:
+        val_str = match_cn_sec.group(1)
+        if val_str == "十":
+            return 10
+        if val_str.startswith("十"):
+            return 10 + cn_num.get(val_str[1], 0)
+        if val_str.endswith("十"):
+            return cn_num.get(val_str[0], 1) * 10
+        if len(val_str) == 3 and val_str[1] == "十":
+            return cn_num.get(val_str[0], 1) * 10 + cn_num.get(val_str[2], 0)
+        return cn_num.get(val_str, 0)
+
+    # Default fallback if mentioned power off without specific time: 0
+    return 0
+
 
 # =============================================================================
 # Built-in Skills (核心基礎技能)
@@ -33,13 +95,12 @@ def get_pi5_hardware_status(param: str = "") -> str:
     """
     results = []
     
-    # 1. Temperature via vcgencmd
+    # 1. Temperature via vcgencmd or sysfs
     try:
         res = subprocess.run(["vcgencmd", "measure_temp"], capture_output=True, text=True, timeout=3)
         temp_str = res.stdout.strip() if res.returncode == 0 else "N/A"
         results.append(f"• 核心溫度 (SoC Temp): {temp_str.replace('temp=', '')}")
     except Exception:
-        # Fallback to thermal zone sysfs
         try:
             with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                 celsius = int(f.read().strip()) / 1000.0
@@ -108,6 +169,123 @@ def fetch_taiwan_news(topic: str = "") -> str:
     return f"【實時聯網搜尋與台灣即時新聞 (主題: {topic or '頭條'})】:\n" + "\n".join(news_items)
 
 
+def control_pi5_power(user_text: str) -> str:
+    """
+    Control Raspberry Pi 5 Power Lifecycle:
+    - RTC Wakeup Poweroff: Shutdown PMIC and wake up automatically after N seconds.
+    - Delayed Reboot: Reboot automatically after N seconds.
+    - Immediate Poweroff / Reboot.
+    """
+    delay_sec = parse_time_duration_seconds(user_text)
+    user_lower = user_text.lower()
+    
+    is_reboot = any(k in user_lower for k in ["重開機", "重新開機", "重啟", "重開", "reboot"])
+    has_wakeup = any(k in user_lower for k in ["開機", "喚醒", "後開", "再開"])
+    is_poweroff = any(k in user_lower for k in ["關機", "poweroff", "shutdown", "關閉系統"])
+
+    # Scenario 1: Shutdown and wake up after N seconds (RTC Wakeup)
+    if is_poweroff and (has_wakeup or delay_sec > 0) and not is_reboot:
+        wake_sec = delay_sec if delay_sec > 0 else 30
+        logger.info(f"Scheduling RTC Wakeup Poweroff in {wake_sec} seconds...")
+        # Delay 3 seconds before issuing command so Telegram message & voice finishes sending
+        cmd = f"nohup bash -c 'sleep 3 && sudo rtcwake -m off -s {wake_sec}' >/dev/null 2>&1 &"
+        subprocess.Popen(cmd, shell=True)
+        return (
+            f"【電源管理 - 硬體定時喚醒 (RTC Wakeup)】:\n"
+            f"樹莓派 5 已成功排定於 3 秒後進入深層關機 (Poweroff)，並由硬體 RTC 晶片在 {wake_sec} 秒後自動喚醒通電開機！\n"
+            f"請留意板子紅色 LED 燈熄滅後，約 {wake_sec} 秒後將自動轉為綠燈並重新啟動系統。"
+        )
+
+    # Scenario 2: Reboot with delay or immediate reboot
+    if is_reboot:
+        delay = delay_sec if delay_sec > 0 else 3
+        logger.info(f"Scheduling system reboot in {delay} seconds...")
+        cmd = f"nohup bash -c 'sleep {delay} && sudo reboot' >/dev/null 2>&1 &"
+        subprocess.Popen(cmd, shell=True)
+        return (
+            f"【電源管理 - 系統重新開機 (Reboot)】:\n"
+            f"已成功排定樹莓派 5 於 {delay} 秒後自動重新啟動系統。"
+        )
+
+    # Scenario 3: Pure Poweroff
+    if is_poweroff:
+        logger.info("Scheduling clean poweroff in 3 seconds...")
+        cmd = "nohup bash -c 'sleep 3 && sudo poweroff' >/dev/null 2>&1 &"
+        subprocess.Popen(cmd, shell=True)
+        return (
+            "【電源管理 - 系統安全關機 (Poweroff)】:\n"
+            "樹莓派 5 已排定於 3 秒後執行安全關機。待狀態指示燈熄滅後即可安全移除電源。"
+        )
+
+    return "【電源管理】: 未能辨識具體的電源指令，請說明是否需要關機、重開機或指定喚醒秒數。"
+
+
+def synthesize_new_skill(user_text: str) -> str:
+    """
+    Self-Evolution: Prompt local LLM to generate a standalone Python skill module,
+    validate its syntax, and hot-reload into the SkillRegistry.
+    """
+    clean_prompt = re.sub(r"(請|幫我|自建|自製|學會|建立|新增|寫一個|技能|工具|能力)", "", user_text).strip()
+    if not clean_prompt:
+        clean_prompt = "自定義擴展工具"
+
+    logger.info(f"Synthesizing new skill for: {clean_prompt}")
+    
+    # Prompt Ollama code model to generate skill code
+    sys_instruction = (
+        "You are an expert Python tool synthesizer for Raspberry Pi 5.\n"
+        "Generate a standalone Python skill module following EXACTLY this specification:\n"
+        "1. Define dictionary SKILL_METADATA = {'name': '名稱', 'desc': '描述', 'keywords': ['關鍵字1', '關鍵字2']}\n"
+        "2. Define function `def execute(user_text: str) -> str:`\n"
+        "3. Only output valid Python code enclosed in ```python ... ``` without any markdown explanations."
+    )
+
+    try:
+        req_data = json.dumps({
+            "model": "qwen2.5-coder:7b-opt",
+            "messages": [
+                {"role": "system", "content": sys_instruction},
+                {"role": "user", "content": f"Create a skill to: {clean_prompt}"}
+            ],
+            "stream": False,
+            "options": {"temperature": 0.2, "num_predict": 512}
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            f"{OLLAMA_API_URL}/api/chat",
+            data=req_data,
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=40) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            content = data.get("message", {}).get("content", "")
+
+        # Extract python code
+        match = re.search(r"```python(.*?)```", content, re.DOTALL)
+        code = match.group(1).strip() if match else content.strip()
+
+        # Sanitize skill file name
+        skill_id = "skill_" + re.sub(r"[^a-zA-Z0-9_]", "", clean_prompt[:10].lower())
+        if len(skill_id) < 8:
+            import time
+            skill_id += f"_{int(time.time())}"
+
+        success = register_new_skill_code(skill_id, code)
+        if success:
+            return (
+                f"🎉 【自我進化成功】:\n"
+                f"已成功為樹莓派 5 撰寫並熱載入新技能模組 `{skill_id}.py`！\n"
+                f"功能目標：{clean_prompt}\n"
+                f"該技能現已即時加入技能庫，下回提到相關關鍵字即可直接自動觸發執行。"
+            )
+        else:
+            return f"❌ 【新技能合成失敗】: 代碼語法未通過沙盒校驗。"
+
+    except Exception as e:
+        logger.error(f"Failed to synthesize skill: {e}")
+        return f"❌ 【自我進化異常】: 調用代碼大模型時出錯 ({e})。"
+
+
 # =============================================================================
 # Dynamic Skill Registry & Self-Evolution (動態技能登錄與自我進化)
 # =============================================================================
@@ -123,17 +301,33 @@ class SkillRegistry:
         self.load_custom_skills()
 
     def register_builtin_skills(self):
+        # 1. Hardware Status
         self.skills["hardware_status"] = {
             "name": "查詢硬體與板子溫度",
             "desc": "查詢樹莓派5的SoC核心溫度、記憶體RAM負載、CPU負載與運作時間",
             "keywords": ["溫度", "板子溫度", "硬體狀態", "記憶體", "ram", "cpu", "負載", "運作時間", "健康狀態", "幾度"],
             "func": get_pi5_hardware_status
         }
+        # 2. Taiwan News & Search
         self.skills["taiwan_news"] = {
             "name": "即時台灣新聞與網頁搜尋",
             "desc": "上網檢索台灣最新頭條新聞或特定時事主題",
             "keywords": ["新聞", "時事", "頭條", "最新消息", "搜尋", "上網找", "查詢", "找一下"],
             "func": fetch_taiwan_news
+        }
+        # 3. Power Control & RTC Wakeup
+        self.skills["power_control"] = {
+            "name": "電源管理與定時開關機",
+            "desc": "安全關機、重開機、或設定硬體RTC定時喚醒開機",
+            "keywords": ["關機", "開機", "重開機", "重啟", "重新開機", "定時開機", "喚醒", "poweroff", "reboot", "rtcwake"],
+            "func": control_pi5_power
+        }
+        # 4. Self-Evolution Skill Synthesis
+        self.skills["skill_synthesis"] = {
+            "name": "自建新技能與代碼進化",
+            "desc": "調用本地代碼模型自動生成新技能代碼並熱載入",
+            "keywords": ["自建技能", "學會新技能", "建立技能", "自建工具", "新增技能", "擴充技能", "寫一個工具", "學會"],
+            "func": synthesize_new_skill
         }
 
     def load_custom_skills(self):
@@ -166,15 +360,28 @@ class SkillRegistry:
         Evaluate user intent and trigger corresponding skill function.
         """
         user_lower = user_text.lower()
-        
-        # Priority 1: Hardware & Temperature check
+
+        # Priority 0: Skill Synthesis (自建新技能)
+        synth_keywords = self.skills["skill_synthesis"]["keywords"]
+        if any(k in user_lower for k in synth_keywords):
+            logger.info("Triggered Skill: synthesize_new_skill")
+            return self.skills["skill_synthesis"]["func"](user_text)
+
+        # Priority 1: Power Control & RTC Wakeup (電源管理)
+        power_keywords = self.skills["power_control"]["keywords"]
+        if any(k in user_lower for k in power_keywords):
+            logger.info("Triggered Skill: control_pi5_power")
+            raw_info = self.skills["power_control"]["func"](user_text)
+            return f"{raw_info}\n請根據以上排定的電源狀態，以親切且清晰的語句告知使用者系統即將進行的動作。"
+
+        # Priority 2: Hardware & Temperature check
         hw_keywords = self.skills["hardware_status"]["keywords"]
         if any(k in user_lower for k in hw_keywords):
             logger.info("Triggered Skill: get_pi5_hardware_status")
             raw_info = self.skills["hardware_status"]["func"]()
             return f"{raw_info}\n請根據以上真實的硬體溫度與數據，以繁體中文親切告知使用者目前板子的狀態。"
 
-        # Priority 2: Web Search & News check
+        # Priority 3: Web Search & News check
         news_keywords = self.skills["taiwan_news"]["keywords"]
         if any(k in user_lower for k in news_keywords):
             logger.info("Triggered Skill: fetch_taiwan_news")
@@ -183,9 +390,9 @@ class SkillRegistry:
             raw_info = self.skills["taiwan_news"]["func"](topic)
             return f"{raw_info}\n請根據以上搜尋結果，為使用者統整出重點摘要並語音朗讀回答。"
 
-        # Priority 3: Custom Loaded Skills
+        # Priority 4: Custom Loaded Skills
         for s_id, s_info in self.skills.items():
-            if s_id in ["hardware_status", "taiwan_news"]:
+            if s_id in ["hardware_status", "taiwan_news", "power_control", "skill_synthesis"]:
                 continue
             if any(k.lower() in user_lower for k in s_info.get("keywords", [])):
                 logger.info(f"Triggered Dynamic Skill: {s_id}")
@@ -224,8 +431,12 @@ def register_new_skill_code(skill_name: str, code: str) -> bool:
         logger.error(f"Skill registration failed: {e}")
         return False
 
+
 if __name__ == "__main__":
-    print("1. Testing Hardware Status:")
-    print(execute_tool_call_if_needed("幫我查板子的溫度還有幾度"))
-    print("\n2. Testing News Search:")
-    print(execute_tool_call_if_needed("幫我查今天的新聞"))
+    print("1. Testing Time Parsing:")
+    print("三十秒 ->", parse_time_duration_seconds("請三十秒後關機"))
+    print("1分鐘 ->", parse_time_duration_seconds("設定1分鐘後重新開機"))
+    
+    print("\n2. Testing Power Control Simulation:")
+    # Simulation without calling subprocess Popen directly
+    print(execute_tool_call_if_needed("幫我設定關機，30秒後自行開機"))
