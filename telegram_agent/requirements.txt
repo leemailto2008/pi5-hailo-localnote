@@ -1,0 +1,7 @@
+# Pi 5 Telegram Voice AI Agent Dependencies
+python-telegram-bot>=21.0
+faster-whisper>=1.0.0
+edge-tts>=6.1.0
+numpy>=1.24.0
+requests>=2.31.0
+pydantic>=2.0.0

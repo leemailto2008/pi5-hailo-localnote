@@ -1,0 +1,19 @@
+#ignore local notes myself
+.agents/
+note1.txt
+plan1.md
+plan2.md
+
+# Ignore large Ollama model backup files
+raspi5_ollama_backup/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+.env
+telegram_agent/.env
+telegram_agent/data/
+telegram_agent/temp/
+*.db

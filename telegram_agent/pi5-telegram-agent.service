@@ -1,0 +1,17 @@
+[Unit]
+Description=Raspberry Pi 5 Telegram Voice AI Agent Daemon
+After=network.target ollama.service redis.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/pi5-llm-arena/telegram_agent
+EnvironmentFile=/home/pi/pi5-llm-arena/telegram_agent/.env
+ExecStart=/usr/bin/python3 /home/pi/pi5-llm-arena/telegram_agent/agent.py
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
