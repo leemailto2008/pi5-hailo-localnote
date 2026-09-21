@@ -302,12 +302,17 @@ class EvolutionEngine:
             elif task_index == 5:
                 # 5. Memory Consolidation
                 fact_count = 0
-                working_count = 0
+                episodic_count = 0
                 if os.path.exists(MEMORY_DB_PATH):
                     with sqlite3.connect(MEMORY_DB_PATH) as mconn:
-                        working_count = mconn.execute("SELECT COUNT(*) FROM working_memory").fetchone()[0]
-                        fact_count = mconn.execute("SELECT COUNT(*) FROM user_facts").fetchone()[0]
-                result_log = f"• 短期對話緩衝筆數: {working_count} 筆\n• 個人特徵事實固化筆數: {fact_count} 條\n• 記憶金字塔索引優化完成 (VACUUM & ANALYZE)。"
+                        tables = [r[0] for r in mconn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+                        if "user_facts" in tables:
+                            fact_count = mconn.execute("SELECT COUNT(*) FROM user_facts").fetchone()[0]
+                        if "episodic_memories" in tables:
+                            episodic_count = mconn.execute("SELECT COUNT(*) FROM episodic_memories").fetchone()[0]
+                        mconn.execute("VACUUM")
+                        mconn.execute("ANALYZE")
+                result_log = f"• 長期情境記憶 (Episodic): {episodic_count} 筆\n• 個人特徵事實固化 (Facts): {fact_count} 條\n• 記憶金字塔資料庫空間重整與索引優化完成 (VACUUM & ANALYZE)。"
 
             elif task_index == 6:
                 # 6. External Knowledge Ingestion
@@ -452,8 +457,8 @@ if __name__ == "__main__":
     print("Testing Evolution Engine initialization:")
     plans = evolution_engine.get_or_create_daily_plans()
     print(f"Generated {len(plans)} plans.")
-    print("\nExecuting Task 1 (Hardware/Governor check):")
-    res1 = evolution_engine.execute_task_by_index(1)
-    print(json.dumps(res1, ensure_ascii=False, indent=2))
+    print("\nExecuting Task 5 (Memory Consolidation):")
+    res5 = evolution_engine.execute_task_by_index(5)
+    print(json.dumps(res5, ensure_ascii=False, indent=2))
     print("\nFormatted Telegram Markdown Preview:")
     print(evolution_engine.format_plans_markdown())
