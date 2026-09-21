@@ -38,6 +38,7 @@ from config import (
 )
 from memory import ThreeTierMemoryManager
 from voice_pipeline import speech_to_text, text_to_speech_async
+from tools import execute_tool_call_if_needed
 
 # Setup logging
 logging.basicConfig(
@@ -278,6 +279,11 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         "回答力求清晰簡潔，重點條理分明。"
     )
 
+    # Check tool execution (Web search / Taiwan news)
+    tool_context = execute_tool_call_if_needed(user_text)
+    if tool_context:
+        base_instruction = f"{base_instruction}\n\n{tool_context}"
+
     # Build prompt messages from Three-Tier Memory
     messages = memory_mgr.build_prompt_messages(chat_id, user_text, base_instruction)
 
@@ -328,7 +334,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.info(f"[Voice STT] User {chat_id}: {transcribed_text}")
         await update.message.reply_text(f"🎙️ *您說:* 「{transcribed_text}」", parse_mode=ParseMode.MARKDOWN)
 
-        # 2. LLM Reasoning with Three-Tier Memory
+        # 2. LLM Reasoning with Three-Tier Memory & Tools
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.RECORD_VOICE)
         base_instruction = (
             "你是部署於樹莓派 5 上的邊緣語音個人助理。使用者正使用語音與你交談。"
@@ -336,6 +342,13 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             "請以繁體中文 (Traditional Chinese, 台灣語音習慣) 回應，語言力求自然、生動、簡潔，"
             "避免過多複雜的排版符號，以便於語音合成流暢朗讀。"
         )
+
+        # Check tool execution (Web search / Taiwan news)
+        tool_context = execute_tool_call_if_needed(transcribed_text)
+        if tool_context:
+            await update.message.reply_text("🌐 *正在為您連線檢索最新台灣即時資訊...*", parse_mode=ParseMode.MARKDOWN)
+            base_instruction = f"{base_instruction}\n\n{tool_context}"
+
         messages = memory_mgr.build_prompt_messages(chat_id, transcribed_text, base_instruction)
         reply_text = call_ollama_chat(model, messages)
 
