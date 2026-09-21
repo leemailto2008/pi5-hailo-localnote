@@ -1,7 +1,12 @@
 # f:\12_prj_raspi5\telegram_agent\agent.py
 """
 Raspberry Pi 5 Telegram Voice AI Agent Core Daemon.
-Integrates python-telegram-bot, Three-Tier Memory, Voice Pipeline, and Ollama Engine.
+Integrates:
+1. python-telegram-bot
+2. Three-Tier Memory Pyramid (Working Buffer, Profile Facts, Vector RAG)
+3. Edge Voice Pipeline (faster-whisper STT & edge-tts Neural TTS)
+4. Dynamic Evolving Skills Registry & Hardware Telemetry
+5. Autonomous Self-Evolution Engine (10 Daily Goals & Proactive Progress Reports)
 """
 
 import os
@@ -15,8 +20,9 @@ if _CURRENT_DIR not in sys.path:
 import time
 import uuid
 import logging
+import asyncio
 import subprocess
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 import requests
 from telegram import Update, BotCommand
@@ -39,6 +45,8 @@ from config import (
 from memory import ThreeTierMemoryManager
 from voice_pipeline import speech_to_text, text_to_speech_async
 from tools import execute_tool_call_if_needed
+from evolution_engine import evolution_engine
+from notifier import broadcast_daily_plan_overview, broadcast_progress_milestone
 
 # Setup logging
 logging.basicConfig(
@@ -54,12 +62,15 @@ memory_mgr = ThreeTierMemoryManager()
 active_models: Dict[int, str] = {}
 
 
-def is_authorized(user_id: int) -> bool:
-    """Check if the user is in the authorized whitelist."""
+def is_authorized(user_id: int, username: str = "") -> bool:
+    """Check whitelist and register subscriber for proactive push notifications."""
     if not ALLOWED_CHAT_IDS:
-        # If no whitelist specified, allow but log warning
+        evolution_engine.register_chat_subscriber(user_id, username)
         return True
-    return user_id in ALLOWED_CHAT_IDS
+    if user_id in ALLOWED_CHAT_IDS:
+        evolution_engine.register_chat_subscriber(user_id, username)
+        return True
+    return False
 
 
 def get_active_model(chat_id: int) -> str:
@@ -102,16 +113,19 @@ def get_hardware_telemetry() -> Dict[str, Any]:
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
     user = update.effective_user
-    if not is_authorized(user.id):
+    if not is_authorized(user.id, user.username or ""):
         await update.message.reply_text(f"⚠️ 未授權存取。您的 Telegram User ID 為: `{user.id}`，請聯繫管理員加入白名單。", parse_mode=ParseMode.MARKDOWN)
         return
 
     msg = (
-        f"👋 您好 {user.first_name}！我是您的 **Raspberry Pi 5 邊緣語音 AI 助理**。\n\n"
+        f"👋 您好 {user.first_name}！我是您的 **Raspberry Pi 5 自主進化語音 AI 助理**。\n\n"
         f"🧠 **當前推論大腦:** `{get_active_model(user.id)}`\n"
         f"🏛️ **三層記憶金字塔:** 已啟用 (即時緩衝 + 個人畫像 + 語意向量庫)\n"
+        f"🌱 **自主進化引擎:** 每日排定 10 項進化計畫並自主推進與回報\n"
         f"🎙️ **語音互動:** 直接發送語音訊息，我會用語音回覆您！\n\n"
         f"常用指令：\n"
+        f"/plan - 檢視今日 10 大自主進化目標與當前進度\n"
+        f"/evolve - 立即推進執行下一項未完成的進化目標\n"
         f"/status - 檢視樹莓派 5 核心溫度與記憶體硬體遙測\n"
         f"/model <名稱> - 切換 AI 模型 (如 qwen2.5:3b-opt, deepseek-r1:1.5b-opt)\n"
         f"/remember <文字> - 手動將重要資訊記入長期向量庫\n"
@@ -123,42 +137,79 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command."""
-    if not is_authorized(update.effective_user.id):
+    user = update.effective_user
+    if not is_authorized(user.id, user.username or ""):
         return
     help_text = (
         "📖 **Raspberry Pi 5 AI 助理操作指南**\n\n"
-        "1. **語音互動 (Voice Chat):** 直接按住錄音鍵發送語音訊息，系統將自動進行語音轉錄 $\\to$ 思考 $\\to$ 繁體中文語音回覆。\n"
-        "2. **文字對話 (Text Chat):** 直接輸入文字進行問答與代碼審查。\n"
-        "3. **長期記憶 (Long-Term Memory):**\n"
+        "1. **自主進化 (Self-Evolution):**\n"
+        "   - `/plan`: 查看樹莓派今天為自己排定的 10 大改良目標與完成進度\n"
+        "   - `/evolve`: 手動觸發執行下一項進化任務\n"
+        "2. **語音互動 (Voice Chat):** 直接按住錄音鍵發送語音訊息，系統將自動進行語音轉錄 $\\to$ 思考 $\\to$ 繁體中文語音回覆。\n"
+        "3. **電源與 RTC 管理:** 語音說「關機並在 30 秒後開機」即可調度底層硬體 RTC 晶片通電喚醒。\n"
+        "4. **長期記憶 (Long-Term Memory):**\n"
         "   - `/remember <內容>`: 主動記憶重要事情\n"
         "   - `/facts`: 列出個人檔案特徵\n"
         "   - `/clear`: 清空短期上下文\n"
-        "4. **模型切換 (Switch Models):**\n"
+        "5. **模型切換 (Switch Models):**\n"
         "   - `/model qwen2.5:3b-opt` (繁中最佳，6 tok/s)\n"
         "   - `/model deepseek-r1:1.5b-opt` (極速思考，12 tok/s)\n"
         "   - `/model qwen2.5-coder:7b-opt` (深度代碼審查)\n"
-        "5. **硬體監控 (Hardware Telemetry):**\n"
-        "   - `/status`: 查看 CPU 溫度、可用 RAM 與佇列"
+        "6. **硬體監控 (Hardware Telemetry):**\n"
+        "   - `/status`: 查看 CPU 溫度、可用 RAM 與健康狀態"
     )
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
 
+async def plan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /plan: show today's 10 evolutionary goals and progress."""
+    user = update.effective_user
+    if not is_authorized(user.id, user.username or ""):
+        return
+    msg = evolution_engine.format_plans_markdown()
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+
+async def evolve_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /evolve: manually trigger the next pending evolutionary task."""
+    user = update.effective_user
+    if not is_authorized(user.id, user.username or ""):
+        return
+
+    await update.message.reply_text("⏳ *正在為您排程執行下一項自主進化任務...*", parse_mode=ParseMode.MARKDOWN)
+    res = evolution_engine.execute_next_pending_task()
+    if res:
+        summary = evolution_engine.get_progress_summary()
+        pct = summary["progress_pct"]
+        reply = (
+            f"🎉 **【任務完成】: [{res['task_index']}] {res['title']}**\n\n"
+            f"📊 **今日總體進度:** `{pct}%` ({summary['completed']}/10 項完成)\n"
+            f"📝 **執行結果日誌:**\n{res['result_log']}"
+        )
+        await update.message.reply_text(reply, parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text("✨ 今日 10 大自主進化任務已全數完成！系統目前處於最佳狀態。")
+
+
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /status command: display Pi 5 hardware metrics."""
-    if not is_authorized(update.effective_user.id):
+    user = update.effective_user
+    if not is_authorized(user.id, user.username or ""):
         return
 
     telem = get_hardware_telemetry()
-    chat_id = update.effective_user.id
+    chat_id = user.id
     current_model = get_active_model(chat_id)
     working_turns = len(memory_mgr.get_working_memory(chat_id)) // 2
     facts_count = len(memory_mgr.get_user_facts(chat_id))
+    summary = evolution_engine.get_progress_summary()
 
     status_msg = (
         f"📊 **Raspberry Pi 5 邊緣運算節點健康狀態**\n\n"
         f"🌡️ **CPU 溫度:** `{telem['cpu_temp']:.1f} °C` " + ("🟢 (優良)" if telem['cpu_temp'] < 65 else "🟠 (注意)") + "\n"
         f"💾 **實體記憶體:** `{telem['free_ram']:,} MB` 可用 / `{telem['total_ram']:,} MB`\n"
         f"🤖 **運作中模型:** `{current_model}`\n"
+        f"🌱 **今日進化進度:** `{summary['progress_pct']}%` ({summary['completed']}/10 項完成)\n"
         f"🧠 **短期記憶緩衝:** `{working_turns} 輪對話`\n"
         f"📝 **個人事實特徵:** `{facts_count} 條記錄`\n"
         f"🕒 **節點時間:** `{time.strftime('%Y-%m-%d %H:%M:%S')}`"
@@ -168,12 +219,12 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /model <model_name> command."""
-    if not is_authorized(update.effective_user.id):
+    user = update.effective_user
+    if not is_authorized(user.id, user.username or ""):
         return
 
-    chat_id = update.effective_user.id
+    chat_id = user.id
     if not context.args:
-        # Show list of available models
         try:
             resp = requests.get(f"{OLLAMA_API_URL}/api/tags", timeout=3)
             if resp.status_code == 200:
@@ -193,7 +244,8 @@ async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def remember_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /remember <text> command: explicitly store into Tier 3 vector memory."""
-    if not is_authorized(update.effective_user.id):
+    user = update.effective_user
+    if not is_authorized(user.id, user.username or ""):
         return
 
     if not context.args:
@@ -201,7 +253,7 @@ async def remember_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     content = " ".join(context.args).strip()
-    chat_id = update.effective_user.id
+    chat_id = user.id
 
     success = memory_mgr.store_memory(chat_id, content)
     if success:
@@ -212,10 +264,11 @@ async def remember_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def facts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /facts command: display and manage Tier 2 user facts."""
-    if not is_authorized(update.effective_user.id):
+    user = update.effective_user
+    if not is_authorized(user.id, user.username or ""):
         return
 
-    chat_id = update.effective_user.id
+    chat_id = user.id
     facts = memory_mgr.get_user_facts(chat_id)
     if not facts:
         await update.message.reply_text("目前尚未登記任何個人事實特徵 (Tier 2)。您可以在日常對話中告訴我您的偏好，或直接輸入指令。")
@@ -229,10 +282,11 @@ async def facts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /clear command: reset Tier 1 working memory."""
-    if not is_authorized(update.effective_user.id):
+    user = update.effective_user
+    if not is_authorized(user.id, user.username or ""):
         return
 
-    chat_id = update.effective_user.id
+    chat_id = user.id
     memory_mgr.clear_working_memory(chat_id)
     await update.message.reply_text("🧹 已清空當前短期對話記憶緩衝區 (Tier 1)。長期記憶與個人事實依然保留。")
 
@@ -262,7 +316,7 @@ def call_ollama_chat(model: str, messages: list) -> str:
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming text messages."""
     user = update.effective_user
-    if not is_authorized(user.id):
+    if not is_authorized(user.id, user.username or ""):
         return
 
     user_text = update.message.text.strip()
@@ -274,14 +328,22 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Base system instruction
     base_instruction = (
-        "你是部署於使用者客廳樹莓派 5 (Raspberry Pi 5) 上的專屬邊緣 AI 語音個人助理。"
+        "你是部署於使用者客廳樹莓派 5 (Raspberry Pi 5) 上的專屬邊緣 AI 語音個人助理兼自主進化體。"
         "請一律以繁體中文 (Traditional Chinese, 台灣語境) 親切、精準、專業地回答。"
         "回答力求清晰簡潔，重點條理分明。"
     )
 
-    # Check tool execution (Web search / Taiwan news)
+    # Check tool execution
     tool_context = execute_tool_call_if_needed(user_text)
     if tool_context:
+        if "電源管理" in tool_context:
+            await update.message.reply_text("⚡ *正在排程系統電源狀態 (RTC / Power Control)...*", parse_mode=ParseMode.MARKDOWN)
+        elif "硬體監控" in tool_context:
+            await update.message.reply_text("🌡️ *正在讀取板載感測器與硬體數據...*", parse_mode=ParseMode.MARKDOWN)
+        elif "即時新聞" in tool_context or "聯網搜尋" in tool_context:
+            await update.message.reply_text("🌐 *正在為您連線檢索最新台灣即時資訊...*", parse_mode=ParseMode.MARKDOWN)
+        elif "自我進化" in tool_context:
+            await update.message.reply_text("🛠️ *正在調用代碼模型自建新技能模組並熱載入...*", parse_mode=ParseMode.MARKDOWN)
         base_instruction = f"{base_instruction}\n\n{tool_context}"
 
     # Build prompt messages from Three-Tier Memory
@@ -303,7 +365,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
     Telegram Voice (.oga) -> faster-whisper STT -> Three-Tier Memory + LLM -> edge-tts TTS -> Telegram Voice reply
     """
     user = update.effective_user
-    if not is_authorized(user.id):
+    if not is_authorized(user.id, user.username or ""):
         return
 
     voice = update.message.voice or update.message.audio
@@ -343,7 +405,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             "避免過多複雜的排版符號，以便於語音合成流暢朗讀。"
         )
 
-        # Check tool execution (Skills / Tools / Power / Hardware)
+        # Check tool execution
         tool_context = execute_tool_call_if_needed(transcribed_text)
         if tool_context:
             if "電源管理" in tool_context:
@@ -366,27 +428,79 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         tts_success = await text_to_speech_async(reply_text, output_ogg_path)
 
         if tts_success and os.path.exists(output_ogg_path):
-            # Send voice message back
             with open(output_ogg_path, "rb") as audio_fp:
                 await update.message.reply_voice(
                     voice=audio_fp,
                     caption=f"📝 {reply_text[:200]}..." if len(reply_text) > 200 else f"📝 {reply_text}"
                 )
         else:
-            # Fallback to text if TTS fails
             await update.message.reply_text(reply_text)
 
     except Exception as e:
         logger.error(f"Voice pipeline error: {e}")
         await update.message.reply_text(f"❌ 語音處理管線錯誤: {e}")
     finally:
-        # Cleanup temporary audio files
         for p in [input_oga_path, output_ogg_path]:
             if os.path.exists(p):
                 try:
                     os.remove(p)
                 except OSError:
                     pass
+
+
+# =============================================================================
+# Autonomous Evolution Background Worker
+# =============================================================================
+
+async def evolution_background_worker(app):
+    """
+    Autonomous evolution scheduler:
+    1. Generates 10 goals every day at 08:00 (or at startup).
+    2. Proactively broadcasts the 10 goals overview to Telegram subscribers.
+    3. Executes one pending task every 30 minutes.
+    4. Proactively broadcasts milestone progress updates upon task completion.
+    """
+    logger.info("🌱 Autonomous Self-Evolution Engine worker initialized.")
+    await asyncio.sleep(5)  # Wait for Telegram bot polling to establish
+    
+    today_str = time.strftime("%Y-%m-%d")
+    evolution_engine.get_or_create_daily_plans(today_str)
+    
+    # Broadcast today's plan on start if there are subscribers
+    broadcast_daily_plan_overview(today_str)
+
+    last_exec_time = time.time()
+    last_day_planned = today_str
+
+    while True:
+        try:
+            now_t = time.time()
+            current_day = time.strftime("%Y-%m-%d")
+            current_hour = time.strftime("%H")
+
+            # Daily plan reset at 08:00
+            if current_day != last_day_planned and current_hour >= "08":
+                evolution_engine.get_or_create_daily_plans(current_day)
+                broadcast_daily_plan_overview(current_day)
+                last_day_planned = current_day
+
+            # Execute next pending evolution task every 30 minutes (1800s)
+            if now_t - last_exec_time >= 1800:
+                pending_res = evolution_engine.execute_next_pending_task(current_day)
+                if pending_res:
+                    summary = evolution_engine.get_progress_summary(current_day)
+                    broadcast_progress_milestone(pending_res, summary["progress_pct"])
+                last_exec_time = now_t
+
+        except Exception as e:
+            logger.error(f"Error in evolution background worker: {e}")
+
+        await asyncio.sleep(60)
+
+
+async def post_init_hook(app):
+    """Post initialization hook: start background worker coroutine."""
+    asyncio.create_task(evolution_background_worker(app))
 
 
 def main():
@@ -396,12 +510,14 @@ def main():
         print("[Error] TELEGRAM_BOT_TOKEN is not set! Please set it in config.py or environment.")
         sys.exit(1)
 
-    print(f"🚀 Starting Pi 5 Telegram Voice AI Agent (PID: {os.getpid()})...")
-    app = ApplicationBuilder().token(token).build()
+    print(f"🚀 Starting Pi 5 Telegram Voice & Evolution AI Agent (PID: {os.getpid()})...")
+    app = ApplicationBuilder().token(token).post_init(post_init_hook).build()
 
     # Register command handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("plan", plan_command))
+    app.add_handler(CommandHandler("evolve", evolve_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("model", model_command))
     app.add_handler(CommandHandler("remember", remember_command))
@@ -412,7 +528,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice_message))
 
-    print("🤖 Pi 5 Telegram Agent is running and listening for messages/voice...")
+    print("🤖 Pi 5 Telegram Agent with Self-Evolution Engine is running...")
     app.run_polling(drop_pending_updates=True)
 
 
