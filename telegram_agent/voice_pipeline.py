@@ -97,13 +97,16 @@ def speech_to_text(audio_oga_path: str) -> Optional[str]:
                 pass
 
 
-async def text_to_speech_async(text: str, output_ogg_path: str, voice: str = DEFAULT_TTS_VOICE) -> bool:
+async def text_to_speech_async(text: str, output_ogg_path: Optional[str] = None, voice: str = DEFAULT_TTS_VOICE) -> bool:
     """
     Synthesize text into natural Traditional Chinese neural voice using edge-tts.
     Outputs as OGG/Opus compatible with Telegram Voice Message.
     """
     if not text.strip():
         return False
+    if output_ogg_path is None:
+        import uuid
+        output_ogg_path = os.path.join(TEMP_AUDIO_DIR, f"tts_{uuid.uuid4().hex[:8]}.ogg")
     try:
         import edge_tts
         communicate = edge_tts.Communicate(text, voice)

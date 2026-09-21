@@ -6,6 +6,12 @@ Integrates python-telegram-bot, Three-Tier Memory, Voice Pipeline, and Ollama En
 
 import os
 import sys
+
+# Ensure telegram_agent directory is in sys.path
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if _CURRENT_DIR not in sys.path:
+    sys.path.insert(0, _CURRENT_DIR)
+
 import time
 import uuid
 import logging

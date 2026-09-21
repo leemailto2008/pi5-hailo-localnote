@@ -15,8 +15,21 @@ os.makedirs(DATA_DIR, exist_ok=True)
 # Database & Memory storage
 MEMORY_DB_PATH = os.path.join(DATA_DIR, "memory.db")
 
+# Load .env file natively if present
+env_path = os.path.join(BASE_DIR, ".env")
+if os.path.exists(env_path):
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+    except Exception:
+        pass
+
 # Telegram Bot Credentials & Access Control
-# Set via environment variable or update below
+# Set via environment variable or .env file
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 # Whitelist of allowed Telegram User/Chat IDs (integers)
