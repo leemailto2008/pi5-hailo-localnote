@@ -167,7 +167,11 @@ async def plan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(user.id, user.username or ""):
         return
     msg = evolution_engine.format_plans_markdown()
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    try:
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.warning(f"Failed to reply with MARKDOWN in /plan, falling back to plain text: {e}")
+        await update.message.reply_text(msg)
 
 
 async def evolve_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -176,7 +180,11 @@ async def evolve_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(user.id, user.username or ""):
         return
 
-    await update.message.reply_text("⏳ *正在為您排程執行下一項自主進化任務...*", parse_mode=ParseMode.MARKDOWN)
+    try:
+        await update.message.reply_text("⏳ *正在為您排程執行下一項自主進化任務...*", parse_mode=ParseMode.MARKDOWN)
+    except Exception:
+        await update.message.reply_text("⏳ 正在為您排程執行下一項自主進化任務...")
+
     res = evolution_engine.execute_next_pending_task()
     if res:
         summary = evolution_engine.get_progress_summary()
@@ -186,7 +194,10 @@ async def evolve_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📊 **今日總體進度:** `{pct}%` ({summary['completed']}/10 項完成)\n"
             f"📝 **執行結果日誌:**\n{res['result_log']}"
         )
-        await update.message.reply_text(reply, parse_mode=ParseMode.MARKDOWN)
+        try:
+            await update.message.reply_text(reply, parse_mode=ParseMode.MARKDOWN)
+        except Exception:
+            await update.message.reply_text(reply)
     else:
         await update.message.reply_text("✨ 今日 10 大自主進化任務已全數完成！系統目前處於最佳狀態。")
 

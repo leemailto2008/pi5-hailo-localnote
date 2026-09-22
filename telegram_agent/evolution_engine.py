@@ -440,11 +440,12 @@ class EvolutionEngine:
             icon = status_icons.get(p["status"], "⚪")
             lines.append(f"{icon} **{p['task_index']}. [{p['category']}] {p['title']}**")
             if p["result_log"]:
-                # First line of result log indented
-                first_line = p["result_log"].splitlines()[0]
-                lines.append(f"   └─ `{first_line}`")
+                # Clean any nested backticks and print clean text
+                first_line = p["result_log"].splitlines()[0].replace("`", "").strip()
+                lines.append(f"   └─ {first_line}")
             else:
-                lines.append(f"   └─ {p['description']}")
+                clean_desc = p['description'].replace("`", "").strip()
+                lines.append(f"   └─ {clean_desc}")
 
         lines.append("\n💡 *提示: 輸入 `/plan` 查看最新狀態，或輸入 `/evolve` 即刻執行下一項進化。*")
         return "\n".join(lines)
