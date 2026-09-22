@@ -16,20 +16,26 @@ from typing import List, Optional
 logger = logging.getLogger("Pi5Notifier")
 
 try:
-    from config import TELEGRAM_BOT_TOKEN, ALLOWED_CHAT_IDS
+    from telegram_agent.config import TELEGRAM_BOT_TOKEN, ALLOWED_CHAT_IDS
 except ImportError:
-    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    ALLOWED_CHAT_IDS = []
+    try:
+        from config import TELEGRAM_BOT_TOKEN, ALLOWED_CHAT_IDS
+    except ImportError:
+        TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        ALLOWED_CHAT_IDS = []
 
 try:
-    from evolution_engine import evolution_engine
+    from telegram_agent.evolution_engine import evolution_engine
 except ImportError:
-    evolution_engine = None
+    try:
+        from evolution_engine import evolution_engine
+    except ImportError:
+        evolution_engine = None
 
 
-def send_telegram_message_direct(chat_id: int, text: str, parse_mode: str = "Markdown") -> bool:
+def send_telegram_message_direct(chat_id: int, text: str, parse_mode: Optional[str] = "Markdown") -> bool:
     """
-    Send message directly via Telegram Bot HTTP API (urllib, no external dependencies).
+    Send message directly via Telegram Bot HTTP API with automatic plain-text fallback.
     """
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN is not set; cannot send notification.")
@@ -39,9 +45,10 @@ def send_telegram_message_direct(chat_id: int, text: str, parse_mode: str = "Mar
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": parse_mode,
         "disable_web_page_preview": True
     }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     
     try:
         data = json.dumps(payload).encode("utf-8")
@@ -54,7 +61,19 @@ def send_telegram_message_direct(chat_id: int, text: str, parse_mode: str = "Mar
             if resp.status == 200:
                 return True
     except Exception as e:
-        logger.error(f"Failed to send Telegram message to {chat_id}: {e}")
+        logger.warning(f"Failed to send with parse_mode={parse_mode}: {e}. Retrying with plain text...")
+        if parse_mode:
+            payload.pop("parse_mode", None)
+            try:
+                data = json.dumps(payload).encode("utf-8")
+                req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    if resp.status == 200:
+                        return True
+            except Exception as e2:
+                logger.error(f"Failed to send plain text message to {chat_id}: {e2}")
+        else:
+            logger.error(f"Failed to send message to {chat_id}: {e}")
 
     return False
 
