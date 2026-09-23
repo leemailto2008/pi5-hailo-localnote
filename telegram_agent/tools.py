@@ -130,6 +130,148 @@ def get_pi5_hardware_status(param: str = "") -> str:
     return "【樹莓派 5 實體硬體監控數據】:\n" + "\n".join(results)
 
 
+def extract_clean_news_topic(user_text: str) -> str:
+    """Extract clean news topic from conversational text."""
+    known_entities = [
+        "台積電", "聯發科", "鴻海", "廣達", "台達電", "聯電", "大立光", "富邦金", "國泰金",
+        "輝達", "NVIDIA", "OpenAI", "Google", "蘋果", "Apple", "微軟", "半導體", "AI",
+        "加權指數", "台股", "股市", "地震", "颱風", "氣象", "物價"
+    ]
+    for ent in known_entities:
+        if ent.lower() in user_text.lower():
+            return ent
+
+    cleaned = re.sub(r"^(請|幫我|協助我|上網|即時|連線|查詢|搜尋|看一下|找一下|看一下新聞|找新聞|有沒有|查一下|新聞裡面|台灣新聞裡面|台灣新聞|今日新聞|最新新聞)+", "", user_text)
+    cleaned = re.sub(r"(的新聞|新聞|時事|消息|的資訊|資訊|資料|報導|看你.*|我故意.*|多少|行情|今天|今日|相關).*$", "", cleaned)
+    cleaned = cleaned.strip(" ，。,、？！?!")
+    return cleaned if len(cleaned) >= 2 else "台灣新聞"
+
+
+def fetch_taiwan_stock(query_text: str = "") -> str:
+    """
+    Fetch real-time or closing stock prices & market index from Taiwan Stock Exchange (TWSE) MIS API.
+    """
+    stock_map = {
+        "台積電": "tse_2330.tw",
+        "2330": "tse_2330.tw",
+        "鴻海": "tse_2317.tw",
+        "2317": "tse_2317.tw",
+        "聯發科": "tse_2454.tw",
+        "2454": "tse_2454.tw",
+        "廣達": "tse_2382.tw",
+        "2382": "tse_2382.tw",
+        "台達電": "tse_2308.tw",
+        "2308": "tse_2308.tw",
+        "聯電": "tse_2303.tw",
+        "2303": "tse_2303.tw",
+        "大立光": "tse_3008.tw",
+        "3008": "tse_3008.tw",
+        "富邦金": "tse_2881.tw",
+        "2881": "tse_2881.tw",
+        "國泰金": "tse_2882.tw",
+        "2882": "tse_2882.tw",
+        "0050": "tse_0050.tw",
+        "0056": "tse_0056.tw",
+        "大盤": "tse_t00.tw",
+        "加權指數": "tse_t00.tw",
+        "大盤指數": "tse_t00.tw",
+        "股市行情": "tse_t00.tw",
+    }
+
+    targets = []
+    # Detect 4-digit stock codes
+    code_matches = re.findall(r"\b(\d{4})\b", query_text)
+    for code in code_matches:
+        channel = f"tse_{code}.tw"
+        if channel not in targets:
+            targets.append(channel)
+
+    # Detect known stock names
+    for name, channel in stock_map.items():
+        if name in query_text:
+            if channel not in targets:
+                targets.append(channel)
+
+    # If general market / stock行情 asked, add Weighted Index
+    if any(k in query_text for k in ["股市", "行情", "大盤", "台股", "指數", "股票", "收盤"]):
+        if "tse_t00.tw" not in targets:
+            targets.append("tse_t00.tw")
+
+    # Fallback to TSMC + Weighted Index if none recognized
+    if not targets:
+        targets = ["tse_2330.tw", "tse_t00.tw"]
+
+    channel_str = "|".join(targets)
+    url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={channel_str}&json=1&delay=0"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://mis.twse.com.tw/stock/index.jsp"
+    }
+
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        msg_array = data.get("msgArray", [])
+        if not msg_array:
+            return f"【台灣證券交易所 (TWSE)】: 查無即時報價資料 (查詢目標: {channel_str})。"
+
+        results = []
+        for it in msg_array:
+            code = it.get("c", "")
+            name = it.get("n", "")
+            z_str = it.get("z", "")
+            y_str = it.get("y", "")
+            if not z_str or z_str == "-":
+                z_str = it.get("pz", y_str)
+
+            try:
+                curr_price = float(z_str)
+                prev_price = float(y_str) if y_str and y_str != "-" else curr_price
+                diff = round(curr_price - prev_price, 2)
+                diff_pct = round((diff / prev_price) * 100, 2) if prev_price > 0 else 0.0
+
+                if diff > 0:
+                    sign = f"🔺 +{diff:.2f} (+{diff_pct:.2f}%)"
+                elif diff < 0:
+                    sign = f"🔻 {diff:.2f} ({diff_pct:.2f}%)"
+                else:
+                    sign = f"➖ 0.00 (0.00%)"
+
+                t_time = it.get("t", "")
+                t_date = it.get("d", "")
+                date_fmt = f"{t_date[:4]}/{t_date[4:6]}/{t_date[6:]}" if len(t_date) == 8 else t_date
+
+                vol = it.get("v", "0")
+                open_p = it.get("o", "-")
+                high_p = it.get("h", "-")
+                low_p = it.get("l", "-")
+
+                is_index = code == "t00" or "指數" in name
+                unit = "點" if is_index else "元"
+                vol_unit = "口/億元" if is_index else "張"
+
+                item_str = (
+                    f"• {name} ({code}):\n"
+                    f"  - 最新成交/收盤價: {curr_price:,.2f} {unit} ({sign})\n"
+                    f"  - 昨收: {prev_price:,.2f} {unit} | 今日開盤: {open_p} | 最高: {high_p} | 最低: {low_p}\n"
+                    f"  - 成交量: {int(vol):,} {vol_unit}\n"
+                    f"  - 資料時間: {date_fmt} {t_time}"
+                )
+                results.append(item_str)
+            except Exception as parse_err:
+                results.append(f"• {name} ({code}): 報價資料解析異常 ({parse_err})")
+
+        return (
+            "【台灣證券交易所 (TWSE) 官方即時/收盤股市行情 (權威數據)】:\n" +
+            "\n\n".join(results) +
+            "\n\n請務必以繁體中文專業、精準回答使用者上述最新成交/收盤價，嚴禁隨意猜測或編造非上述數據。"
+        )
+    except Exception as e:
+        return f"【台灣證券交易所 (TWSE)】: 行情連線查詢異常 ({e})，請稍候再試。"
+
+
 def fetch_taiwan_news(topic: str = "") -> str:
     """
     Fetch real-time news from Google News Taiwan RSS.
@@ -164,7 +306,7 @@ def fetch_taiwan_news(topic: str = "") -> str:
         return f"【實時聯網搜尋】: 無法抓取新聞資訊 ({e})"
 
     if not news_items:
-        return f"【實時聯網搜尋】: 未能搜尋到關於『{topic}』的即時新聞。"
+        return f"【實時聯網搜尋】: 未能搜尋到關於『{topic}』的即時新聞。請如實告知使用者未找到即時新聞，嚴禁自行編造虛假新聞！"
         
     return f"【實時聯網搜尋與台灣即時新聞 (主題: {topic or '頭條'})】:\n" + "\n".join(news_items)
 
@@ -315,14 +457,21 @@ class SkillRegistry:
             "keywords": ["新聞", "時事", "頭條", "最新消息", "搜尋", "上網找", "查詢", "找一下"],
             "func": fetch_taiwan_news
         }
-        # 3. Power Control & RTC Wakeup
+        # 3. Taiwan Stock & Market Index (TWSE MIS)
+        self.skills["taiwan_stock"] = {
+            "name": "台灣股市與即時股價行情",
+            "desc": "連線台灣證券交易所 (TWSE) 查詢台積電、各檔股票與加權指數即時/收盤行情",
+            "keywords": ["股價", "股市", "行情", "台積電", "加權指數", "大盤", "股票", "收盤價", "2330", "開盤價", "跌幅", "漲幅", "台股", "成交量"],
+            "func": fetch_taiwan_stock
+        }
+        # 4. Power Control & RTC Wakeup
         self.skills["power_control"] = {
             "name": "電源管理與定時開關機",
             "desc": "安全關機、重開機、或設定硬體RTC定時喚醒開機",
             "keywords": ["關機", "開機", "重開機", "重啟", "重新開機", "定時開機", "喚醒", "poweroff", "reboot", "rtcwake"],
             "func": control_pi5_power
         }
-        # 4. Self-Evolution Skill Synthesis
+        # 5. Self-Evolution Skill Synthesis
         self.skills["skill_synthesis"] = {
             "name": "自建新技能與代碼進化",
             "desc": "調用本地代碼模型自動生成新技能代碼並熱載入",
@@ -374,19 +523,34 @@ class SkillRegistry:
             raw_info = self.skills["power_control"]["func"](user_text)
             return f"{raw_info}\n請根據以上排定的電源狀態，以親切且清晰的語句告知使用者系統即將進行的動作。"
 
-        # Priority 2: Hardware & Temperature check
+        # Priority 2: Taiwan Stock & Financial Market (股市行情最優先於一般新聞)
+        stock_keywords = self.skills["taiwan_stock"]["keywords"]
+        if any(k in user_lower for k in stock_keywords):
+            logger.info("Triggered Skill: fetch_taiwan_stock")
+            stock_info = self.skills["taiwan_stock"]["func"](user_text)
+            # If user ALSO explicitly mentions news/時事/新聞, append company news
+            if any(k in user_lower for k in ["新聞", "時事", "消息"]):
+                clean_ent = extract_clean_news_topic(user_text)
+                news_info = self.skills["taiwan_news"]["func"](clean_ent)
+                return (
+                    f"{stock_info}\n\n{news_info}\n\n"
+                    "【回答指引】: 最新股價必須嚴格採用上方 TWSE 標明的『最新成交/收盤價』(例如台積電為 2,500.00 元)，"
+                    "下方新聞列表僅用作補充市場消息背景，回答請精簡扼要，避免過多長篇贅述。"
+                )
+            return stock_info
+
+        # Priority 3: Hardware & Temperature check
         hw_keywords = self.skills["hardware_status"]["keywords"]
         if any(k in user_lower for k in hw_keywords):
             logger.info("Triggered Skill: get_pi5_hardware_status")
             raw_info = self.skills["hardware_status"]["func"]()
             return f"{raw_info}\n請根據以上真實的硬體溫度與數據，以繁體中文親切告知使用者目前板子的狀態。"
 
-        # Priority 3: Web Search & News check
+        # Priority 4: Web Search & News check
         news_keywords = self.skills["taiwan_news"]["keywords"]
         if any(k in user_lower for k in news_keywords):
             logger.info("Triggered Skill: fetch_taiwan_news")
-            clean_q = re.sub(r"(請|幫我|上網|搜尋|查詢|看|找|今天的|今日的|台灣的|新聞|時事)", "", user_text).strip()
-            topic = clean_q if clean_q else "台灣新聞"
+            topic = extract_clean_news_topic(user_text)
             raw_info = self.skills["taiwan_news"]["func"](topic)
             return f"{raw_info}\n請根據以上搜尋結果，為使用者統整出重點摘要並語音朗讀回答。"
 

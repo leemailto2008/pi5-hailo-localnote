@@ -334,7 +334,7 @@ def call_ollama_chat(model: str, messages: list) -> str:
         "stream": False,
         "options": {
             "temperature": 0.3,
-            "num_predict": 1024
+            "num_predict": 350
         }
     }
     resp = requests.post(url, json=payload, timeout=90)
@@ -366,7 +366,9 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Check tool execution
     tool_context = execute_tool_call_if_needed(user_text)
     if tool_context:
-        if "電源管理" in tool_context:
+        if "台灣證券交易所" in tool_context or "股市行情" in tool_context:
+            await update.message.reply_text("📈 *正在連線台灣證券交易所 (TWSE) 查詢最新股市與股價行情...*", parse_mode=ParseMode.MARKDOWN)
+        elif "電源管理" in tool_context:
             await update.message.reply_text("⚡ *正在排程系統電源狀態 (RTC / Power Control)...*", parse_mode=ParseMode.MARKDOWN)
         elif "硬體監控" in tool_context:
             await update.message.reply_text("🌡️ *正在讀取板載感測器與硬體數據...*", parse_mode=ParseMode.MARKDOWN)
@@ -374,7 +376,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text("🌐 *正在為您連線檢索最新台灣即時資訊...*", parse_mode=ParseMode.MARKDOWN)
         elif "自我進化" in tool_context:
             await update.message.reply_text("🛠️ *正在調用代碼模型自建新技能模組並熱載入...*", parse_mode=ParseMode.MARKDOWN)
-        base_instruction = f"{base_instruction}\n\n{tool_context}"
+        base_instruction = f"{base_instruction}\n\n【真實數據與事實嚴格原則】: 若有提供工具數據 (如證交所股價、硬體數據)，必須 100% 依據提供之數字回答，嚴禁憑空猜測或編造虛假行情！\n\n{tool_context}"
 
     # Build prompt messages from Three-Tier Memory
     messages = memory_mgr.build_prompt_messages(chat_id, user_text, base_instruction)
@@ -455,7 +457,9 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         tool_context = execute_tool_call_if_needed(transcribed_text)
         if tool_context:
             try:
-                if "電源管理" in tool_context:
+                if "台灣證券交易所" in tool_context or "股市行情" in tool_context:
+                    await update.message.reply_text("📈 *正在連線台灣證券交易所 (TWSE) 查詢最新股市與股價行情...*", parse_mode=ParseMode.MARKDOWN)
+                elif "電源管理" in tool_context:
                     await update.message.reply_text("⚡ *正在排程系統電源生命週期控制 (RTC / Power Control)...*", parse_mode=ParseMode.MARKDOWN)
                 elif "硬體監控" in tool_context:
                     await update.message.reply_text("🌡️ *正在讀取板載感測器與硬體數據...*", parse_mode=ParseMode.MARKDOWN)
@@ -465,7 +469,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
                     await update.message.reply_text("🛠️ *正在調用代碼模型自建新技能模組並熱載入...*", parse_mode=ParseMode.MARKDOWN)
             except Exception:
                 pass
-            base_instruction = f"{base_instruction}\n\n{tool_context}"
+            base_instruction = f"{base_instruction}\n\n【真實數據與事實嚴格原則】: 若有提供工具數據 (如證交所股價、硬體數據)，必須 100% 依據提供之數字回答，嚴禁憑空猜測或編造虛假行情！\n\n{tool_context}"
 
         messages = memory_mgr.build_prompt_messages(chat_id, transcribed_text, base_instruction)
         reply_text = call_ollama_chat(model, messages)
