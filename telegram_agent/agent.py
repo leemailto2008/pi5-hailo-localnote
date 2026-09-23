@@ -27,6 +27,7 @@ from typing import Dict, Any, List
 import requests
 from telegram import Update, BotCommand
 from telegram.constants import ParseMode, ChatAction
+from telegram.request import HTTPXRequest
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -405,7 +406,10 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
     model = get_active_model(chat_id)
 
     # Send recording audio action
-    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.RECORD_VOICE)
+    try:
+        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.RECORD_VOICE)
+    except Exception:
+        pass
 
     # Download voice file from Telegram
     voice_file = await voice.get_file()
@@ -419,14 +423,27 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         # 1. Speech-To-Text
         transcribed_text = speech_to_text(input_oga_path)
         if not transcribed_text:
-            await update.message.reply_text("🔇 無法辨識語音內容，請再試一次或改用文字輸入。")
+            try:
+                await update.message.reply_text("🔇 無法辨識語音內容，請再試一次或改用文字輸入。")
+            except Exception:
+                pass
             return
 
         logger.info(f"[Voice STT] User {chat_id}: {transcribed_text}")
-        await update.message.reply_text(f"🎙️ *您說:* 「{transcribed_text}」", parse_mode=ParseMode.MARKDOWN)
+        try:
+            await update.message.reply_text(f"🎙️ *您說:* 「{transcribed_text}」", parse_mode=ParseMode.MARKDOWN)
+        except Exception:
+            try:
+                await update.message.reply_text(f"🎙️ 您說: 「{transcribed_text}」")
+            except Exception as ack_err:
+                logger.warning(f"Could not send transcribed text ack: {ack_err}")
 
         # 2. LLM Reasoning with Three-Tier Memory & Tools
-        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.RECORD_VOICE)
+        try:
+            await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.RECORD_VOICE)
+        except Exception:
+            pass
+
         base_instruction = (
             "你是部署於樹莓派 5 上的邊緣語音個人助理。使用者正使用語音與你交談。"
             "使用者語音轉文字若含有同音或相近錯別字，請依據上下文與樹莓派專案語境自動對齊其真實意圖。"
@@ -437,14 +454,17 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         # Check tool execution
         tool_context = execute_tool_call_if_needed(transcribed_text)
         if tool_context:
-            if "電源管理" in tool_context:
-                await update.message.reply_text("⚡ *正在排程系統電源生命週期控制 (RTC / Power Control)...*", parse_mode=ParseMode.MARKDOWN)
-            elif "硬體監控" in tool_context:
-                await update.message.reply_text("🌡️ *正在讀取板載感測器與硬體數據...*", parse_mode=ParseMode.MARKDOWN)
-            elif "即時新聞" in tool_context or "聯網搜尋" in tool_context:
-                await update.message.reply_text("🌐 *正在為您連線檢索最新台灣即時資訊...*", parse_mode=ParseMode.MARKDOWN)
-            elif "自我進化" in tool_context:
-                await update.message.reply_text("🛠️ *正在調用代碼模型自建新技能模組並熱載入...*", parse_mode=ParseMode.MARKDOWN)
+            try:
+                if "電源管理" in tool_context:
+                    await update.message.reply_text("⚡ *正在排程系統電源生命週期控制 (RTC / Power Control)...*", parse_mode=ParseMode.MARKDOWN)
+                elif "硬體監控" in tool_context:
+                    await update.message.reply_text("🌡️ *正在讀取板載感測器與硬體數據...*", parse_mode=ParseMode.MARKDOWN)
+                elif "即時新聞" in tool_context or "聯網搜尋" in tool_context:
+                    await update.message.reply_text("🌐 *正在為您連線檢索最新台灣即時資訊...*", parse_mode=ParseMode.MARKDOWN)
+                elif "自我進化" in tool_context:
+                    await update.message.reply_text("🛠️ *正在調用代碼模型自建新技能模組並熱載入...*", parse_mode=ParseMode.MARKDOWN)
+            except Exception:
+                pass
             base_instruction = f"{base_instruction}\n\n{tool_context}"
 
         messages = memory_mgr.build_prompt_messages(chat_id, transcribed_text, base_instruction)
@@ -457,17 +477,24 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         tts_success = await text_to_speech_async(reply_text, output_ogg_path)
 
         if tts_success and os.path.exists(output_ogg_path):
-            with open(output_ogg_path, "rb") as audio_fp:
-                await update.message.reply_voice(
-                    voice=audio_fp,
-                    caption=f"📝 {reply_text[:200]}..." if len(reply_text) > 200 else f"📝 {reply_text}"
-                )
+            try:
+                with open(output_ogg_path, "rb") as audio_fp:
+                    await update.message.reply_voice(
+                        voice=audio_fp,
+                        caption=f"📝 {reply_text[:200]}..." if len(reply_text) > 200 else f"📝 {reply_text}"
+                    )
+            except Exception as voice_err:
+                logger.warning(f"Voice send failed, fallback to text: {voice_err}")
+                await update.message.reply_text(reply_text)
         else:
             await update.message.reply_text(reply_text)
 
     except Exception as e:
         logger.error(f"Voice pipeline error: {e}")
-        await update.message.reply_text(f"❌ 語音處理管線錯誤: {e}")
+        try:
+            await update.message.reply_text(f"❌ 語音處理管線錯誤: {e}")
+        except Exception:
+            pass
     finally:
         for p in [input_oga_path, output_ogg_path]:
             if os.path.exists(p):
@@ -540,7 +567,13 @@ def main():
         sys.exit(1)
 
     print(f"🚀 Starting Pi 5 Telegram Voice & Evolution AI Agent (PID: {os.getpid()})...")
-    app = ApplicationBuilder().token(token).post_init(post_init_hook).build()
+    request_config = HTTPXRequest(
+        connect_timeout=30.0,
+        read_timeout=45.0,
+        write_timeout=45.0,
+        pool_timeout=30.0,
+    )
+    app = ApplicationBuilder().token(token).request(request_config).post_init(post_init_hook).build()
 
     # Register command handlers
     app.add_handler(CommandHandler("start", start_command))
