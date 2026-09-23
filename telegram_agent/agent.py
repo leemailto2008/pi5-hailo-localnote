@@ -46,7 +46,7 @@ from memory import ThreeTierMemoryManager
 from voice_pipeline import speech_to_text, text_to_speech_async
 from tools import execute_tool_call_if_needed
 from evolution_engine import evolution_engine
-from notifier import broadcast_daily_plan_overview, broadcast_progress_milestone
+from notifier import broadcast_daily_plan_overview, broadcast_progress_milestone, broadcast_deep_work_step
 
 # Setup logging
 logging.basicConfig(
@@ -175,25 +175,43 @@ async def plan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def evolve_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /evolve: manually trigger the next pending evolutionary task."""
+    """Handle /evolve: manually advance the next evolutionary stage/task."""
     user = update.effective_user
     if not is_authorized(user.id, user.username or ""):
         return
 
     try:
-        await update.message.reply_text("⏳ *正在為您排程執行下一項自主進化任務...*", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("⏳ *正在為您啟動並推進下一階段自主進化任務...*", parse_mode=ParseMode.MARKDOWN)
     except Exception:
-        await update.message.reply_text("⏳ 正在為您排程執行下一項自主進化任務...")
+        await update.message.reply_text("⏳ 正在為您啟動並推進下一階段自主進化任務...")
 
-    res = evolution_engine.execute_next_pending_task()
+    res = evolution_engine.execute_next_evolution_step()
     if res:
         summary = evolution_engine.get_progress_summary()
         pct = summary["progress_pct"]
-        reply = (
-            f"🎉 **【任務完成】: [{res['task_index']}] {res['title']}**\n\n"
-            f"📊 **今日總體進度:** `{pct}%` ({summary['completed']}/10 項完成)\n"
-            f"📝 **執行結果日誌:**\n{res['result_log']}"
-        )
+        is_fin = res.get("is_finished", False)
+        diff = res.get("difficulty", "MEDIUM")
+        cur = res.get("stage_current", 1)
+        tot = res.get("stage_total", 1)
+        rem = res.get("remaining_mins", 0)
+
+        if is_fin:
+            reply = (
+                f"🎉 **【演化任務完成】: [{res['task_index']}] {res['title']}**\n\n"
+                f"📊 **今日總體進度:** `{pct}%` ({summary['completed']}/10 項完成)\n"
+                f"⚡ **難度評估:** `{diff}`\n"
+                f"📝 **達成成果:**\n{res['full_log']}"
+            )
+        else:
+            reply = (
+                f"🧠 **【深度進化階段推進 (Deep Work)】**\n\n"
+                f"🎯 **目標:** [{res['task_index']}] {res['title']}\n"
+                f"⚡ **難度評估:** `{diff}` (多階段深度運算)\n"
+                f"📊 **當前階段:** 第 `{cur}/{tot}` 階段 (`{res.get('progress_pct', 0)}%`)\n"
+                f"⏳ **預估剩餘時間:** 約 `{rem}` 分鐘 (系統持續在背景運作)\n\n"
+                f"📝 **本階段進展:**\n{res['stage_log']}"
+            )
+
         try:
             await update.message.reply_text(reply, parse_mode=ParseMode.MARKDOWN)
         except Exception:
@@ -495,12 +513,12 @@ async def evolution_background_worker(app):
                 broadcast_daily_plan_overview(current_day)
                 last_day_planned = current_day
 
-            # Execute next pending evolution task every 30 minutes (1800s)
-            if now_t - last_exec_time >= 1800:
-                pending_res = evolution_engine.execute_next_pending_task(current_day)
+            # Execute next progressive evolution step every 20 minutes (1200s)
+            if now_t - last_exec_time >= 1200:
+                pending_res = evolution_engine.execute_next_evolution_step(current_day)
                 if pending_res:
                     summary = evolution_engine.get_progress_summary(current_day)
-                    broadcast_progress_milestone(pending_res, summary["progress_pct"])
+                    broadcast_deep_work_step(pending_res, summary["progress_pct"])
                 last_exec_time = now_t
 
         except Exception as e:

@@ -115,16 +115,49 @@ def broadcast_daily_plan_overview(target_date: Optional[str] = None) -> int:
     return broadcast_message(msg)
 
 
-def broadcast_progress_milestone(task_info: dict, overall_pct: int) -> int:
-    """Broadcast milestone completion notification."""
-    text = (
-        f"📈 **【自我進化進度回報】**\n\n"
-        f"✅ 已完成: **[{task_info.get('category', '進化任務')}] {task_info.get('title', '')}**\n"
-        f"📊 **當前總體達成率:** `{overall_pct}%`\n\n"
-        f"📝 **執行日誌與指標:**\n{task_info.get('result_log', '')}\n\n"
-        f"系統將自主依排程繼續推進下一項目標。"
-    )
+def broadcast_deep_work_step(step_info: dict, overall_pct: int) -> int:
+    """Broadcast progressive deep work stage execution."""
+    diff = step_info.get("difficulty", "MEDIUM")
+    cur = step_info.get("stage_current", 1)
+    tot = step_info.get("stage_total", 1)
+    rem = step_info.get("remaining_mins", 0)
+    task_idx = step_info.get("task_index", 1)
+    title = step_info.get("title", "")
+    is_fin = step_info.get("is_finished", False)
+    stage_log = step_info.get("stage_log", "").replace("`", "")
+
+    diff_labels = {
+        "EASY": "🟢 [EASY: 輕量檢核]",
+        "MEDIUM": "🟡 [MEDIUM: 中度調優]",
+        "HARD": "🔴 [HARD: 深度演化算力密集]"
+    }
+    badge = diff_labels.get(diff, "[MEDIUM]")
+
+    if is_fin:
+        text = (
+            f"🎉 **【演化任務完成】: [{task_idx}] {title}**\n\n"
+            f"📊 **今日總體進度:** `{overall_pct}%`\n"
+            f"⚡ **評估難度:** `{badge}`\n"
+            f"📝 **最終達成成果:**\n{step_info.get('full_log', '')}\n\n"
+            f"💡 *排程器已紀錄成果，將持續推進下一項進化目標。*"
+        )
+    else:
+        text = (
+            f"🧠 **【深度進化運算中 (Deep Work)】**\n\n"
+            f"🎯 **目標:** [{task_idx}] {title}\n"
+            f"⚡ **難度評估:** `{badge}`\n"
+            f"📊 **階段推進:** 第 `{cur}/{tot}` 階段 (`{step_info.get('progress_pct', 0)}%`)\n"
+            f"⏳ **預估本任務尚需時間:** 約 `{rem}` 分鐘 (系統持續在背景多做一陣子)\n\n"
+            f"📝 **當前階段進展:**\n{stage_log}\n\n"
+            f"💡 *輸入 `/plan` 可查看全體進度清單。*"
+        )
+
     return broadcast_message(text)
+
+
+def broadcast_progress_milestone(step_info: dict, overall_pct: int) -> int:
+    """Backward compatibility wrapper for broadcast_deep_work_step."""
+    return broadcast_deep_work_step(step_info, overall_pct)
 
 
 if __name__ == "__main__":
