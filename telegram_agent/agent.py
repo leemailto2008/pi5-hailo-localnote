@@ -343,6 +343,32 @@ def call_ollama_chat(model: str, messages: list) -> str:
     return f"[Ollama 錯誤 {resp.status_code}]: {resp.text}"
 
 
+def parse_bilingual_response(raw_reply: str) -> tuple:
+    """
+    Parse [ZH] and [EN] components from bilingual Ollama response.
+    Returns (zh_text, en_text).
+    """
+    text = raw_reply.strip()
+    zh_part = ""
+    en_part = ""
+    
+    if "[ZH]" in text and "[EN]" in text:
+        parts = text.split("[EN]")
+        zh_part = parts[0].replace("[ZH]", "").strip()
+        en_part = parts[1].strip()
+    elif "[ZH]" in text:
+        zh_part = text.replace("[ZH]", "").strip()
+    elif "[EN]" in text:
+        parts = text.split("[EN]")
+        zh_part = parts[0].strip()
+        en_part = parts[1].strip()
+    else:
+        zh_part = text
+        en_part = ""
+        
+    return zh_part, en_part
+
+
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming text messages."""
     user = update.effective_user
@@ -447,10 +473,13 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             pass
 
         base_instruction = (
-            "你是部署於樹莓派 5 上的邊緣語音個人助理。使用者正使用語音與你交談。"
-            "使用者語音轉文字若含有同音或相近錯別字，請依據上下文與樹莓派專案語境自動對齊其真實意圖。"
-            "請以繁體中文 (Traditional Chinese, 台灣語音習慣) 回應，語言力求自然、生動、簡潔，"
-            "避免過多複雜的排版符號，以便於語音合成流暢朗讀。"
+            "你是部署於樹莓派 5 上的邊緣 AI 語音助理。使用者正使用語音與你交談。"
+            "使用者語音轉文字若含有同音或相近錯別字，請依據上下文自動對齊其真實意圖。"
+            "請以親切精煉的繁體中文回答，並同時提供流暢道地的英文翻譯對照。"
+            "回答格式必須嚴格遵循以下兩段標籤結構：\n"
+            "[ZH] 繁體中文回答內容（請控制在 30~50 字以內，文字簡潔流暢，以利語音朗讀）\n"
+            "[EN] Fluent English translation of the response\n"
+            "嚴禁添加多餘的特殊符號。"
         )
 
         # Check tool execution
@@ -474,24 +503,36 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         messages = memory_mgr.build_prompt_messages(chat_id, transcribed_text, base_instruction)
         reply_text = call_ollama_chat(model, messages)
 
-        # Update Tier 1 working memory
-        memory_mgr.append_turn(chat_id, transcribed_text, reply_text)
+        # Parse bilingual sections
+        zh_text, en_text = parse_bilingual_response(reply_text)
+        if not zh_text:
+            zh_text = reply_text
 
-        # 3. Text-To-Speech Synthesis
-        tts_success = await text_to_speech_async(reply_text, output_ogg_path)
+        # Update Tier 1 working memory with clean Chinese response
+        memory_mgr.append_turn(chat_id, transcribed_text, zh_text)
+
+        # 3. Text-To-Speech Synthesis: Synthesize ONLY Chinese for natural voice
+        tts_success = await text_to_speech_async(zh_text, output_ogg_path)
+
+        # Build clean bilingual text card for visual display
+        if en_text:
+            bilingual_msg = f"🇹🇼 **中文 (ZH):**\n{zh_text}\n\n🇺🇸 **English (EN):**\n{en_text}"
+        else:
+            bilingual_msg = zh_text
 
         if tts_success and os.path.exists(output_ogg_path):
             try:
                 with open(output_ogg_path, "rb") as audio_fp:
                     await update.message.reply_voice(
                         voice=audio_fp,
-                        caption=f"📝 {reply_text[:200]}..." if len(reply_text) > 200 else f"📝 {reply_text}"
+                        caption=bilingual_msg if len(bilingual_msg) <= 1024 else f"🇹🇼 {zh_text[:300]}...",
+                        parse_mode=ParseMode.MARKDOWN
                     )
             except Exception as voice_err:
                 logger.warning(f"Voice send failed, fallback to text: {voice_err}")
-                await update.message.reply_text(reply_text)
+                await update.message.reply_text(bilingual_msg, parse_mode=ParseMode.MARKDOWN)
         else:
-            await update.message.reply_text(reply_text)
+            await update.message.reply_text(bilingual_msg, parse_mode=ParseMode.MARKDOWN)
 
     except Exception as e:
         logger.error(f"Voice pipeline error: {e}")
