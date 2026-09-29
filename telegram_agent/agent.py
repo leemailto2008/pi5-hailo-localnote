@@ -44,10 +44,20 @@ from config import (
     DATA_DIR
 )
 from memory import ThreeTierMemoryManager
-from voice_pipeline import speech_to_text, text_to_speech_async
+from voice_pipeline import speech_to_text, text_to_speech_async, record_audio_from_mic
 from tools import execute_tool_call_if_needed
 from evolution_engine import evolution_engine
-from notifier import broadcast_daily_plan_overview, broadcast_progress_milestone, broadcast_deep_work_step
+from notifier import broadcast_daily_plan_overview, broadcast_progress_milestone, broadcast_deep_work_step, broadcast_message
+from bluetooth_manager import (
+    scan_devices as bt_scan_devices,
+    pair_and_trust as bt_pair_and_trust,
+    get_full_bt_status,
+    connect_default_device as bt_connect_default,
+    disconnect_device as bt_disconnect_device,
+    auto_reconnect_tick as bt_auto_reconnect_tick,
+    load_bt_config,
+    is_device_connected
+)
 
 # Setup logging
 logging.basicConfig(
@@ -156,7 +166,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "   - `/model qwen2.5:3b-opt` (繁中最佳，6 tok/s)\n"
         "   - `/model deepseek-r1:1.5b-opt` (極速思考，12 tok/s)\n"
         "   - `/model qwen2.5-coder:7b-opt` (深度代碼審查)\n"
-        "6. **硬體監控 (Hardware Telemetry):**\n"
+        "6. **藍牙音訊耳麥管理 (Bluetooth Headset):**\n"
+        "   - `/voice_note [秒數]`: 透過耳麥錄音並轉錄中英對照文字，回傳語音檔與中英字卡 (如 `/voice_note 5`)\n"
+        "   - `/bt_scan`: 掃描周圍處於配對模式的耳麥 (10 秒)\n"
+        "   - `/bt_pair <編號/MAC>`: 一鍵配對、信任並設為預設耳麥\n"
+        "   - `/bt`: 查看目前藍牙連線與耳麥狀態\n"
+        "   - `/bt_connect` / `/bt_disconnect`: 手動連線或中斷\n"
+        "   - *自動重連通知*: 耳麥開機靠近時自動秒連並透過 Telegram 即時回報！\n"
+        "7. **硬體監控 (Hardware Telemetry):**\n"
         "   - `/status`: 查看 CPU 溫度、可用 RAM 與健康狀態"
     )
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
@@ -322,6 +339,274 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =============================================================================
+# Bluetooth Audio Headset Commands
+# =============================================================================
+
+async def bt_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /bt or /bt_status: Display current Bluetooth connection and paired devices."""
+    user = update.effective_user
+    if not is_authorized(user.id, user.username or ""):
+        return
+
+    status = get_full_bt_status()
+    def_name = status.get("default_name") or "未設定"
+    def_mac = status.get("default_mac") or "無"
+    is_conn = status.get("default_connected", False)
+
+    lines = [
+        "🎧 **Raspberry Pi 5 藍牙音訊狀態**\n",
+        f"📡 **藍牙控制器:** {'🟢 正常' if status['controller_ok'] else '🔴 異常'} ({status['controller_message']})",
+        f"🎯 **預設耳麥:** *{def_name}* (`{def_mac}`)",
+        f"🔗 **連線狀態:** {'🟢 已連線 (Connected)' if is_conn else '⚪ 未連線 (Disconnected)'}",
+        f"🔄 **自動重連:** {'✅ 啟用中 (每 15 秒探測)' if status['auto_reconnect'] else '❌ 停用'}\n"
+    ]
+
+    paired = status.get("paired_devices", [])
+    if paired:
+        lines.append("📋 **已配對裝置清單 (Paired Devices):**")
+        for dev in paired:
+            star = "⭐ " if dev["is_default"] else "• "
+            conn_tag = " [🟢 連線中]" if dev["connected"] else ""
+            lines.append(f"{star}`{dev['mac']}` - {dev['name']}{conn_tag}")
+    else:
+        lines.append("ℹ️ 尚未配對任何裝置。輸入 `/bt_scan` 搜尋附近的耳麥。")
+
+    lines.append("\n💡 常用指令：")
+    lines.append("• `/bt_scan` - 搜尋附近處於配對狀態的耳麥")
+    lines.append("• `/bt_pair <編號/MAC>` - 一鍵配對並設為預設耳麥")
+    lines.append("• `/bt_connect` - 手動連線預設耳麥")
+    lines.append("• `/bt_disconnect` - 中斷藍牙連線")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+
+async def bt_scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /bt_scan: Scan for nearby Bluetooth devices (runs 10s)."""
+    user = update.effective_user
+    if not is_authorized(user.id, user.username or ""):
+        return
+
+    await update.message.reply_text(
+        "🔍 **正在掃描周圍藍牙音訊裝置 (約需 10 秒)...**\n"
+        "請確保您的耳麥已開機並處於「配對模式 (Pairing Mode / 燈號閃爍)」！",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    await context.bot.send_chat_action(chat_id=user.id, action=ChatAction.TYPING)
+
+    # Run blocking scan in thread pool
+    devices = await asyncio.to_thread(bt_scan_devices, 10)
+
+    if not devices:
+        await update.message.reply_text(
+            "❌ **未搜尋到任何藍牙裝置。**\n"
+            "建議：\n"
+            "1. 確認耳麥已進入配對狀態 (長按耳麥電源/配對鍵至紅藍閃爍)。\n"
+            "2. 靠近樹莓派主機後再試一次 `/bt_scan`。",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    lines = ["🎧 **搜尋到的藍牙裝置清單：**\n"]
+    for idx, dev in enumerate(devices, start=1):
+        status_tags = []
+        if dev.get("connected"):
+            status_tags.append("🟢 連線中")
+        elif dev.get("paired"):
+            status_tags.append("⚪ 已配對")
+        tag_str = f" ({', '.join(status_tags)})" if status_tags else ""
+        lines.append(f"**[{idx}]** `{dev['mac']}` - *{dev['name']}*{tag_str}")
+
+    lines.append("\n👉 **如何配對：**")
+    lines.append("請直接輸入 `/bt_pair <編號>` (例如 `/bt_pair 1`) 或 `/bt_pair <MAC>` 進行綁定！")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+
+async def bt_pair_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /bt_pair <index or MAC>: Pair, trust, and connect target device."""
+    user = update.effective_user
+    if not is_authorized(user.id, user.username or ""):
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "⚠️ 請指定要配對的裝置編號或 MAC 位址！\n"
+            "範例：\n"
+            "• `/bt_pair 1` (配對上次掃描清單的第 1 個裝置)\n"
+            "• `/bt_pair AA:BB:CC:DD:EE:FF`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    target = context.args[0].strip()
+    await update.message.reply_text(f"⚡ **正在嘗試與裝置 [{target}] 進行配對與綁定信任...**", parse_mode=ParseMode.MARKDOWN)
+    await context.bot.send_chat_action(chat_id=user.id, action=ChatAction.TYPING)
+
+    # Run blocking pair_and_trust in thread pool
+    success, msg = await asyncio.to_thread(bt_pair_and_trust, target)
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+
+async def bt_connect_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /bt_connect: Manually connect to default headset."""
+    user = update.effective_user
+    if not is_authorized(user.id, user.username or ""):
+        return
+
+    await update.message.reply_text("🔄 正在連線至預設耳麥...")
+    await context.bot.send_chat_action(chat_id=user.id, action=ChatAction.TYPING)
+
+    success, msg = await asyncio.to_thread(bt_connect_default)
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+
+async def bt_disconnect_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /bt_disconnect: Disconnect Bluetooth device."""
+    user = update.effective_user
+    if not is_authorized(user.id, user.username or ""):
+        return
+
+    target_mac = context.args[0].strip() if context.args else None
+    success, msg = await asyncio.to_thread(bt_disconnect_device, target_mac)
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+
+async def voice_record_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Handle /voice_note [seconds] or /voice [seconds] command:
+    1. Records audio from default microphone (Bluetooth headset) for N seconds.
+    2. Transcribes voice to Traditional Chinese via faster-whisper.
+    3. Translates Chinese transcript into English via Ollama.
+    4. Sends both the voice note audio and bilingual transcript back to Telegram.
+    """
+    user = update.effective_user
+    if not is_authorized(user.id, user.username or ""):
+        return
+
+    chat_id = user.id
+    duration = 5
+    if context.args:
+        try:
+            duration = int(context.args[0])
+            if duration < 1:
+                duration = 1
+            elif duration > 60:
+                duration = 60
+        except ValueError:
+            await update.message.reply_text(
+                "⚠️ **秒數格式錯誤**\n請輸入整數秒數，例如：`/voice_note 5` 或 `/voice_note 10` (支援 1~60 秒)。",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+    # Check and ensure Bluetooth headset connection
+    config = load_bt_config()
+    default_mac = config.get("default_mac")
+    default_name = config.get("default_name") or "藍牙耳麥"
+
+    if default_mac and not is_device_connected(default_mac):
+        wake_msg = await update.message.reply_text(
+            f"🔄 偵測到耳麥 *{default_name}* 處於休眠/離線狀態，正在連線中...",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        await asyncio.to_thread(bt_connect_default)
+        if not is_device_connected(default_mac):
+            await wake_msg.edit_text(
+                f"⚠️ **無法連線至耳麥：{default_name}**\n\n"
+                "• 請確認耳麥電源已開機並位於連線範圍內。\n"
+                "• 系統背景已啟用自動秒連；耳機開機連上後請再次執行 `/voice_note` 錄音！",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+        await wake_msg.delete()
+
+    status_msg = await update.message.reply_text(
+        f"🎙️ **正在透過藍牙耳麥錄製語音 ({duration} 秒)...**\n請現在對耳麥麥克風說話！",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    temp_ogg = f"/tmp/voice_note_{uuid.uuid4().hex[:8]}.ogg"
+    try:
+        # Record from default pulse audio input (Bluetooth headset)
+        success = await record_audio_from_mic(duration, temp_ogg)
+        if not success or not os.path.exists(temp_ogg):
+            await status_msg.edit_text("❌ **錄音失敗：** 無法從麥克風捕獲音訊，請確認藍牙耳麥連線正常。")
+            return
+
+        await status_msg.edit_text(f"⏳ **錄音完成 ({duration}s)，正在進行語音轉錄與中英翻譯...**", parse_mode=ParseMode.MARKDOWN)
+
+        # 1. ASR Transcription via faster-whisper (ARM NEON int8)
+        zh_text = await asyncio.to_thread(speech_to_text, temp_ogg)
+
+        # 2. English Translation via Ollama
+        en_text = ""
+        if zh_text and zh_text.strip():
+            try:
+                en_text = await asyncio.to_thread(translate_text_to_english, zh_text.strip())
+            except Exception as tr_err:
+                logger.warning(f"Translation failed: {tr_err}")
+
+        # 3. Send Voice Note Audio file to Telegram
+        with open(temp_ogg, "rb") as vf:
+            await context.bot.send_voice(
+                chat_id=chat_id,
+                voice=vf,
+                duration=duration,
+                caption=f"🎙️ **語音備忘錄錄音檔 ({duration} 秒)**",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+        # 4. Send Bilingual Transcript Message Card
+        if zh_text and zh_text.strip():
+            transcript_card = (
+                "📝 **語音辨識與中英對照 (Voice Note Transcript)**\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🇹🇼 **中文文字 (Traditional Chinese):**\n"
+                f"{zh_text.strip()}\n\n"
+                f"🇬🇧 **英文對照 (English Translation):**\n"
+                f"{en_text.strip() if en_text else '*(翻譯產生中)*'}\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                f"⏱️ 錄音時長: `{duration} 秒` | ⚡ ASR: `faster-whisper int8`"
+            )
+        else:
+            transcript_card = (
+                "📝 **語音辨識結果 (Voice Note Transcript)**\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                "🔇 **(未偵測到清晰語音內容)**\n"
+                "💡 建議：請靠近耳麥麥克風清晰發話，或增加錄音秒數 (如 `/voice_note 8`)。\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                f"⏱️ 錄音時長: `{duration} 秒`"
+            )
+
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=transcript_card,
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+        await status_msg.delete()
+
+    except Exception as e:
+        logger.error(f"Error in /voice_note command: {e}")
+        await status_msg.edit_text(f"❌ 處理語音筆記時發生異常: {e}")
+    finally:
+        if os.path.exists(temp_ogg):
+            try:
+                os.remove(temp_ogg)
+            except Exception:
+                pass
+
+
+def translate_text_to_english(text: str) -> str:
+    """Quick translation of Traditional Chinese text to English via Ollama."""
+    if not text.strip():
+        return ""
+    prompt = f"Translate the following Traditional Chinese text into natural, concise English. Output ONLY the English translation, without quotation marks or explanations:\n\n{text}"
+    raw = call_ollama_chat(DEFAULT_CHAT_MODEL, [{"role": "user", "content": prompt}]).strip()
+    return raw.replace('"', '').strip()
+
+
+# =============================================================================
 # Inference & Message Handlers
 # =============================================================================
 
@@ -345,28 +630,42 @@ def call_ollama_chat(model: str, messages: list) -> str:
 
 def parse_bilingual_response(raw_reply: str) -> tuple:
     """
-    Parse [ZH] and [EN] components from bilingual Ollama response.
-    Returns (zh_text, en_text).
+    Parse [USER_EN], [ZH], and [EN] components from bilingual Ollama response.
+    Returns (user_en, zh_text, en_text).
     """
     text = raw_reply.strip()
-    zh_part = ""
-    en_part = ""
+    user_en = ""
+    zh_text = ""
+    en_text = ""
     
-    if "[ZH]" in text and "[EN]" in text:
-        parts = text.split("[EN]")
-        zh_part = parts[0].replace("[ZH]", "").strip()
-        en_part = parts[1].strip()
-    elif "[ZH]" in text:
-        zh_part = text.replace("[ZH]", "").strip()
-    elif "[EN]" in text:
-        parts = text.split("[EN]")
-        zh_part = parts[0].strip()
-        en_part = parts[1].strip()
+    # 1. Extract [USER_EN]
+    if "[USER_EN]" in text:
+        parts = text.split("[USER_EN]", 1)[1]
+        if "[ZH]" in parts:
+            user_en = parts.split("[ZH]", 1)[0].strip()
+            rest = "[ZH]" + parts.split("[ZH]", 1)[1]
+        elif "[EN]" in parts:
+            user_en = parts.split("[EN]", 1)[0].strip()
+            rest = "[EN]" + parts.split("[EN]", 1)[1]
+        else:
+            user_en = parts.strip()
+            rest = ""
     else:
-        zh_part = text
-        en_part = ""
+        rest = text
+
+    # 2. Extract [ZH] and [EN]
+    if "[ZH]" in rest and "[EN]" in rest:
+        zh_parts = rest.split("[ZH]", 1)[1].split("[EN]", 1)
+        zh_text = zh_parts[0].strip()
+        en_text = zh_parts[1].strip()
+    elif "[ZH]" in rest:
+        zh_text = rest.split("[ZH]", 1)[1].strip()
+    elif "[EN]" in rest:
+        en_text = rest.split("[EN]", 1)[1].strip()
+    else:
+        zh_text = rest.strip()
         
-    return zh_part, en_part
+    return user_en, zh_text, en_text
 
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -449,12 +748,21 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await voice_file.download_to_drive(input_oga_path)
 
         # 1. Speech-To-Text
+        audio_file_size = os.path.getsize(input_oga_path) if os.path.exists(input_oga_path) else 0
         transcribed_text = speech_to_text(input_oga_path)
         if not transcribed_text:
+            logger.warning(f"[Voice STT Failed] User {chat_id}, file size={audio_file_size} bytes. Audio transcription empty.")
             try:
-                await update.message.reply_text("🔇 無法辨識語音內容，請再試一次或改用文字輸入。")
+                await update.message.reply_text(
+                    "🔇 *無法辨識語音內容*\n"
+                    "建議：請靠近麥克風並清晰發話約 2~5 秒後再試一次，或改用文字輸入交談。",
+                    parse_mode=ParseMode.MARKDOWN
+                )
             except Exception:
-                pass
+                try:
+                    await update.message.reply_text("🔇 無法辨識語音內容，請靠近麥克風清晰說話約 2~5 秒再試一次。")
+                except Exception:
+                    pass
             return
 
         logger.info(f"[Voice STT] User {chat_id}: {transcribed_text}")
@@ -473,12 +781,12 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
             pass
 
         base_instruction = (
-            "你是部署於樹莓派 5 上的邊緣 AI 語音助理。使用者正使用語音與你交談。"
+            "你是部署於樹莓派 5 上的邊緣 AI 雙語語音助理。使用者正使用語音與你交談。"
             "使用者語音轉文字若含有同音或相近錯別字，請依據上下文自動對齊其真實意圖。"
-            "請以親切精煉的繁體中文回答，並同時提供流暢道地的英文翻譯對照。"
-            "回答格式必須嚴格遵循以下兩段標籤結構：\n"
-            "[ZH] 繁體中文回答內容（請控制在 30~50 字以內，文字簡潔流暢，以利語音朗讀）\n"
-            "[EN] Fluent English translation of the response\n"
+            "請嚴格依據以下三段標籤結構輸出完整中英雙語對照：\n"
+            "[USER_EN] 將使用者發話內容翻譯成簡潔道地的英文\n"
+            "[ZH] 以親切精煉的繁體中文回答（30~50 字以內，文字簡潔流暢，以利語音朗讀）\n"
+            "[EN] 將你的繁體中文回答翻譯成道地流暢的英文\n"
             "嚴禁添加多餘的特殊符號。"
         )
 
@@ -504,7 +812,7 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         reply_text = call_ollama_chat(model, messages)
 
         # Parse bilingual sections
-        zh_text, en_text = parse_bilingual_response(reply_text)
+        user_en, zh_text, en_text = parse_bilingual_response(reply_text)
         if not zh_text:
             zh_text = reply_text
 
@@ -515,24 +823,33 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         tts_success = await text_to_speech_async(zh_text, output_ogg_path)
 
         # Build clean bilingual text card for visual display
+        card_parts = [
+            "🎙️ **語音輸入 (Voice Input):**",
+            f"🇹🇼 「{transcribed_text}」"
+        ]
+        if user_en:
+            card_parts.append(f'🇺🇸 "{user_en}"')
+
+        card_parts.append("\n🤖 **助理回覆 (Assistant Reply):**")
+        card_parts.append(f"🇹🇼 {zh_text}")
         if en_text:
-            bilingual_msg = f"🇹🇼 **中文 (ZH):**\n{zh_text}\n\n🇺🇸 **English (EN):**\n{en_text}"
-        else:
-            bilingual_msg = zh_text
+            card_parts.append(f"🇺🇸 {en_text}")
+
+        bilingual_card = "\n".join(card_parts)
 
         if tts_success and os.path.exists(output_ogg_path):
             try:
                 with open(output_ogg_path, "rb") as audio_fp:
                     await update.message.reply_voice(
                         voice=audio_fp,
-                        caption=bilingual_msg if len(bilingual_msg) <= 1024 else f"🇹🇼 {zh_text[:300]}...",
+                        caption=bilingual_card if len(bilingual_card) <= 1024 else f"🇹🇼 {zh_text[:300]}...",
                         parse_mode=ParseMode.MARKDOWN
                     )
             except Exception as voice_err:
                 logger.warning(f"Voice send failed, fallback to text: {voice_err}")
-                await update.message.reply_text(bilingual_msg, parse_mode=ParseMode.MARKDOWN)
+                await update.message.reply_text(bilingual_card, parse_mode=ParseMode.MARKDOWN)
         else:
-            await update.message.reply_text(bilingual_msg, parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(bilingual_card, parse_mode=ParseMode.MARKDOWN)
 
     except Exception as e:
         logger.error(f"Voice pipeline error: {e}")
@@ -599,9 +916,30 @@ async def evolution_background_worker(app):
         await asyncio.sleep(60)
 
 
+async def bluetooth_reconnect_worker(app):
+    """
+    Autonomous Bluetooth Reconnect & Status Broadcast Worker:
+    Periodically checks every 12s if the default headset connection state changes.
+    Proactively pushes notifications to Telegram whenever headset auto-connects or disconnects.
+    """
+    logger.info("🎧 Bluetooth Auto-Reconnect & Status worker initialized.")
+    await asyncio.sleep(6)
+    while True:
+        try:
+            msg = await asyncio.to_thread(bt_auto_reconnect_tick)
+            if msg:
+                # Broadcast status change directly to Telegram subscribers
+                await asyncio.to_thread(broadcast_message, msg)
+        except Exception as e:
+            logger.debug(f"Bluetooth auto-reconnect tick error: {e}")
+
+        await asyncio.sleep(12)
+
+
 async def post_init_hook(app):
-    """Post initialization hook: start background worker coroutine."""
+    """Post initialization hook: start background worker coroutines."""
     asyncio.create_task(evolution_background_worker(app))
+    asyncio.create_task(bluetooth_reconnect_worker(app))
 
 
 def main():
@@ -631,13 +969,22 @@ def main():
     app.add_handler(CommandHandler("facts", facts_command))
     app.add_handler(CommandHandler("clear", clear_command))
 
+    # Register Voice & Bluetooth handlers
+    app.add_handler(CommandHandler(["voice_note", "voice"], voice_record_command))
+    app.add_handler(CommandHandler(["bt", "bt_status"], bt_status_command))
+    app.add_handler(CommandHandler("bt_scan", bt_scan_command))
+    app.add_handler(CommandHandler("bt_pair", bt_pair_command))
+    app.add_handler(CommandHandler("bt_connect", bt_connect_command))
+    app.add_handler(CommandHandler("bt_disconnect", bt_disconnect_command))
+
     # Register message handlers
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice_message))
 
-    print("🤖 Pi 5 Telegram Agent with Self-Evolution Engine is running...")
+    print("🤖 Pi 5 Telegram Agent with Self-Evolution & Bluetooth Engine is running...")
     app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
     main()
+

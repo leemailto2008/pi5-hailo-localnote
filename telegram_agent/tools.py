@@ -428,6 +428,41 @@ def synthesize_new_skill(user_text: str) -> str:
         return f"❌ 【自我進化異常】: 調用代碼大模型時出錯 ({e})。"
 
 
+def check_or_connect_bluetooth(user_text: str) -> str:
+    """
+    Natural language interface for Bluetooth headset management.
+    Handles querying status, connecting, or scanning via voice/text.
+    """
+    try:
+        from bluetooth_manager import get_full_bt_status, connect_default_device, scan_devices
+    except ImportError:
+        return "❌ 尚未載入藍牙管理模組 (bluetooth_manager.py)。"
+
+    u_lower = user_text.lower()
+    if any(k in u_lower for k in ["連線", "連接", "連上", "重連"]):
+        success, msg = connect_default_device()
+        return f"【藍牙連線操作結果】:\n{msg}"
+    elif any(k in u_lower for k in ["搜尋", "掃描", "尋找"]):
+        devs = scan_devices(8)
+        if not devs:
+            return "【藍牙掃描結果】: 未找到附近處於配對狀態的耳麥，請長按耳麥按鍵進入配對燈號閃爍狀態。"
+        lines = [f"{i+1}. {d['name']} ({d['mac']})" for i, d in enumerate(devs[:5])]
+        return "【藍牙掃描發現以下耳麥/裝置】:\n" + "\n".join(lines) + "\n您可以在 Telegram 輸入 `/bt_pair 編號` 完成綁定。"
+    else:
+        st = get_full_bt_status()
+        def_name = st.get("default_name") or "未綁定預設耳麥"
+        is_conn = st.get("default_connected", False)
+        conn_str = "🟢 已成功連線 (Connected)" if is_conn else "⚪ 目前未連線 (Disconnected)"
+        return (
+            f"【藍牙耳麥狀態】:\n"
+            f"• 預設目標: {def_name}\n"
+            f"• 連線狀態: {conn_str}\n"
+            f"• 開機自動重連: {'啟用中 (每 15 秒探測)' if st.get('auto_reconnect') else '已關閉'}\n"
+            f"• 控制器: {st.get('controller_message')}\n"
+            f"提示：可於 Telegram 輸入 `/bt_scan` 搜尋新耳麥，或輸入 `/bt_pair` 進行綁定。"
+        )
+
+
 # =============================================================================
 # Dynamic Skill Registry & Self-Evolution (動態技能登錄與自我進化)
 # =============================================================================
@@ -477,6 +512,13 @@ class SkillRegistry:
             "desc": "調用本地代碼模型自動生成新技能代碼並熱載入",
             "keywords": ["自建技能", "學會新技能", "建立技能", "自建工具", "新增技能", "擴充技能", "寫一個工具", "學會"],
             "func": synthesize_new_skill
+        }
+        # 6. Bluetooth Headset Control
+        self.skills["bluetooth_headset"] = {
+            "name": "藍牙耳麥管理與自動連線",
+            "desc": "查詢藍牙耳麥連線狀況、掃描配對或手動連線耳機",
+            "keywords": ["藍牙", "藍芽", "耳機", "耳麥", "bluetooth", "連線耳機", "配對耳機", "藍牙耳機"],
+            "func": check_or_connect_bluetooth
         }
 
     def load_custom_skills(self):
@@ -554,9 +596,16 @@ class SkillRegistry:
             raw_info = self.skills["taiwan_news"]["func"](topic)
             return f"{raw_info}\n請根據以上搜尋結果，為使用者統整出重點摘要並語音朗讀回答。"
 
-        # Priority 4: Custom Loaded Skills
+        # Priority 5: Bluetooth Headset Control
+        bt_keywords = self.skills["bluetooth_headset"]["keywords"]
+        if any(k in user_lower for k in bt_keywords):
+            logger.info("Triggered Skill: check_or_connect_bluetooth")
+            raw_info = self.skills["bluetooth_headset"]["func"](user_text)
+            return f"{raw_info}\n請根據以上藍牙連線狀態或結果，以繁體中文親切回應使用者。"
+
+        # Priority 6: Custom Loaded Skills
         for s_id, s_info in self.skills.items():
-            if s_id in ["hardware_status", "taiwan_news", "power_control", "skill_synthesis"]:
+            if s_id in ["hardware_status", "taiwan_news", "power_control", "skill_synthesis", "bluetooth_headset"]:
                 continue
             if any(k.lower() in user_lower for k in s_info.get("keywords", [])):
                 logger.info(f"Triggered Dynamic Skill: {s_id}")
