@@ -61,28 +61,32 @@ def to_taiwan_traditional(text: str) -> str:
     return text
 
 
-def is_silence_or_empty_audio(wav_path: str, rms_threshold: int = 120) -> bool:
+def is_silence_or_empty_audio(wav_path: str, rms_threshold: int = 80) -> bool:
     """
     Check if a WAV file contains only silence or background static.
-    Prevents Whisper from generating hallucinated subtitles on silence.
+    Uses struct to calculate RMS, compatible with Python 3.13 (no audioop dependency).
     """
     try:
         import wave
+        import struct
+        import math
         with wave.open(wav_path, "rb") as wf:
             n_frames = wf.getnframes()
             if n_frames == 0:
                 return True
             frames = wf.readframes(n_frames)
-            width = wf.getsampwidth()
-            
-            # Simple RMS calculation
-            import audioop
-            rms = audioop.rms(frames, width)
+            count = len(frames) // 2
+            if count == 0:
+                return True
+            shorts = struct.unpack(f"<{count}h", frames)
+            sum_sq = sum(s * s for s in shorts)
+            rms = int(math.sqrt(sum_sq / count))
             if rms < rms_threshold:
                 print(f"[VoicePipeline] Audio RMS too low ({rms} < {rms_threshold}), detected as silence.")
                 return True
             return False
     except Exception as e:
+        print(f"[VoicePipeline] Error in silence check: {e}")
         return False
 
 
@@ -92,7 +96,6 @@ def convert_oga_to_wav(input_oga_path: str, output_wav_path: str) -> bool:
     Uses highpass filter + dynaudnorm to boost quiet speech and suppress low-frequency hum.
     """
     try:
-        # Optimized pipeline for high-fidelity speech recognition
         cmd = [
             "ffmpeg", "-y",
             "-i", input_oga_path,
@@ -125,11 +128,7 @@ def convert_oga_to_wav(input_oga_path: str, output_wav_path: str) -> bool:
 def speech_to_text(audio_path: str) -> Optional[str]:
     """
     Transcribe speech from an audio file to Traditional Chinese text.
-    Enhancements:
-    1. Pre-ASR audio RMS energy verification (eliminates silence hallucinations).
-    2. condition_on_previous_text=False (prevents loop/hallucination spirals).
-    3. Tuned VAD thresholds and Taiwan colloquial initial prompt.
-    4. OpenCC s2twp normalization for pure Taiwan Traditional Chinese.
+    Uses robust parameters compatible with faster-whisper on ARM NEON.
     """
     if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
         print(f"[VoicePipeline] Audio file missing or empty: {audio_path}")
@@ -143,7 +142,7 @@ def speech_to_text(audio_path: str) -> Optional[str]:
         return None
 
     try:
-        # Pre-check: If audio is pure silence/static, discard immediately
+        # Pre-check: If audio is pure silence/static, discard
         if is_silence_or_empty_audio(wav_path):
             print(f"[VoicePipeline] Audio is silence, skipping Whisper transcription.")
             return None
@@ -153,29 +152,23 @@ def speech_to_text(audio_path: str) -> Optional[str]:
             print("[VoicePipeline] Whisper model unavailable.")
             return None
 
-        # Clean natural Taiwan Traditional Chinese prompt
-        clean_prompt = "這是一段清晰的台灣繁體中文日常生活語音對話。"
+        clean_prompt = "以下是清晰的繁體中文日常語音對話。"
 
         text = ""
-        # Pass 1: Silero VAD with balanced sensitivity
+        # Pass 1: Silero VAD filter with relaxed settings
         try:
             segments, info = model.transcribe(
                 wav_path,
                 beam_size=5,
-                best_of=5,
                 language="zh",
                 initial_prompt=clean_prompt,
                 condition_on_previous_text=False,
-                compression_ratio_threshold=2.2,
-                no_speech_threshold=0.45,
-                logprob_threshold=-0.9,
-                temperature=[0.0, 0.2],
                 vad_filter=True,
-                vad_parameters=dict(threshold=0.32, min_silence_duration_ms=200)
+                vad_parameters=dict(threshold=0.25, min_silence_duration_ms=400)
             )
             text = "".join([segment.text for segment in segments]).strip()
         except Exception as vad_err:
-            print(f"[VoicePipeline] Pass 1 (VAD) warning: {vad_err}")
+            print(f"[VoicePipeline] Pass 1 (VAD) exception: {vad_err}")
 
         # Pass 2: Fallback without VAD if empty
         if not text:
@@ -183,14 +176,9 @@ def speech_to_text(audio_path: str) -> Optional[str]:
             segments, info = model.transcribe(
                 wav_path,
                 beam_size=5,
-                best_of=5,
                 language="zh",
                 initial_prompt=clean_prompt,
                 condition_on_previous_text=False,
-                compression_ratio_threshold=2.2,
-                no_speech_threshold=0.45,
-                logprob_threshold=-0.9,
-                temperature=[0.0, 0.2],
                 vad_filter=False
             )
             text = "".join([segment.text for segment in segments]).strip()
