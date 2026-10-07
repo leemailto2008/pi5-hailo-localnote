@@ -17,3 +17,4 @@ telegram_agent/.env
 telegram_agent/data/
 telegram_agent/temp/
 *.db
+.vscode/

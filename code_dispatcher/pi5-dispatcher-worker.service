@@ -1,0 +1,16 @@
+[Unit]
+Description=Raspberry Pi 5 LLM Code Dispatcher RQ Worker
+After=network.target redis-server.service ollama.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/code_dispatcher
+ExecStart=/usr/bin/python3 /home/pi/code_dispatcher/worker.py
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

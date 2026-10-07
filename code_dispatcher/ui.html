@@ -1,0 +1,1644 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pi 5 Edge AI Arena & Bluetooth Voice Gateway</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#4f46e5">
+    <link rel="apple-touch-icon" href="https://img.icons8.com/color/192/raspberry-pi.png">
+    <style>
+        :root {
+            --bg-base: #0a0f1d;
+            --bg-surface: #131b2e;
+            --bg-surface-elevated: #1e293b;
+            --border-color: #27354f;
+            --border-focus: #4f46e5;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #38bdf8;
+            --accent-purple: #818cf8;
+            --accent-glow: rgba(56, 189, 248, 0.15);
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            line-height: 1.6;
+        }
+
+        /* Top Header */
+        header {
+            background-color: rgba(19, 27, 46, 0.85);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            padding: 0.75rem 1.5rem;
+        }
+
+        .header-container {
+            max-width: 1240px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+
+        .logo-group {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .logo-badge {
+            background: linear-gradient(135deg, #4f46e5, #06b6d4);
+            color: #fff;
+            font-weight: 700;
+            font-size: 0.85rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: 6px;
+            letter-spacing: 0.5px;
+        }
+
+        .logo-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .telemetry-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .stat-pill {
+            background-color: var(--bg-surface-elevated);
+            border: 1px solid var(--border-color);
+            border-radius: 9999px;
+            padding: 0.25rem 0.7rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .stat-pill strong {
+            color: var(--text-main);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--success);
+            box-shadow: 0 0 8px var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.7; }
+        }
+
+        /* Network Mode Switch Banner */
+        .network-bar-container {
+            max-width: 1240px;
+            margin: 0.85rem auto 0 auto;
+            padding: 0 1.5rem;
+            width: 100%;
+        }
+
+        .network-bar {
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.75rem 1.25rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .network-info {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+        }
+
+        .net-badge {
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 0.3rem 0.65rem;
+            border-radius: 9999px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .net-badge.sta {
+            background-color: rgba(16, 185, 129, 0.2);
+            color: #34d399;
+            border: 1px solid #10b981;
+        }
+
+        .net-badge.ap {
+            background-color: rgba(245, 158, 11, 0.2);
+            color: #fbbf24;
+            border: 1px solid #f59e0b;
+        }
+
+        .net-text {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+        }
+
+        .net-text strong {
+            font-size: 0.9rem;
+            color: #fff;
+        }
+
+        .net-text span {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .btn-net-switch {
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            border: 1px solid #6366f1;
+            color: #fff;
+            padding: 0.45rem 1rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.2s;
+        }
+
+        .btn-net-switch:hover:not(:disabled) {
+            filter: brightness(1.15);
+            transform: translateY(-1px);
+        }
+
+        /* Top Navigation Tabs */
+        .tabs-container {
+            max-width: 1240px;
+            margin: 0.85rem auto 0 auto;
+            padding: 0 1.5rem;
+            width: 100%;
+        }
+
+        .tabs-nav {
+            display: flex;
+            gap: 0.6rem;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            font-weight: 600;
+            padding: 0.55rem 1.1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.2s;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-main);
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-btn.active {
+            color: #fff;
+            background: linear-gradient(135deg, rgba(79, 70, 229, 0.4), rgba(6, 182, 212, 0.2));
+            border: 1px solid var(--border-focus);
+            box-shadow: 0 0 12px rgba(99, 102, 241, 0.25);
+        }
+
+        /* Main Workspace Container */
+        main {
+            max-width: 1240px;
+            margin: 1.25rem auto 2rem auto;
+            padding: 0 1.5rem;
+            width: 100%;
+            flex: 1;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Grid Layouts */
+        .grid-2col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.25rem;
+        }
+
+        @media (max-width: 900px) {
+            .grid-2col {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Glassmorphism Panels */
+        .panel {
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.75rem;
+        }
+
+        .panel-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Form elements */
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        input[type="text"], select, textarea {
+            background-color: #0b1120;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            color: var(--text-main);
+            padding: 0.65rem 0.85rem;
+            font-size: 0.9rem;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus, select:focus, textarea:focus {
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 90px;
+        }
+
+        /* Buttons */
+        .btn-primary {
+            background: linear-gradient(135deg, #4f46e5, #06b6d4);
+            border: none;
+            border-radius: var(--radius-md);
+            color: #fff;
+            font-size: 0.95rem;
+            font-weight: 600;
+            padding: 0.65rem 1.25rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            transition: all 0.2s;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            filter: brightness(1.15);
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background-color: var(--bg-surface-elevated);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            border-radius: var(--radius-md);
+            font-size: 0.85rem;
+            font-weight: 600;
+            padding: 0.5rem 0.9rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            transition: all 0.2s;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        /* BT Device Status Card */
+        .bt-card {
+            background: #0b1120;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .bt-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .bt-badge {
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 0.25rem 0.6rem;
+            border-radius: 9999px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .bt-badge.connected {
+            background-color: rgba(16, 185, 129, 0.2);
+            color: #34d399;
+            border: 1px solid #10b981;
+        }
+
+        .bt-badge.disconnected {
+            background-color: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+            border: 1px solid #ef4444;
+        }
+
+        .bt-device-item {
+            background-color: var(--bg-surface-elevated);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.65rem 0.85rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .bt-device-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+        }
+
+        .bt-device-info strong {
+            font-size: 0.9rem;
+            color: #fff;
+        }
+
+        .bt-device-info span {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Voice Recording Box & Waveform */
+        .voice-box {
+            background: linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(6, 182, 212, 0.05));
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.85rem;
+            text-align: center;
+        }
+
+        .waveform {
+            display: none;
+            align-items: center;
+            gap: 4px;
+            height: 32px;
+            margin: 0.25rem 0;
+        }
+
+        .wave-bar {
+            width: 5px;
+            height: 100%;
+            background: linear-gradient(180deg, #ec4899, #06b6d4);
+            border-radius: 3px;
+            animation: wave 1s infinite ease-in-out;
+        }
+
+        .wave-bar:nth-child(2) { animation-delay: 0.15s; }
+        .wave-bar:nth-child(3) { animation-delay: 0.3s; }
+        .wave-bar:nth-child(4) { animation-delay: 0.45s; }
+        .wave-bar:nth-child(5) { animation-delay: 0.6s; }
+
+        @keyframes wave {
+            0%, 100% { height: 6px; }
+            50% { height: 30px; }
+        }
+
+        /* Live Recording Countdown & Progress */
+        .rec-progress-box {
+            display: none;
+            width: 100%;
+            max-width: 360px;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            border-radius: var(--radius-md);
+            padding: 0.85rem;
+            flex-direction: column;
+            gap: 0.6rem;
+            box-shadow: 0 0 16px rgba(239, 68, 68, 0.15);
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        .rec-progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .rec-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            color: #ef4444;
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .rec-dot {
+            width: 10px;
+            height: 10px;
+            background-color: #ef4444;
+            border-radius: 50%;
+            animation: pulse-dot 1s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 8px #ef4444; }
+            50% { opacity: 0.4; transform: scale(0.85); box-shadow: none; }
+        }
+
+        .rec-timer-txt {
+            font-family: 'JetBrains Mono', monospace;
+            color: #f87171;
+            font-size: 0.95rem;
+        }
+
+        .rec-bar-track {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .rec-bar-fill {
+            height: 100%;
+            width: 100%;
+            background: linear-gradient(90deg, #ef4444, #f59e0b);
+            border-radius: 3px;
+            transition: width 0.1s linear;
+        }
+
+        /* Audio Playback Card */
+        .playback-box {
+            display: none;
+            width: 100%;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            border-radius: var(--radius-md);
+            padding: 0.85rem;
+            flex-direction: column;
+            gap: 0.6rem;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .playback-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--accent);
+        }
+
+        audio {
+            width: 100%;
+            height: 38px;
+            border-radius: 6px;
+            outline: none;
+        }
+
+        /* Bilingual Output Card */
+        .bilingual-card {
+            background: #0b1120;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.85rem;
+        }
+
+        .card-row {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+        }
+
+        .card-row-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .card-row-content {
+            font-size: 1rem;
+            color: #fff;
+            background: rgba(30, 41, 59, 0.5);
+            padding: 0.65rem 0.85rem;
+            border-radius: 6px;
+            line-height: 1.5;
+        }
+
+        .action-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.4rem;
+            flex-wrap: wrap;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 0.8s linear infinite;
+        }
+
+        .bt-toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: rgba(15, 23, 42, 0.95);
+            color: #fff;
+            padding: 0.75rem 1.25rem;
+            border-radius: 8px;
+            border: 1px solid rgba(99, 102, 241, 0.5);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+            font-size: 0.875rem;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            z-index: 9999;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            pointer-events: none;
+        }
+        .bt-toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <header>
+        <div class="header-container">
+            <div class="logo-group">
+                <span class="logo-badge">Pi 5</span>
+                <span class="logo-title">Edge AI & Bluetooth Voice Gateway</span>
+            </div>
+            <div class="telemetry-bar">
+                <div class="stat-pill">
+                    <span class="status-dot"></span>
+                    <span>Port 80 Online</span>
+                </div>
+                <div class="stat-pill" id="pillBtStatus" style="display: none; border-color: rgba(16, 185, 129, 0.4);">
+                    <span id="pillBtIcon">🎧</span>
+                    <strong id="pillBtText" style="color: #10b981;">--</strong>
+                </div>
+                <div class="stat-pill">
+                    <span>Temp:</span> <strong id="valTemp">--.-°C</strong>
+                </div>
+                <div class="stat-pill">
+                    <span>RAM:</span> <strong id="valRam">-- / -- GB</strong>
+                </div>
+                <div class="stat-pill">
+                    <a href="/dbg01" style="color: var(--accent); text-decoration: none; font-weight: 600;">💻 Code Review (/dbg01) ↗</a>
+                </div>
+                <div class="stat-pill">
+                    <a href="/docs" target="_blank" style="color: var(--accent); text-decoration: none;">API Docs ↗</a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Network Switcher Bar -->
+    <div class="network-bar-container">
+        <div class="network-bar">
+            <div class="network-info">
+                <span class="net-badge sta" id="netBadge">STA 聯網模式</span>
+                <div class="net-text">
+                    <strong id="netModeTitle">家用 Wi-Fi 模式 (Online Gateway)</strong>
+                    <span id="netModeDetails">IP: 192.168.50.228 | Telegram & SSH 運作中</span>
+                </div>
+            </div>
+            <div class="network-actions">
+                <button class="btn-net-switch" id="btnNetSwitch" onclick="handleNetworkToggle()">
+                    <span id="btnNetSwitchIcon">📡</span>
+                    <span id="btnNetSwitchText">切換為方案 A 熱點 (raspi543_AI / 10.20.0.1)</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="tabs-container">
+        <div class="tabs-nav">
+            <button class="tab-btn active" id="tabBtnVoice" onclick="switchMainTab('voice')">
+                <span>🎧</span> 藍牙耳麥與語音翻譯應用 (BT Voice Studio)
+            </button>
+            <button class="tab-btn" id="tabBtnArena" onclick="switchMainTab('arena')">
+                <span>💬</span> 程式碼審查與 LLM Arena (Code Review)
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Workspace -->
+    <main>
+        <!-- Tab 1: Bluetooth Voice & Translation Studio (Default) -->
+        <div class="tab-content active" id="tabVoice">
+            <div class="grid-2col">
+                <!-- Left Column: BT Manager & Mic Capture -->
+                <section class="panel">
+                    <div class="panel-header">
+                        <h2 class="panel-title">
+                            <span>🎧</span> 藍牙耳麥裝置管理 (Bluetooth Hub)
+                        </h2>
+                        <button class="btn-secondary" onclick="fetchBTStatus()">
+                            <span>🔄</span> 重新檢查狀態
+                        </button>
+                    </div>
+
+                    <!-- Current BT Status -->
+                    <div class="bt-card">
+                        <div class="bt-header">
+                            <div>
+                                <strong id="btDeviceName">未連線耳麥</strong>
+                                <div style="font-size: 0.75rem; color: var(--text-muted); font-family: monospace;" id="btDeviceMac">--:--:--:--:--:--</div>
+                            </div>
+                            <span class="bt-badge disconnected" id="btStatusBadge">DISCONNECTED</span>
+                        </div>
+
+                        <!-- Telemetry: Battery & Signal Strength -->
+                        <div class="bt-telemetry-row" id="btTelemetryRow" style="display: none; margin: 0.75rem 0 0.5rem 0; padding: 0.65rem 0.85rem; background: rgba(15, 23, 42, 0.7); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08); align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
+                            <!-- Battery Gauge -->
+                            <div style="display: flex; align-items: center; gap: 0.6rem; flex: 1; min-width: 140px;">
+                                <span id="btBatteryIcon" style="font-size: 1.35rem;">🔋</span>
+                                <div style="flex: 1;">
+                                    <div style="display: flex; justify-content: space-between; font-size: 0.75rem; margin-bottom: 3px;">
+                                        <span style="color: var(--text-muted);">耳麥剩餘電量</span>
+                                        <strong id="btBatteryText" style="color: #10b981;">--%</strong>
+                                    </div>
+                                    <div style="height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden;">
+                                        <div id="btBatteryBar" style="height: 100%; width: 0%; background: #10b981; transition: width 0.4s ease, background-color 0.4s ease;"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Signal Strength -->
+                            <div style="display: flex; align-items: center; gap: 0.6rem; flex: 1; min-width: 140px; border-left: 1px solid rgba(255, 255, 255, 0.1); padding-left: 0.75rem;">
+                                <span id="btSignalIcon" style="font-size: 1.35rem;">📶</span>
+                                <div style="flex: 1;">
+                                    <div style="display: flex; justify-content: space-between; font-size: 0.75rem; margin-bottom: 3px;">
+                                        <span style="color: var(--text-muted);">訊號連線品質</span>
+                                        <strong id="btSignalText" style="color: #38bdf8;">--%</strong>
+                                    </div>
+                                    <div style="height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden;">
+                                        <div id="btSignalBar" style="height: 100%; width: 0%; background: #38bdf8; transition: width 0.4s ease;"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="action-row">
+                            <button class="btn-secondary" id="btnScanBT" onclick="handleScanBT()">
+                                <span>🔍</span> 掃描周圍耳麥 (Scan)
+                            </button>
+                            <button class="btn-secondary" id="btnConnectBT" onclick="handleConnectBT()">
+                                <span>🔗</span> 一鍵連線預設耳麥
+                            </button>
+                            <button class="btn-secondary" id="btnDisconnectBT" onclick="handleDisconnectBT()" style="color: #ef4444;">
+                                <span>🔌</span> 中斷連線
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Scan Results List -->
+                    <div class="form-group" id="scanResultsContainer" style="display: none;">
+                        <label>掃描到的藍牙裝置 (點擊進行配對與連線)：</label>
+                        <div id="scanList" style="max-height: 180px; overflow-y: auto;"></div>
+                    </div>
+
+                    <!-- Voice Record Action Box -->
+                    <div class="panel-header" style="margin-top: 0.5rem;">
+                        <h2 class="panel-title">
+                            <span>🎙️</span> 耳麥收音與雙語轉錄 (BT Voice to Bilingual)
+                        </h2>
+                    </div>
+
+                    <div class="voice-box">
+                        <div style="font-size: 0.85rem; color: var(--text-muted);">
+                            點擊按鈕後，請對著藍牙耳麥說話，系統將自動以 faster-whisper 進行語音識別並翻譯為英文：
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <label for="selectDuration" style="font-size: 0.85rem;">錄音秒數：</label>
+                            <select id="selectDuration" style="padding: 0.35rem 0.6rem;">
+                                <option value="5">5 秒 (簡短發話)</option>
+                                <option value="10" selected>10 秒 (推薦 /voice 10 標準)</option>
+                                <option value="15">15 秒 (完整長句敘述)</option>
+                                <option value="30">30 秒 (長段落演說)</option>
+                                <option value="60">60 秒 (超長完整錄音)</option>
+                            </select>
+                        </div>
+
+                        <!-- Waveform Visualizer -->
+                        <div class="waveform" id="waveAnim">
+                            <div class="wave-bar"></div>
+                            <div class="wave-bar"></div>
+                            <div class="wave-bar"></div>
+                            <div class="wave-bar"></div>
+                            <div class="wave-bar"></div>
+                        </div>
+
+                        <!-- Live Recording Progress & Countdown -->
+                        <div class="rec-progress-box" id="recProgressBox">
+                            <div class="rec-progress-header">
+                                <div class="rec-indicator">
+                                    <div class="rec-dot"></div>
+                                    <span id="recStatusTitle">RECORDING</span>
+                                </div>
+                                <div class="rec-timer-txt" id="recTimerText">10.0s</div>
+                            </div>
+                            <div class="rec-bar-track">
+                                <div class="rec-bar-fill" id="recBarFill"></div>
+                            </div>
+                        </div>
+
+                        <button class="btn-primary" id="btnRecordVoice" onclick="handleRecordBTVoice()" style="width: 100%; max-width: 320px; font-size: 1rem; padding: 0.75rem;">
+                            <span id="btnRecordIcon">🎙️</span>
+                            <span id="btnRecordText">開始耳麥錄音 (Record Voice)</span>
+                        </button>
+
+                        <!-- Pipeline Stepper Indicator -->
+                        <div class="pipeline-stepper" id="pipelineStepper" style="display: none; width: 100%; margin-top: 0.75rem; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 0.75rem; flex-direction: column; gap: 0.45rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; color: var(--text-muted); border-bottom: 1px solid rgba(255, 255, 255, 0.06); padding-bottom: 0.4rem;">
+                                <span>⚡ 雙語語音處理管線進度 (Pipeline Status)</span>
+                                <span id="stepperElapsedText" style="color: #38bdf8; font-family: monospace; font-weight: 600;">總耗時: 0.0s</span>
+                            </div>
+                            
+                            <!-- Step 1: Record -->
+                            <div class="step-item" id="stepItemRec" style="display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; padding: 0.3rem 0.5rem; border-radius: 4px; background: rgba(255, 255, 255, 0.02);">
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span id="stepIconRec">⚪</span>
+                                    <span>① 藍牙耳麥收音 (Mic Capture)</span>
+                                </div>
+                                <span id="stepTagRec" style="font-size: 0.72rem; color: var(--text-muted);">等待中</span>
+                            </div>
+
+                            <!-- Step 2: Whisper STT -->
+                            <div class="step-item" id="stepItemStt" style="display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; padding: 0.3rem 0.5rem; border-radius: 4px; background: rgba(255, 255, 255, 0.02);">
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span id="stepIconStt">⚪</span>
+                                    <span>② faster-whisper 繁中轉錄 (STT)</span>
+                                </div>
+                                <span id="stepTagStt" style="font-size: 0.72rem; color: var(--text-muted);">等待中</span>
+                            </div>
+
+                            <!-- Step 3: Qwen Translation -->
+                            <div class="step-item" id="stepItemTr" style="display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; padding: 0.3rem 0.5rem; border-radius: 4px; background: rgba(255, 255, 255, 0.02);">
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span id="stepIconTr">⚪</span>
+                                    <span>③ Qwen 本地大模型英文口譯 (LLM)</span>
+                                </div>
+                                <span id="stepTagTr" style="font-size: 0.72rem; color: var(--text-muted);">等待中</span>
+                            </div>
+
+                            <!-- Step 4: Ready -->
+                            <div class="step-item" id="stepItemDone" style="display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; padding: 0.3rem 0.5rem; border-radius: 4px; background: rgba(255, 255, 255, 0.02);">
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span id="stepIconDone">⚪</span>
+                                    <span>④ 雙語卡片就緒 & 可點擊試聽 (Ready)</span>
+                                </div>
+                                <span id="stepTagDone" style="font-size: 0.72rem; color: var(--text-muted);">等待中</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Right Column: Bilingual Results, Audio Playback & TTS Synthesis Studio -->
+                <section class="panel">
+                    <div class="panel-header">
+                        <h2 class="panel-title">
+                            <span>🌐</span> 中英雙語對照卡與音訊回放
+                        </h2>
+                    </div>
+
+                    <!-- Audio Playback Inspection Card -->
+                    <div class="playback-box" id="playbackBox">
+                        <div class="playback-header">
+                            <span>🎧 耳麥錄音原音回放 (Audio Playback)</span>
+                            <span id="audioStatusBadge" style="font-size: 0.75rem; color: #10b981; font-weight: normal;">● 錄音就緒可試聽</span>
+                        </div>
+                        <audio id="voiceAudioPlayer" controls preload="auto"></audio>
+                        <div style="font-size: 0.75rem; color: var(--text-muted); display: flex; justify-content: space-between;">
+                            <span>錄音檔由 PipeWire 擷取自藍牙耳麥麥克風</span>
+                            <span id="audioHintBadge"></span>
+                        </div>
+                    </div>
+
+                    <!-- Hidden Audio for TTS -->
+                    <audio id="browserAudioPlayer" style="display: none;"></audio>
+
+                    <!-- Results Output -->
+                    <div class="bilingual-card" id="bilingualCard">
+                        <div class="card-row">
+                            <span class="card-row-title">🇹🇼 語音轉錄 (Whisper STT 繁體中文)</span>
+                            <div class="card-row-content" id="txtTranscribed">
+                                尚未進行語音辨識。請點擊左側「開始耳麥錄音」說話。
+                            </div>
+                        </div>
+
+                        <div class="card-row">
+                            <span class="card-row-title">🇺🇸 即時道地英文 (English Translation)</span>
+                            <div class="card-row-content" id="txtTranslated">
+                                Awaiting speech input...
+                            </div>
+                        </div>
+
+                        <div class="action-row" id="ttsActionRow" style="display: none;">
+                            <button class="btn-secondary" onclick="playCurrentTTS(true)">
+                                <span>🔊</span> 透過耳麥喇叭朗讀 (Headset Play)
+                            </button>
+                            <button class="btn-secondary" onclick="playCurrentTTS(false)">
+                                <span>📱</span> 手機/瀏覽器播放 (Browser Play)
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Manual Text Translate & TTS Box -->
+                    <div class="panel-header" style="margin-top: 1rem;">
+                        <h2 class="panel-title">
+                            <span>✍️</span> 手動文字即時翻譯與語音合成
+                        </h2>
+                    </div>
+
+                    <div class="form-group">
+                        <textarea id="txtManualInput" placeholder="輸入你想翻譯或發音的中英文句子..."></textarea>
+                    </div>
+
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <button class="btn-primary" onclick="handleManualTranslate('zh2en')">
+                            <span>🇺🇸</span> 繁中 ➔ 英文翻譯
+                        </button>
+                        <button class="btn-primary" onclick="handleManualTranslate('en2zh')" style="background: linear-gradient(135deg, #059669, #0d9488);">
+                            <span>🇹🇼</span> 英文 ➔ 繁中翻譯
+                        </button>
+                        <button class="btn-secondary" onclick="handleManualTTS()">
+                            <span>🔊</span> 合成語音並在耳麥朗讀 (TTS)
+                        </button>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <!-- Tab 2: LLM Arena & Code Review -->
+        <div class="tab-content" id="tabArena">
+            <div class="grid-2col">
+                <section class="panel">
+                    <div class="panel-header">
+                        <h2 class="panel-title">
+                            <span>💬</span> 提問與程式碼審查 (Prompt & Code)
+                        </h2>
+                    </div>
+                    <div class="form-group">
+                        <label for="selectModel">選擇模型 (Select Model)</label>
+                        <select id="selectModel">
+                            <option value="qwen2.5-coder:7b" selected>qwen2.5-coder:7b (推薦代碼審查)</option>
+                            <option value="deepseek-r1:7b">deepseek-r1:7b (深度思考推理)</option>
+                            <option value="llama3.2:3b">llama3.2:3b (極速輕量回應)</option>
+                            <option value="codellama:7b">codellama:7b</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="txtPrompt">問題 / 提示詞 (Instructions)</label>
+                        <textarea id="txtPrompt" placeholder="在這裡輸入你想詢問的技術問題或代碼分析指示..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="txtCode">原始程式碼 (Source Code)</label>
+                        <textarea id="txtCode" style="min-height: 160px; font-family: monospace;" placeholder="# 在這裡貼上欲審查的 Python / C 程式碼..."></textarea>
+                    </div>
+                    <button class="btn-primary" id="btnSubmit" onclick="submitTask()">
+                        <span>🚀 送入 Redis 佇列並開始推論</span>
+                    </button>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-header">
+                        <h2 class="panel-title">
+                            <span>⚡</span> 推論結果與狀態 (Inference & Output)
+                        </h2>
+                        <button class="btn-secondary" id="btnCopy" onclick="copyResponse()" style="display: none;">複製內容</button>
+                    </div>
+                    <div id="markdownOutput" style="min-height: 200px; max-height: 520px; overflow-y: auto; background: #0b1120; padding: 1rem; border-radius: 8px;">
+                        等待提交任務...
+                    </div>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <!-- Hidden Audio Player for Browser Playback -->
+    <audio id="browserAudioPlayer" style="display: none;"></audio>
+
+    <script>
+        // Main Tab Switcher
+        function switchMainTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+            if (tab === 'voice') {
+                document.getElementById('tabBtnVoice').classList.add('active');
+                document.getElementById('tabVoice').classList.add('active');
+                fetchBTStatus();
+            } else {
+                document.getElementById('tabBtnArena').classList.add('active');
+                document.getElementById('tabArena').classList.add('active');
+            }
+        }
+
+        // Toast Notification System
+        function showToast(msg) {
+            let toast = document.getElementById('globalToast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'globalToast';
+                toast.className = 'bt-toast';
+                document.body.appendChild(toast);
+            }
+            toast.innerText = msg;
+            toast.classList.add('show');
+            clearTimeout(window._toastTimeout);
+            window._toastTimeout = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3500);
+        }
+
+        // Bluetooth Management with Reactive Auto-Refresh
+        let lastBtStateHash = "";
+        let isBtFirstLoad = true;
+
+        async function fetchBTStatus() {
+            try {
+                const res = await fetch('/api/bt/status');
+                if (!res.ok) return;
+                const data = await res.json();
+                const badge = document.getElementById('btStatusBadge');
+                const name = document.getElementById('btDeviceName');
+                const mac = document.getElementById('btDeviceMac');
+                const telemRow = document.getElementById('btTelemetryRow');
+                const batText = document.getElementById('btBatteryText');
+                const batBar = document.getElementById('btBatteryBar');
+                const batIcon = document.getElementById('btBatteryIcon');
+                const sigText = document.getElementById('btSignalText');
+                const sigBar = document.getElementById('btSignalBar');
+                const sigIcon = document.getElementById('btSignalIcon');
+                const pillStatus = document.getElementById('pillBtStatus');
+                const pillText = document.getElementById('pillBtText');
+                const pillIcon = document.getElementById('pillBtIcon');
+
+                // Auto-detect Bluetooth device changes and refresh
+                if (!isBtFirstLoad && data.state_hash && data.state_hash !== lastBtStateHash) {
+                    console.log("[BT Reactive] Bluetooth state changed:", data.state_hash);
+                    if (data.connected) {
+                        showToast(`🎧 藍牙耳麥已連線: ${data.connected_name || '耳麥'} (電量 ${data.battery_level !== null ? data.battery_level + '%' : '未知'})`);
+                    } else {
+                        showToast('⚠️ 藍牙耳麥已中斷連線');
+                    }
+                }
+                lastBtStateHash = data.state_hash || "";
+                isBtFirstLoad = false;
+
+                if (data.connected && data.connected_mac) {
+                    badge.className = 'bt-badge connected';
+                    badge.innerText = 'CONNECTED';
+                    name.innerText = data.connected_name || '已連線藍牙耳麥';
+                    mac.innerText = data.connected_mac;
+
+                    // Telemetry: Battery & Signal
+                    if (telemRow) telemRow.style.display = 'flex';
+                    if (data.battery_level !== null && data.battery_level !== undefined) {
+                        const bVal = Math.min(100, Math.max(0, data.battery_level));
+                        batText.innerText = `${bVal}%`;
+                        batBar.style.width = `${bVal}%`;
+                        if (bVal > 50) {
+                            batBar.style.backgroundColor = '#10b981';
+                            batText.style.color = '#10b981';
+                            batIcon.innerText = '🔋';
+                        } else if (bVal >= 20) {
+                            batBar.style.backgroundColor = '#f59e0b';
+                            batText.style.color = '#f59e0b';
+                            batIcon.innerText = '🔋';
+                        } else {
+                            batBar.style.backgroundColor = '#ef4444';
+                            batText.style.color = '#ef4444';
+                            batIcon.innerText = '🪫';
+                        }
+                    } else {
+                        batText.innerText = '未回報';
+                        batBar.style.width = '0%';
+                        batIcon.innerText = '🔋';
+                    }
+
+                    if (data.signal_level_pct !== null && data.signal_level_pct !== undefined) {
+                        const sVal = Math.min(100, Math.max(0, data.signal_level_pct));
+                        const lq = data.link_quality !== null ? `${data.link_quality}/255` : '滿格';
+                        sigText.innerText = `${sVal}% (${lq})`;
+                        sigBar.style.width = `${sVal}%`;
+                        sigIcon.innerText = '📶';
+                    } else {
+                        sigText.innerText = '良好 (正常)';
+                        sigBar.style.width = '100%';
+                        sigIcon.innerText = '📶';
+                    }
+
+                    // Top Bar Pill
+                    if (pillStatus && pillText) {
+                        pillStatus.style.display = 'flex';
+                        const batStr = data.battery_level !== null ? ` · 🔋${data.battery_level}%` : '';
+                        const sigStr = data.signal_level_pct !== null ? ` · 📶${data.signal_level_pct}%` : '';
+                        pillText.innerText = `${data.connected_name || '耳麥'}${batStr}${sigStr}`;
+                    }
+                } else {
+                    badge.className = 'bt-badge disconnected';
+                    badge.innerText = 'DISCONNECTED';
+                    name.innerText = data.default_name ? `預設設備: ${data.default_name}` : '未連線耳麥';
+                    mac.innerText = data.default_mac || '等待連線';
+                    if (telemRow) telemRow.style.display = 'none';
+                    if (pillStatus) pillStatus.style.display = 'none';
+                }
+            } catch (e) {
+                console.warn("BT status error:", e);
+            }
+        }
+
+        async function handleScanBT() {
+            const btn = document.getElementById('btnScanBT');
+            btn.disabled = true;
+            btn.innerHTML = `<span class="spinner"></span> 掃描中 (8s)...`;
+
+            try {
+                const res = await fetch('/api/bt/scan', { method: 'POST' });
+                const data = await res.json();
+                const container = document.getElementById('scanResultsContainer');
+                const list = document.getElementById('scanList');
+                list.innerHTML = '';
+
+                if (data.devices && data.devices.length > 0) {
+                    data.devices.forEach(dev => {
+                        const item = document.createElement('div');
+                        item.className = 'bt-device-item';
+                        item.innerHTML = `
+                            <div class="bt-device-info">
+                                <strong>${dev.name || '未知耳麥'}</strong>
+                                <span>${dev.mac}</span>
+                            </div>
+                            <button class="btn-secondary" onclick="handlePairBT('${dev.mac}')">
+                                一鍵配對連線
+                            </button>
+                        `;
+                        list.appendChild(item);
+                    });
+                    container.style.display = 'flex';
+                } else {
+                    list.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem; padding: 0.5rem;">未掃描到處於配對模式的設備，請將耳機重開並進入配對狀態。</div>';
+                    container.style.display = 'flex';
+                }
+            } catch (err) {
+                alert("掃描失敗: " + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `<span>🔍</span> 掃描周圍耳麥 (Scan)`;
+            }
+        }
+
+        async function handlePairBT(mac) {
+            try {
+                const res = await fetch('/api/bt/pair', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target: mac })
+                });
+                const data = await res.json();
+                alert(data.message || "配對完成！");
+                fetchBTStatus();
+            } catch (e) {
+                alert("配對失敗: " + e.message);
+            }
+        }
+
+        async function handleConnectBT() {
+            const btn = document.getElementById('btnConnectBT');
+            btn.disabled = true;
+            btn.innerHTML = `<span class="spinner"></span> 連線中...`;
+            try {
+                const res = await fetch('/api/bt/connect', { method: 'POST' });
+                const data = await res.json();
+                alert(data.message || "連線完成！");
+                fetchBTStatus();
+            } catch (e) {
+                alert("連線失敗: " + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `<span>🔗</span> 一鍵連線預設耳麥`;
+            }
+        }
+
+        async function handleDisconnectBT() {
+            if (!confirm("確定要中斷目前的藍牙耳麥連線嗎？")) return;
+            try {
+                const res = await fetch('/api/bt/disconnect', { method: 'POST' });
+                const data = await res.json();
+                alert(data.message || "已中斷連線");
+                fetchBTStatus();
+            } catch (e) {
+                alert("中斷失敗: " + e.message);
+            }
+        }
+
+        // Voice Recording & Bilingual Translation
+        // Voice Recording & Bilingual Translation with Stepper Tracking
+        let currentAudioUrl = "";
+        let recCountdownInterval = null;
+        let stepperStopwatchInterval = null;
+
+        function setStepState(step, icon, tag, isHighlight = false, color = "var(--text-muted)") {
+            const iconEl = document.getElementById(`stepIcon${step}`);
+            const tagEl = document.getElementById(`stepTag${step}`);
+            const itemEl = document.getElementById(`stepItem${step}`);
+            if (iconEl) iconEl.innerHTML = icon;
+            if (tagEl) {
+                tagEl.innerHTML = tag;
+                tagEl.style.color = color;
+            }
+            if (itemEl) {
+                itemEl.style.background = isHighlight ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)';
+            }
+        }
+
+        async function handleRecordBTVoice() {
+            const duration = parseInt(document.getElementById('selectDuration').value) || 5;
+            const btn = document.getElementById('btnRecordVoice');
+            const wave = document.getElementById('waveAnim');
+            const progressBox = document.getElementById('recProgressBox');
+            const timerTxt = document.getElementById('recTimerText');
+            const statusTitle = document.getElementById('recStatusTitle');
+            const barFill = document.getElementById('recBarFill');
+            const stepper = document.getElementById('pipelineStepper');
+            const stepperElapsed = document.getElementById('stepperElapsedText');
+
+            // Reset & Open Stepper
+            stepper.style.display = 'flex';
+            const pipelineStartTime = Date.now();
+            if (stepperStopwatchInterval) clearInterval(stepperStopwatchInterval);
+            stepperStopwatchInterval = setInterval(() => {
+                const sec = ((Date.now() - pipelineStartTime) / 1000).toFixed(1);
+                stepperElapsed.innerText = `總耗時: ${sec}s`;
+            }, 100);
+
+            setStepState('Rec', '🔴', `錄音中 (${duration}s)`, true, '#ef4444');
+            setStepState('Stt', '⚪', '等待錄音結束', false, 'var(--text-muted)');
+            setStepState('Tr', '⚪', '等待轉錄', false, 'var(--text-muted)');
+            setStepState('Done', '⚪', '待命', false, 'var(--text-muted)');
+
+            // 1. Enter Recording State
+            btn.disabled = true;
+            wave.style.display = 'flex';
+            progressBox.style.display = 'flex';
+            statusTitle.innerText = "RECORDING IN PROGRESS";
+            statusTitle.style.color = "#ef4444";
+            btn.innerHTML = `<span class="spinner"></span> 🔴 ① 錄音中 (${duration}s)... 請對耳麥說話`;
+
+            const startTime = Date.now();
+            const totalDurationMs = duration * 1000;
+
+            if (recCountdownInterval) clearInterval(recCountdownInterval);
+            recCountdownInterval = setInterval(() => {
+                const elapsed = Date.now() - startTime;
+                const remaining = Math.max(0, (totalDurationMs - elapsed) / 1000);
+                timerTxt.innerText = remaining.toFixed(1) + "s";
+                const progressPct = Math.min(100, (elapsed / totalDurationMs) * 100);
+                barFill.style.width = progressPct + "%";
+
+                if (elapsed >= totalDurationMs) {
+                    clearInterval(recCountdownInterval);
+                    timerTxt.innerText = "0.0s";
+                }
+            }, 100);
+
+            try {
+                // Step 1: Record from mic
+                const recRes = await fetch('/api/voice/record', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ duration_sec: duration })
+                });
+
+                if (!recRes.ok) {
+                    const errData = await recRes.json().catch(() => ({}));
+                    setStepState('Rec', '❌', '錄音失敗', false, '#ef4444');
+                    throw new Error(errData.detail || `HTTP ${recRes.status}`);
+                }
+
+                const recData = await recRes.json();
+                const recDoneTime = ((Date.now() - pipelineStartTime) / 1000).toFixed(1);
+                setStepState('Rec', '✅', `已完成 (${recDoneTime}s)`, false, '#10b981');
+
+                // Immediately load and show the Audio Playback Player!
+                if (recData.audio_url) {
+                    const playbackBox = document.getElementById('playbackBox');
+                    const player = document.getElementById('voiceAudioPlayer');
+                    const hintBadge = document.getElementById('audioHintBadge');
+                    playbackBox.style.display = 'flex';
+                    player.src = recData.audio_url + '?t=' + Date.now();
+                    player.load();
+                    hintBadge.innerText = "▶ 音訊就緒可試聽";
+                }
+
+                // Step 2: Whisper STT
+                const sttStartTime = Date.now();
+                setStepState('Stt', '<span class="spinner"></span>', '辨識中 (ARM NEON)...', true, '#06b6d4');
+                statusTitle.innerText = "WHISPER AI TRANSCRIBING";
+                statusTitle.style.color = "#06b6d4";
+                btn.innerHTML = `<span class="spinner"></span> ⚡ ② faster-whisper 語音轉錄中...`;
+                document.getElementById('txtTranscribed').innerText = "⏳ 正在辨識耳麥語音 (faster-whisper)...";
+
+                const sttRes = await fetch('/api/voice/transcribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ audio_id: recData.audio_id })
+                });
+
+                if (!sttRes.ok) {
+                    const errData = await sttRes.json().catch(() => ({}));
+                    setStepState('Stt', '❌', '轉錄異常', false, '#ef4444');
+                    throw new Error(errData.detail || `語音轉錄異常 HTTP ${sttRes.status}`);
+                }
+
+                const sttData = await sttRes.json();
+                const sttElapsed = ((Date.now() - sttStartTime) / 1000).toFixed(1);
+
+                if (sttData.status === 'success' && sttData.transcribed_text) {
+                    const zhText = sttData.transcribed_text.trim();
+                    setStepState('Stt', '✅', `辨識成功 (${sttElapsed}s)`, false, '#10b981');
+                    document.getElementById('txtTranscribed').innerText = zhText;
+                    document.getElementById('audioHintBadge').innerText = "✅ 語音轉錄完成";
+                    currentAudioUrl = recData.audio_url || "";
+                    document.getElementById('ttsActionRow').style.display = 'flex';
+
+                    // Step 3: LLM Translation
+                    const trStartTime = Date.now();
+                    setStepState('Tr', '<span class="spinner"></span>', '口譯中 (Qwen 3B)...', true, '#10b981');
+                    statusTitle.innerText = "QWEN AI TRANSLATING";
+                    statusTitle.style.color = "#10b981";
+                    btn.innerHTML = `<span class="spinner"></span> 🌐 ③ Qwen 本地大模型英文口譯中...`;
+                    document.getElementById('txtTranslated').innerText = "⏳ 正在生成道地英文對照...";
+
+                    try {
+                        const trRes = await fetch('/api/voice/translate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ text: zhText, direction: 'zh2en' })
+                        });
+                        const trData = await trRes.json();
+                        const trElapsed = ((Date.now() - trStartTime) / 1000).toFixed(1);
+                        setStepState('Tr', '✅', `口譯完成 (${trElapsed}s)`, false, '#10b981');
+                        document.getElementById('txtTranslated').innerText = trData.translated_text || "(無翻譯結果)";
+                        document.getElementById('audioHintBadge').innerText = "✅ 雙語對照全部就緒";
+
+                        // Step 4: Finished!
+                        const totalTime = ((Date.now() - pipelineStartTime) / 1000).toFixed(1);
+                        setStepState('Done', '🎯', `全部完成 (總耗時 ${totalTime}s)`, true, '#10b981');
+                    } catch (trErr) {
+                        setStepState('Tr', '⚠️', '逾時 (可手動翻譯)', false, '#f59e0b');
+                        document.getElementById('txtTranslated').innerText = "[翻譯逾時，請點擊下方手動翻譯]";
+                    }
+                } else {
+                    setStepState('Stt', '⚠️', '未偵測到清晰語音', false, '#f59e0b');
+                    setStepState('Tr', '⚪', '跳過口譯', false, 'var(--text-muted)');
+                    setStepState('Done', '⚠️', '結束 (可試聽原音)', false, '#f59e0b');
+                    document.getElementById('txtTranscribed').innerText = sttData.message || "未能辨識出清晰人聲語音。您可點擊上方播放器試聽耳麥是否有錄到聲音。";
+                    document.getElementById('txtTranslated').innerText = "No clear speech detected.";
+                    document.getElementById('audioHintBadge').innerText = "⚠️ 未辨識到清晰文字";
+                }
+            } catch (e) {
+                alert("耳麥錄音或處理失敗: " + e.message + "\n請確認藍牙耳麥已連線且麥克風開啟。");
+            } finally {
+                if (recCountdownInterval) clearInterval(recCountdownInterval);
+                if (stepperStopwatchInterval) clearInterval(stepperStopwatchInterval);
+                btn.disabled = false;
+                wave.style.display = 'none';
+                progressBox.style.display = 'none';
+                btn.innerHTML = `<span>🎙️</span> 開始耳麥錄音 (Record Voice)`;
+            }
+        }
+
+        async function playCurrentTTS(onSpeaker) {
+            const text = document.getElementById('txtTranscribed').innerText;
+            if (!text || text.includes("尚未進行")) return;
+
+            try {
+                const res = await fetch('/api/voice/tts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text, play_on_speaker: onSpeaker })
+                });
+                const data = await res.json();
+                if (!onSpeaker && data.audio_url) {
+                    const audio = document.getElementById('browserAudioPlayer');
+                    audio.src = data.audio_url;
+                    audio.play();
+                }
+            } catch (e) {
+                alert("TTS 播放失敗: " + e.message);
+            }
+        }
+
+        // Manual Text Translate & TTS
+        async function handleManualTranslate(direction) {
+            const input = document.getElementById('txtManualInput').value.trim();
+            if (!input) {
+                alert("請先輸入欲翻譯之內容！");
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/voice/translate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: input, direction: direction })
+                });
+                const data = await res.json();
+                document.getElementById('txtManualInput').value = `${input}\n\n【翻譯結果】:\n${data.translated_text}`;
+            } catch (e) {
+                alert("翻譯失敗: " + e.message);
+            }
+        }
+
+        async function handleManualTTS() {
+            const input = document.getElementById('txtManualInput').value.trim();
+            if (!input) {
+                alert("請先輸入欲朗讀之文字！");
+                return;
+            }
+            try {
+                const res = await fetch('/api/voice/tts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: input, play_on_speaker: true })
+                });
+                const data = await res.json();
+                alert("🔊 正在藍牙耳麥播放語音朗讀！");
+            } catch (e) {
+                alert("TTS 播放失敗: " + e.message);
+            }
+        }
+
+        // Network Switcher
+        let currentNetMode = "sta";
+
+        async function fetchNetworkStatus() {
+            try {
+                const res = await fetch('/api/network/status');
+                if (!res.ok) return;
+                const data = await res.json();
+                currentNetMode = data.mode;
+
+                const badge = document.getElementById('netBadge');
+                const title = document.getElementById('netModeTitle');
+                const details = document.getElementById('netModeDetails');
+                const btnText = document.getElementById('btnNetSwitchText');
+                const btnIcon = document.getElementById('btnNetSwitchIcon');
+
+                if (currentNetMode === 'ap') {
+                    badge.className = 'net-badge ap';
+                    badge.innerText = 'AP 獨立熱點';
+                    title.innerText = '戶外 / 飛航獨立熱點模式 (Offline Edge)';
+                    details.innerText = `熱點 IP: ${data.current_ip || '10.20.0.1'} | SSID: ${data.hotspot_ssid || 'raspi543_AI'}`;
+                    btnText.innerText = '切換回家用 Wi-Fi';
+                    btnIcon.innerText = '🏠';
+                } else {
+                    badge.className = 'net-badge sta';
+                    badge.innerText = 'STA 家用連線';
+                    title.innerText = '家用 Wi-Fi 模式 (Online Gateway)';
+                    details.innerText = `區域 IP: ${data.current_ip || '192.168.50.228'} | 連線: ${data.active_connection}`;
+                    btnText.innerText = '切換為方案 A 熱點 (raspi543_AI)';
+                    btnIcon.innerText = '📡';
+                }
+            } catch (e) {
+                console.warn("Network status fetch failed:", e);
+            }
+        }
+
+        // Keep-alive heartbeat for AP Watchdog
+        setInterval(() => {
+            if (currentNetMode === 'ap') {
+                fetch('/api/network/keepalive', { method: 'POST' }).catch(() => {});
+            }
+        }, 15000);
+
+        // Continuous Web Keepalive: Signal Watchdog every 30s to maintain AP session while user is active
+        setInterval(async () => {
+            try {
+                await fetch('/api/network/keepalive', { method: 'POST' });
+            } catch (e) {
+                // Ignore transient network errors
+            }
+        }, 30000);
+
+        async function handleNetworkToggle() {
+            const targetMode = currentNetMode === 'sta' ? 'ap' : 'sta';
+            const btn = document.getElementById('btnNetSwitch');
+
+            let confirmMsg = targetMode === 'ap'
+                ? "即將切換至【獨立熱點模式 (10.20.0.1)】！\n\n🛡️【防失聯看門狗已啟動】\n• 系統配有 180 秒故障保險：若 3 分鐘內未有手機連線，樹莓派將自動回退連回家中 Wi-Fi，絕不失聯！\n\n切換後操作：\n1. 手機連線 Wi-Fi：raspi543_AI (密碼 raspi543)\n2. 瀏覽器造訪：http://10.20.0.1 (免打 :8000)\n\n確定切換嗎？"
+                : "即將切換回【家用 Wi-Fi 模式 (192.168.50.228)】！\n\n確定切換嗎？";
+
+            if (!confirm(confirmMsg)) return;
+
+            btn.disabled = true;
+            btn.innerHTML = `<span class="spinner"></span> 🛡️ 防失聯切換中...`;
+
+            try {
+                const res = await fetch('/api/network/switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target_mode: targetMode })
+                });
+                const data = await res.json();
+                alert(`✅ ${data.message || '切換指令已接收！'}\n\n• 若切至熱點：請連線 raspi543_AI，造訪 http://10.20.0.1\n• 🛡️ 若 3 分鐘內未連線，系統將自動復歸家用 Wi-Fi！`);
+            } catch (err) {
+                alert(`📡 網路指令已送出！\n\n• 若切至熱點：請連線 raspi543_AI，造訪 http://10.20.0.1\n• 🛡️ 若 3 分鐘內未連線，系統將自動復歸家用 Wi-Fi！`);
+            } finally {
+                setTimeout(fetchNetworkStatus, 3000);
+            }
+        }
+
+        // Code Arena
+        async function submitTask() {
+            const prompt = document.getElementById('txtPrompt').value;
+            const code = document.getElementById('txtCode').value;
+            const model = document.getElementById('selectModel').value;
+            const btn = document.getElementById('btnSubmit');
+
+            btn.disabled = true;
+            btn.innerHTML = `<span class="spinner"></span> 任務推論中...`;
+
+            try {
+                const res = await fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: prompt, code: code, model: model })
+                });
+                const data = await res.json();
+                pollArenaTask(data.task_id);
+            } catch (e) {
+                alert("提交失敗: " + e.message);
+                btn.disabled = false;
+                btn.innerHTML = `<span>🚀 送入 Redis 佇列並開始推論</span>`;
+            }
+        }
+
+        async function pollArenaTask(taskId) {
+            try {
+                const res = await fetch(`/api/tasks/${taskId}`);
+                const data = await res.json();
+                if (data.status === 'finished') {
+                    const out = document.getElementById('markdownOutput');
+                    const text = data.result ? (data.result.result || data.result.response || "") : "";
+                    out.innerHTML = window.marked ? marked.parse(text) : text;
+                    document.getElementById('btnCopy').style.display = 'block';
+                    const btn = document.getElementById('btnSubmit');
+                    btn.disabled = false;
+                    btn.innerHTML = `<span>🚀 送入 Redis 佇列並開始推論</span>`;
+                } else if (data.status === 'failed') {
+                    alert("任務失敗: " + data.error);
+                } else {
+                    setTimeout(() => pollArenaTask(taskId), 2500);
+                }
+            } catch (e) {
+                console.error("Poll task error:", e);
+            }
+        }
+
+        function copyResponse() {
+            const text = document.getElementById('markdownOutput').innerText;
+            navigator.clipboard.writeText(text).then(() => alert("已複製！"));
+        }
+
+        // Telemetry
+        async function fetchTelemetry() {
+            try {
+                const res = await fetch('/health');
+                const data = await res.json();
+                if (data.cpu_temperature_c) {
+                    document.getElementById('valTemp').innerText = `${data.cpu_temperature_c.toFixed(1)}°C`;
+                }
+                if (data.ram_available_mb && data.ram_total_mb) {
+                    document.getElementById('valRam').innerText = `${(data.ram_available_mb / 1024).toFixed(1)} / ${(data.ram_total_mb / 1024).toFixed(1)} GB`;
+                }
+            } catch (e) {}
+        }
+
+        // Init
+        fetchTelemetry();
+        fetchNetworkStatus();
+        fetchBTStatus();
+        setInterval(fetchTelemetry, 10000);
+        setInterval(fetchNetworkStatus, 10000);
+        setInterval(fetchBTStatus, 2500); // Reactive auto-refresh when BT state changes
+    </script>
+</body>
+</html>

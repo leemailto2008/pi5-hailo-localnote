@@ -174,9 +174,47 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "   - `/bt_connect` / `/bt_disconnect`: 手動連線或中斷\n"
         "   - *自動重連通知*: 耳麥開機靠近時自動秒連並透過 Telegram 即時回報！\n"
         "7. **硬體監控 (Hardware Telemetry):**\n"
-        "   - `/status`: 查看 CPU 溫度、可用 RAM 與健康狀態"
+        "   - `/status`: 查看 CPU 溫度、可用 RAM 與健康狀態\n"
+        "8. **網路模式切換 (Network Switch - 離線野外/省電隨選):**\n"
+        "   - `/hotspot_a` (預設熱點方案): 切換為獨立離線熱點 `raspi543_AI` (IP: 10.20.0.1，省電/野外模式，附 180 秒防失聯看門狗)\n"
+        "   - `/ap` 或 `/hotspot`: 同上快速別名"
     )
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+
+
+async def hotspot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /hotspot_a, /hotspot or /ap: switch Pi 5 to standalone AP mode (10.20.0.1)."""
+    user = update.effective_user
+    if not is_authorized(user.id, user.username or ""):
+        return
+
+    msg = (
+        "📡 *【指令確認：切換為獨立熱點預設方案 A (/hotspot_a)】*\n\n"
+        "• *熱點名稱 (SSID):* `raspi543_AI`\n"
+        "• *連線密碼:* `raspi543`\n"
+        "• *本地閘道網址:* http://10.20.0.1 (Port 80)\n"
+        "• *省電策略:* 無連線時關閉高耗能組件，180 秒自動回滾\n\n"
+        "🛡️ *【防失聯自動復歸看門狗已啟動】*\n"
+        "• 系統已配置 180 秒故障保險 (Fail-Safe)。\n"
+        "• 若 3 分鐘內未有手機連線或無操作，樹莓派將**自動安全切回原家用 Wi-Fi**並重連 Telegram，絕不失聯變磚！\n\n"
+        "請拿出手機搜尋 Wi-Fi `raspi543_AI` (密碼 `raspi543`)，連線後造訪 http://10.20.0.1 即可開始離線使用！"
+    )
+    try:
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    except Exception:
+        await update.message.reply_text("📡 正在切換為獨立熱點 raspi543_AI (10.20.0.1)，已啟動防失聯看門狗...")
+
+    # Allow Telegram to safely flush message before network disconnects
+    await asyncio.sleep(2.0)
+
+    # Trigger safe switch to AP mode via Fail-Safe Hotspot Controller
+    try:
+        sys.path.insert(0, "/home/pi/code_dispatcher")
+        import hotspot_controller
+        hotspot_controller.switch_to_ap(timeout_sec=180)
+    except Exception as e:
+        logger.error(f"Failed to switch to hotspot: {e}")
+        subprocess.Popen(["sudo", "nmcli", "connection", "up", "Pi5-Hotspot"])
 
 
 async def plan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -678,6 +716,12 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     chat_id = user.id
     model = get_active_model(chat_id)
 
+    # Quick intent check: switch to hotspot
+    lower_text = user_text.lower()
+    if any(k in lower_text for k in ["切換熱點", "開熱點", "切到方案a", "切換方案a", "切換到方案a", "啟用熱點", "開啟熱點", "hotspot"]):
+        await hotspot_command(update, context)
+        return
+
     # Show typing action
     await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 
@@ -976,6 +1020,9 @@ def main():
     app.add_handler(CommandHandler("bt_pair", bt_pair_command))
     app.add_handler(CommandHandler("bt_connect", bt_connect_command))
     app.add_handler(CommandHandler("bt_disconnect", bt_disconnect_command))
+
+    # Register Network Switch handler
+    app.add_handler(CommandHandler(["hotspot", "ap", "hotspot_a"], hotspot_command))
 
     # Register message handlers
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))

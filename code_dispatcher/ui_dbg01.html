@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pi 5 LLM Arena & Code Gateway</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        :root {
+            --bg-base: #0f172a;
+            --bg-surface: #1e293b;
+            --bg-surface-elevated: #334155;
+            --border-color: #334155;
+            --border-focus: #3b82f6;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #38bdf8;
+            --accent-glow: rgba(56, 189, 248, 0.15);
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            line-height: 1.6;
+        }
+
+        header {
+            background-color: rgba(30, 41, 59, 0.85);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            padding: 0.85rem 1.5rem;
+        }
+
+        .header-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+
+        .logo-group {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .logo-badge {
+            background: linear-gradient(135deg, #0284c7, #38bdf8);
+            color: #fff;
+            font-weight: 700;
+            font-size: 0.85rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: 6px;
+            letter-spacing: 0.5px;
+        }
+
+        .logo-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .telemetry-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+
+        .stat-pill {
+            background-color: var(--bg-surface-elevated);
+            border: 1px solid var(--border-color);
+            border-radius: 9999px;
+            padding: 0.25rem 0.75rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .stat-pill strong {
+            color: var(--text-main);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--success);
+            box-shadow: 0 0 8px var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(0.9); }
+        }
+
+        main {
+            max-width: 1200px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 1.5rem;
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+
+        @media (max-width: 900px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel {
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.85rem;
+        }
+
+        .panel-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        select, input, textarea {
+            background-color: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            color: var(--text-main);
+            font-family: inherit;
+            font-size: 0.9rem;
+            padding: 0.65rem 0.85rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 110px;
+            font-family: inherit;
+        }
+
+        .code-textarea {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            background-color: #0b1120;
+            white-space: pre;
+        }
+
+        select:focus, input:focus, textarea:focus {
+            outline: none;
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .collapsible-header {
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: var(--bg-surface-elevated);
+            padding: 0.55rem 0.85rem;
+            border-radius: var(--radius-md);
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .collapsible-content {
+            display: none;
+            margin-top: 0.75rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .quick-prompts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+        }
+
+        .quick-btn {
+            background: var(--bg-surface-elevated);
+            border: 1px solid var(--border-color);
+            border-radius: 9999px;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            padding: 0.25rem 0.6rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .quick-btn:hover {
+            color: var(--accent);
+            border-color: var(--accent);
+            background-color: var(--accent-glow);
+        }
+
+        .btn-submit {
+            background: linear-gradient(135deg, #0284c7, #38bdf8);
+            border: none;
+            border-radius: var(--radius-md);
+            color: #fff;
+            font-size: 0.95rem;
+            font-weight: 600;
+            padding: 0.75rem 1.25rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+            box-shadow: 0 4px 12px rgba(2, 132, 199, 0.3);
+            transition: opacity 0.2s, transform 0.1s;
+        }
+
+        .btn-submit:hover:not(:disabled) {
+            opacity: 0.95;
+            transform: translateY(-1px);
+        }
+
+        .btn-submit:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Status & Results Panel */
+        .status-tracker {
+            background: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.85rem;
+            display: none;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .status-flow {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: relative;
+            margin: 0.5rem 0;
+        }
+
+        .flow-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.3rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            z-index: 1;
+        }
+
+        .flow-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background-color: var(--bg-surface-elevated);
+            border: 2px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            transition: all 0.3s;
+        }
+
+        .flow-step.active .flow-icon {
+            border-color: var(--accent);
+            background-color: var(--accent);
+            color: #fff;
+            box-shadow: 0 0 10px var(--accent);
+        }
+
+        .flow-step.completed .flow-icon {
+            border-color: var(--success);
+            background-color: var(--success);
+            color: #fff;
+        }
+
+        .response-container {
+            flex: 1;
+            overflow-y: auto;
+            max-height: 600px;
+            padding-right: 0.5rem;
+        }
+
+        .response-empty {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: var(--text-muted);
+            text-align: center;
+            padding: 3rem 1rem;
+            gap: 0.75rem;
+        }
+
+        .metrics-banner {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: var(--radius-md);
+            padding: 0.6rem 0.85rem;
+            font-size: 0.8rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--success);
+            display: none;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Markdown rendered styling */
+        .markdown-body {
+            font-size: 0.92rem;
+            color: #e2e8f0;
+            line-height: 1.7;
+        }
+
+        .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+            color: #fff;
+            margin-top: 1.25rem;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        .markdown-body h2 {
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.3rem;
+        }
+
+        .markdown-body p {
+            margin-bottom: 0.85rem;
+        }
+
+        .markdown-body ul, .markdown-body ol {
+            padding-left: 1.5rem;
+            margin-bottom: 0.85rem;
+        }
+
+        .markdown-body pre {
+            background-color: #0b1120;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            overflow-x: auto;
+            margin: 1rem 0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+        }
+
+        .markdown-body code {
+            font-family: 'JetBrains Mono', monospace;
+            background-color: rgba(51, 65, 85, 0.6);
+            padding: 0.15rem 0.35rem;
+            border-radius: 4px;
+            font-size: 0.85em;
+            color: #38bdf8;
+        }
+
+        .markdown-body pre code {
+            background-color: transparent;
+            padding: 0;
+            color: inherit;
+        }
+
+        .copy-btn {
+            background-color: var(--bg-surface-elevated);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            border-radius: 6px;
+            padding: 0.3rem 0.6rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            float: right;
+            margin-bottom: 0.5rem;
+        }
+
+        .copy-btn:hover {
+            color: var(--text-main);
+            border-color: var(--border-focus);
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-container">
+            <div class="logo-group">
+                <span class="logo-badge">Pi 5</span>
+                <span class="logo-title">LLM Arena & Code Gateway</span>
+            </div>
+            <div class="telemetry-bar">
+                <div class="stat-pill">
+                    <span class="status-dot" id="dotStatus"></span>
+                    <span id="serviceStatus">Online</span>
+                </div>
+                <div class="stat-pill">
+                    <span>Temp:</span> <strong id="valTemp">--.-°C</strong>
+                </div>
+                <div class="stat-pill">
+                    <span>RAM:</span> <strong id="valRam">-- / -- GB</strong>
+                </div>
+                <div class="stat-pill">
+                    <span>Queue:</span> <strong id="valQueue">0 jobs</strong>
+                </div>
+                <div class="stat-pill">
+                    <a href="/" style="color: #38bdf8; text-decoration: none; font-weight: 600;">🎧 BT Voice (首頁) ↗</a>
+                </div>
+                <div class="stat-pill">
+                    <a href="/docs" target="_blank" style="color: var(--accent); text-decoration: none;">API Docs ↗</a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <!-- Left Panel: Input & Settings -->
+        <section class="panel">
+            <div class="panel-header">
+                <h2 class="panel-title">
+                    <span>💬</span> 提問與程式碼審查 (Prompt & Code)
+                </h2>
+            </div>
+
+            <div class="form-group">
+                <label for="selectModel">選擇模型 (Select Model)</label>
+                <select id="selectModel">
+                    <option value="qwen2.5-coder:7b" selected>qwen2.5-coder:7b (推薦代碼審查)</option>
+                    <option value="deepseek-r1:7b">deepseek-r1:7b (深度思考推理)</option>
+                    <option value="llama3.2:3b">llama3.2:3b (極速輕量回應)</option>
+                    <option value="codellama:7b">codellama:7b</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>快速提問範例 (Quick Examples)</label>
+                <div class="quick-prompts">
+                    <button class="quick-btn" onclick="setPrompt('請詳細解釋 Python 中的 GIL (Global Interpreter Lock) 原理與繞過方法。')">什麼是 Python GIL？</button>
+                    <button class="quick-btn" onclick="setPrompt('請用 Python 寫一個具備 O(1) 時間複雜度的 LRU Cache 實作並加上註解。')">寫 LRU Cache</button>
+                    <button class="quick-btn" onclick="setPrompt('請用繁體中文解釋 Linux epoll 與 select 的本質區別。')">Linux epoll vs select</button>
+                    <button class="quick-btn" onclick="setPrompt('請詳細審查以下程式碼的安全性、時間複雜度與記憶體使用，並提供重構建議。', true)">代碼審查與重構</button>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="txtPrompt">問題 / 提示詞 (Question or Instructions)</label>
+                <textarea id="txtPrompt" placeholder="在這裡輸入你想詢問的技術問題，或是對附加程式碼的分析指示..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <div class="collapsible-header" onclick="toggleCodeSection()">
+                    <span>📄 附加程式碼檔案或片段 (可選，點擊展開)</span>
+                    <span id="codeToggleIcon">▼</span>
+                </div>
+                <div class="collapsible-content" id="codeSection" style="display: none;">
+                    <div style="display: flex; gap: 0.5rem;">
+                        <input type="text" id="txtFilename" placeholder="檔名 (例如: server.py)" value="snippet.py" style="flex: 2;">
+                        <select id="selectLanguage" style="flex: 1;">
+                            <option value="python">Python</option>
+                            <option value="javascript">JavaScript</option>
+                            <option value="c">C / C++</option>
+                            <option value="go">Go</option>
+                            <option value="sql">SQL</option>
+                            <option value="bash">Bash</option>
+                        </select>
+                    </div>
+                    <textarea id="txtCode" class="code-textarea" placeholder="貼上欲審查的程式碼片段..." style="min-height: 140px;"></textarea>
+                </div>
+            </div>
+
+            <div class="form-group" style="display: flex; flex-direction: row; gap: 1rem;">
+                <div style="flex: 1;">
+                    <label for="numMaxTokens">Max Tokens</label>
+                    <input type="number" id="numMaxTokens" value="800" min="100" max="3000" step="50">
+                </div>
+                <div style="flex: 1;">
+                    <label for="numTemperature">Temperature</label>
+                    <input type="number" id="numTemperature" value="0.2" min="0.0" max="1.0" step="0.1">
+                </div>
+            </div>
+
+            <button class="btn-submit" id="btnSubmit" onclick="submitTask()">
+                <span>🚀 送入 Redis 佇列並開始推論</span>
+            </button>
+        </section>
+
+        <!-- Right Panel: Live Response & Output -->
+        <section class="panel">
+            <div class="panel-header">
+                <h2 class="panel-title">
+                    <span>⚡</span> 推論結果與狀態 (Inference & Output)
+                </h2>
+                <button class="copy-btn" id="btnCopy" onclick="copyResponse()" style="display: none;">複製內容</button>
+            </div>
+
+            <!-- Queue Progress Tracker -->
+            <div class="status-tracker" id="statusTracker">
+                <div style="display: flex; justify-content: space-between; font-size: 0.8rem;">
+                    <span style="color: var(--text-muted);">任務 ID: <code id="lblTaskId" style="color: var(--accent);">--</code></span>
+                    <span id="lblElapsedTime" style="font-family: 'JetBrains Mono'; color: var(--accent);">0s elapsed</span>
+                </div>
+                <div class="status-flow">
+                    <div class="flow-step" id="stepQueued">
+                        <div class="flow-icon">1</div>
+                        <span>已入列 (Queued)</span>
+                    </div>
+                    <div class="flow-step" id="stepRunning">
+                        <div class="flow-icon">2</div>
+                        <span>推論中 (Inference)</span>
+                    </div>
+                    <div class="flow-step" id="stepFinished">
+                        <div class="flow-icon">3</div>
+                        <span>完成 (Finished)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Performance Metrics Banner -->
+            <div class="metrics-banner" id="metricsBanner">
+                <span id="txtMetricStats">850 Tokens | 2.26 tok/s</span>
+                <span id="txtMetricTime">耗時: 380s</span>
+            </div>
+
+            <!-- Markdown Response Output -->
+            <div class="response-container" id="responseContainer">
+                <div class="response-empty" id="responseEmpty">
+                    <div style="font-size: 2.5rem; opacity: 0.6;">💡</div>
+                    <p>在左側輸入問題或貼上程式碼，點擊送出即可開始。<br>任務將由 Pi 5 序列化安全推論。</p>
+                </div>
+                <div class="markdown-body" id="markdownOutput" style="display: none;"></div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        let currentTaskId = null;
+        let pollTimer = null;
+        let timerStart = 0;
+        let elapsedInterval = null;
+        let rawResponseText = "";
+
+        // Initialize telemetry & models
+        async function fetchTelemetry() {
+            try {
+                const res = await fetch('/health');
+                const data = await res.json();
+                document.getElementById('valTemp').innerText = data.cpu_temperature_c.toFixed(1) + '°C';
+                const availGb = (data.ram_available_mb / 1024).toFixed(1);
+                const totalGb = (data.ram_total_mb / 1024).toFixed(1);
+                document.getElementById('valRam').innerText = `${availGb} / ${totalGb} GB`;
+                document.getElementById('valQueue').innerText = `${data.queue_length} jobs`;
+                document.getElementById('serviceStatus').innerText = data.status === 'healthy' ? 'Online' : 'Degraded';
+            } catch (e) {
+                document.getElementById('serviceStatus').innerText = 'Offline';
+                document.getElementById('dotStatus').style.backgroundColor = 'var(--danger)';
+            }
+        }
+
+        async function fetchModels() {
+            try {
+                const res = await fetch('/api/models');
+                const data = await res.json();
+                const select = document.getElementById('selectModel');
+                if (data.models && data.models.length > 0) {
+                    select.innerHTML = '';
+                    data.models.forEach(m => {
+                        const opt = document.createElement('option');
+                        opt.value = m.name;
+                        if (m.name.includes('llama3.2:3b') || m.name.includes('3b')) {
+                            opt.innerText = `⚡ ${m.name} (極速 18 tok/s · 推薦日常問答/數秒)`;
+                        } else if (m.name.includes('qwen2.5-coder')) {
+                            opt.innerText = `💻 ${m.name} (代碼專精 2.6 tok/s · 需2~4分鐘)`;
+                        } else if (m.name.includes('deepseek-r1')) {
+                            opt.innerText = `🧠 ${m.name} (深度推理 2.5 tok/s · 需3~5分鐘)`;
+                        } else {
+                            opt.innerText = `🤖 ${m.name}`;
+                        }
+
+                        if (m.name.includes('llama3.2:3b')) opt.selected = true;
+                        select.appendChild(opt);
+                    });
+
+                    // Set default recommended tokens for 3b
+                    document.getElementById('numMaxTokens').value = 250;
+                }
+            } catch (e) {
+                console.error("Failed to load models:", e);
+            }
+        }
+
+        document.getElementById('selectModel').addEventListener('change', (e) => {
+            const val = e.target.value;
+            const tokenInput = document.getElementById('numMaxTokens');
+            if (val.includes('3b')) {
+                tokenInput.value = 250;
+            } else {
+                tokenInput.value = 600;
+            }
+        });
+
+        function toggleCodeSection() {
+            const sec = document.getElementById('codeSection');
+            const icon = document.getElementById('codeToggleIcon');
+            if (sec.style.display === 'none' || !sec.style.display) {
+                sec.style.display = 'flex';
+                icon.innerText = '▲';
+            } else {
+                sec.style.display = 'none';
+                icon.innerText = '▼';
+            }
+        }
+
+        function setPrompt(text, openCode = false) {
+            document.getElementById('txtPrompt').value = text;
+            if (openCode) {
+                document.getElementById('codeSection').style.display = 'flex';
+                document.getElementById('codeToggleIcon').innerText = '▲';
+            }
+        }
+
+        async function submitTask() {
+            const prompt = document.getElementById('txtPrompt').value.trim();
+            const code = document.getElementById('txtCode').value;
+            const model = document.getElementById('selectModel').value;
+            const filename = document.getElementById('txtFilename').value;
+            const language = document.getElementById('selectLanguage').value;
+            const maxTokens = parseInt(document.getElementById('numMaxTokens').value) || 800;
+            const temperature = parseFloat(document.getElementById('numTemperature').value) || 0.2;
+
+            if (!prompt && !code) {
+                alert("請至少輸入問題或程式碼！");
+                return;
+            }
+
+            // Lock submit button
+            const btn = document.getElementById('btnSubmit');
+            btn.disabled = true;
+            btn.innerHTML = `<span class="spinner"></span> 正在推播至佇列...`;
+
+            // Reset UI states
+            document.getElementById('responseEmpty').style.display = 'none';
+            document.getElementById('markdownOutput').style.display = 'none';
+            document.getElementById('metricsBanner').style.display = 'none';
+            document.getElementById('btnCopy').style.display = 'none';
+            document.getElementById('statusTracker').style.display = 'flex';
+
+            setStepActive('stepQueued');
+
+            try {
+                const res = await fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        code: code,
+                        model: model,
+                        filename: filename,
+                        language: language,
+                        max_tokens: maxTokens,
+                        temperature: temperature
+                    })
+                });
+
+                if (!res.ok) throw new Error("HTTP error " + res.status);
+                const task = await res.json();
+                currentTaskId = task.task_id;
+                document.getElementById('lblTaskId').innerText = currentTaskId.substring(0, 8) + '...';
+
+                // Start timer & poll
+                timerStart = Date.now();
+                clearInterval(elapsedInterval);
+                elapsedInterval = setInterval(() => {
+                    const sec = Math.floor((Date.now() - timerStart) / 1000);
+                    document.getElementById('lblElapsedTime').innerText = sec + 's elapsed';
+                }, 1000);
+
+                btn.innerHTML = `<span class="spinner"></span> 任務排隊 / 推論中...`;
+                pollTask(currentTaskId);
+            } catch (err) {
+                alert("提交失敗: " + err.message);
+                btn.disabled = false;
+                btn.innerHTML = `<span>🚀 送入 Redis 佇列並開始推論</span>`;
+            }
+        }
+
+        async function pollTask(taskId) {
+            if (pollTimer) clearTimeout(pollTimer);
+
+            try {
+                const res = await fetch(`/api/tasks/${taskId}`);
+                const data = await res.json();
+
+                if (data.status === 'started') {
+                    setStepActive('stepRunning');
+                } else if (data.status === 'finished') {
+                    setStepActive('stepFinished');
+                    clearInterval(elapsedInterval);
+                    finishTask(data.result);
+                    return;
+                } else if (data.status === 'failed') {
+                    clearInterval(elapsedInterval);
+                    alert("任務執行失敗: " + (data.error || "未知錯誤"));
+                    resetSubmitButton();
+                    return;
+                }
+            } catch (e) {
+                console.error("Poll error:", e);
+            }
+
+            pollTimer = setTimeout(() => pollTask(taskId), 2500);
+        }
+
+        function setStepActive(stepId) {
+            const steps = ['stepQueued', 'stepRunning', 'stepFinished'];
+            const activeIdx = steps.indexOf(stepId);
+            steps.forEach((s, idx) => {
+                const el = document.getElementById(s);
+                el.classList.remove('active', 'completed');
+                if (idx < activeIdx) el.classList.add('completed');
+                else if (idx === activeIdx) el.classList.add('active');
+            });
+        }
+
+        function finishTask(result) {
+            resetSubmitButton();
+            if (!result) return;
+
+            document.getElementById('responseEmpty').style.display = 'none';
+
+            // Align with tasks.py return keys: "result", "total_tokens", "eval_tps", "total_elapsed_s"
+            rawResponseText = result.result || result.analysis || result.response || "";
+            const mdDiv = document.getElementById('markdownOutput');
+            if (window.marked && typeof marked.parse === 'function') {
+                mdDiv.innerHTML = marked.parse(rawResponseText);
+            } else {
+                mdDiv.innerText = rawResponseText;
+            }
+            mdDiv.style.display = 'block';
+            document.getElementById('btnCopy').style.display = 'block';
+
+            // Metrics Banner
+            const banner = document.getElementById('metricsBanner');
+            const tokens = result.total_tokens || result.eval_count || 0;
+            const speed = result.eval_tps || result.tokens_per_sec || 0;
+            const duration = (result.total_elapsed_s || result.total_duration_sec || 0).toFixed(1);
+            const modelName = result.model || document.getElementById('selectModel').value;
+
+            document.getElementById('txtMetricStats').innerText = `${tokens} Tokens | ${speed} tok/s (${modelName})`;
+            document.getElementById('txtMetricTime').innerText = `耗時: ${duration}s`;
+            banner.style.display = 'flex';
+
+            fetchTelemetry(); // update queue telemetry
+        }
+
+        function resetSubmitButton() {
+            const btn = document.getElementById('btnSubmit');
+            btn.disabled = false;
+            btn.innerHTML = `<span>🚀 送入 Redis 佇列並開始推論</span>`;
+        }
+
+        function copyResponse() {
+            navigator.clipboard.writeText(rawResponseText).then(() => {
+                const btn = document.getElementById('btnCopy');
+                btn.innerText = '已複製！';
+                setTimeout(() => btn.innerText = '複製內容', 2000);
+            });
+        }
+
+        // Initial loading
+        fetchTelemetry();
+        fetchModels();
+        setInterval(fetchTelemetry, 10000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+[Unit]
+Description=Raspberry Pi 5 5-Key & 5-LED GPIO Driver Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/gpio_driver
+ExecStart=/usr/bin/python3 /home/pi/gpio_driver/key_led_driver.py --mode follow
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
