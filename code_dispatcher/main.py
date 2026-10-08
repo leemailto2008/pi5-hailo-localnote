@@ -405,6 +405,16 @@ class BTPairRequest(BaseModel):
     target: str = Field(..., description="Device MAC address, list index, or name")
 
 
+class BTConnectRequest(BaseModel):
+    target: Optional[str] = Field(default=None, description="Device MAC address, or None for default")
+
+
+class BTAutoConnectRequest(BaseModel):
+    mac: str = Field(..., description="Device MAC address")
+    auto_connect: bool = Field(..., description="Whether to auto-connect to this device")
+    set_default: Optional[bool] = Field(default=False, description="Whether to set as primary default device")
+
+
 class VoiceRecordRequest(BaseModel):
     duration_sec: int = Field(default=5, ge=2, le=120, description="Recording duration in seconds")
 
@@ -469,6 +479,29 @@ def get_bt_status() -> Dict[str, Any]:
         link_quality = 255 if connected_mac else 0
         state_hash = f"{connected_mac}_{connected_name}_{battery_level}"
 
+        # Fetch trusted devices list for multi-device management
+        trusted_devices = []
+        try:
+            res_trusted = subprocess.run(["bluetoothctl", "devices", "Trusted"], capture_output=True, text=True, timeout=3)
+            auto_map = config.get("auto_connect_devices", {})
+            for line in res_trusted.stdout.strip().split("\n"):
+                m_dev = re.match(r"^Device\s+([0-9A-Fa-f:]{17})\s+(.*)$", line.strip())
+                if m_dev:
+                    d_mac = m_dev.group(1).upper()
+                    d_name = m_dev.group(2).strip()
+                    is_def = (d_mac == (config.get("default_mac") or "").upper())
+                    is_conn = (d_mac == (connected_mac or "").upper())
+                    auto_conn = auto_map.get(d_mac, is_def)
+                    trusted_devices.append({
+                        "mac": d_mac,
+                        "name": d_name,
+                        "connected": is_conn,
+                        "is_default": is_def,
+                        "auto_connect": auto_conn
+                    })
+        except Exception as e_t:
+            logger.warning(f"Error fetching trusted devices: {e_t}")
+
         res_data = {
             "status_text": status_text,
             "connected": connected_mac is not None,
@@ -480,7 +513,8 @@ def get_bt_status() -> Dict[str, Any]:
             "rssi": 0,
             "state_hash": state_hash,
             "default_mac": config.get("default_mac"),
-            "default_name": config.get("default_name")
+            "default_name": config.get("default_name"),
+            "trusted_devices": trusted_devices
         }
         _last_bt_status_cache = res_data
         _last_bt_status_time = now
@@ -492,6 +526,7 @@ def get_bt_status() -> Dict[str, Any]:
             "status_text": f"藍牙狀態獲取失敗: {str(e)}",
             "connected": False,
             "state_hash": f"err_{str(e)}",
+            "trusted_devices": [],
             "error": str(e)
         }
 
@@ -526,12 +561,71 @@ def pair_bt_device(req: BTPairRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"配對失敗: {str(e)}")
 
 
-@app.post("/api/bt/connect", tags=["Bluetooth"])
-def connect_bt_device() -> Dict[str, Any]:
-    """Connect to default configured Bluetooth headset."""
+@app.post("/api/bt/trusted/auto_connect", tags=["Bluetooth"])
+def set_bt_device_auto_connect(req: BTAutoConnectRequest) -> Dict[str, Any]:
+    """Toggle auto-connect setting or set default for a trusted Bluetooth device."""
     try:
-        from bluetooth_manager import connect_default_device
-        ok, msg = connect_default_device()
+        from bluetooth_manager import load_bt_config, save_bt_config
+        config = load_bt_config()
+        if "auto_connect_devices" not in config or not isinstance(config["auto_connect_devices"], dict):
+            config["auto_connect_devices"] = {}
+
+        target_mac = req.mac.upper()
+        config["auto_connect_devices"][target_mac] = req.auto_connect
+
+        if req.set_default:
+            config["default_mac"] = target_mac
+            # Resolve name
+            res_info = subprocess.run(["bluetoothctl", "info", target_mac], capture_output=True, text=True, timeout=3)
+            m = re.search(r"Name:\s*(.+)", res_info.stdout)
+            if m:
+                config["default_name"] = m.group(1).strip()
+
+        save_bt_config(config)
+
+        # Invalidate status cache
+        global _last_bt_status_time
+        _last_bt_status_time = 0.0
+
+        return {
+            "status": "success",
+            "message": f"已更新 {target_mac} 自動連線設定為 {'啟用' if req.auto_connect else '停用'}",
+            "config": config
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"設定失敗: {str(e)}")
+
+
+@app.post("/api/bt/connect", tags=["Bluetooth"])
+def connect_bt_device(req: Optional[BTConnectRequest] = None) -> Dict[str, Any]:
+    """Connect to default or specified Bluetooth headset."""
+    try:
+        target_mac = req.target.strip() if (req and req.target) else None
+        from bluetooth_manager import connect_default_device, _switch_pipewire_default_sink
+        
+        if not target_mac:
+            ok, msg = connect_default_device()
+        else:
+            # 連線到指定的 MAC
+            res = subprocess.run(["bluetoothctl", "connect", target_mac], capture_output=True, text=True, timeout=10)
+            res_info = subprocess.run(["bluetoothctl", "info", target_mac], capture_output=True, text=True, timeout=3)
+            dev_name = "耳麥"
+            m = re.search(r"Name:\s*(.+)", res_info.stdout)
+            if m:
+                dev_name = m.group(1).strip()
+
+            if "Connected: yes" in res_info.stdout or "Connection successful" in res.stdout:
+                _switch_pipewire_default_sink(dev_name)
+                ok = True
+                msg = f"🎧 已成功連線至耳麥：{dev_name} ({target_mac})"
+            else:
+                ok = False
+                msg = f"連線至 {dev_name} ({target_mac}) 失敗，請確認耳麥處於待連線或開機狀態。"
+
+        # Invalidate cache
+        global _last_bt_status_time
+        _last_bt_status_time = 0.0
+
         if not ok:
             raise HTTPException(status_code=400, detail=msg)
         return {"status": "success", "message": msg}
@@ -547,6 +641,9 @@ def disconnect_bt_device() -> Dict[str, Any]:
     try:
         from bluetooth_manager import disconnect_device
         ok, msg = disconnect_device()
+        # Invalidate cache
+        global _last_bt_status_time
+        _last_bt_status_time = 0.0
         return {"status": "success" if ok else "failed", "message": msg}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"中斷連線失敗: {str(e)}")
