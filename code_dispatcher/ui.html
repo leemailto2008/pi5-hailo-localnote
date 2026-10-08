@@ -212,6 +212,18 @@
             transform: translateY(-1px);
         }
 
+        /* Streaming Typewriter Cursor */
+        .streaming-cursor::after {
+            content: "▋";
+            animation: blinkCursor 0.8s infinite;
+            color: #38bdf8;
+            margin-left: 3px;
+        }
+        @keyframes blinkCursor {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
         /* Top Navigation Tabs */
         .tabs-container {
             max-width: 1240px;
@@ -813,10 +825,13 @@
                     </div>
 
                     <!-- Voice Record Action Box -->
-                    <div class="panel-header" style="margin-top: 0.5rem;">
+                    <div class="panel-header" style="margin-top: 0.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.4rem;">
                         <h2 class="panel-title">
                             <span>🎙️</span> 耳麥收音與雙語轉錄 (BT Voice to Bilingual)
                         </h2>
+                        <span id="badgeMemoryStorage" style="font-size: 0.72rem; padding: 0.2rem 0.55rem; border-radius: 9999px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #6ee7b7; font-weight: 500;">
+                            ⚡ RAM-Disk: 零磁碟寫入 (0 Flash Wear)
+                        </span>
                     </div>
 
                     <div class="voice-box">
@@ -857,10 +872,15 @@
                             </div>
                         </div>
 
-                        <button class="btn-primary" id="btnRecordVoice" onclick="handleRecordBTVoice()" style="width: 100%; max-width: 320px; font-size: 1rem; padding: 0.75rem;">
-                            <span id="btnRecordIcon">🎙️</span>
-                            <span id="btnRecordText">開始耳麥錄音 (Record Voice)</span>
-                        </button>
+                        <div style="display: flex; gap: 0.5rem; width: 100%; max-width: 380px; flex-wrap: wrap;">
+                            <button class="btn-primary" id="btnRecordVoice" onclick="handleRecordBTVoice()" style="flex: 1; min-width: 200px; font-size: 1rem; padding: 0.75rem;">
+                                <span id="btnRecordIcon">🎙️</span>
+                                <span id="btnRecordText">開始耳麥錄音 (Record Voice)</span>
+                            </button>
+                            <button class="btn-secondary" id="btnStopVoice" onclick="handleStopVoiceEarly()" style="display: none; font-size: 0.9rem; padding: 0.75rem 1rem; background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.5); color: #fca5a5;">
+                                <span>⏹️</span> 說完了立即轉錄
+                            </button>
+                        </div>
 
                         <!-- Pipeline Stepper Indicator -->
                         <div class="pipeline-stepper" id="pipelineStepper" style="display: none; width: 100%; margin-top: 0.75rem; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 0.75rem; flex-direction: column; gap: 0.45rem;">
@@ -1071,6 +1091,7 @@
         let isBtFirstLoad = true;
 
         async function fetchBTStatus() {
+            if (currentStreamingSessionId) return; // 錄音進行中暫停輪詢，保障藍牙 SCO 語音傳輸
             try {
                 const res = await fetch('/api/bt/status');
                 if (!res.ok) return;
@@ -1268,9 +1289,27 @@
             }
         }
 
+        let currentStreamingSessionId = null;
+        let currentEventSource = null;
+
+        async function handleStopVoiceEarly() {
+            if (!currentStreamingSessionId) return;
+            const btnStop = document.getElementById('btnStopVoice');
+            if (btnStop) {
+                btnStop.disabled = true;
+                btnStop.innerHTML = `<span class="spinner"></span> 正在結算錄音...`;
+            }
+            try {
+                await fetch(`/api/voice/stream/${currentStreamingSessionId}/stop`, { method: 'POST' });
+            } catch (e) {
+                console.error("Stop voice error:", e);
+            }
+        }
+
         async function handleRecordBTVoice() {
             const duration = parseInt(document.getElementById('selectDuration').value) || 5;
             const btn = document.getElementById('btnRecordVoice');
+            const btnStop = document.getElementById('btnStopVoice');
             const wave = document.getElementById('waveAnim');
             const progressBox = document.getElementById('recProgressBox');
             const timerTxt = document.getElementById('recTimerText');
@@ -1288,18 +1327,25 @@
                 stepperElapsed.innerText = `總耗時: ${sec}s`;
             }, 100);
 
-            setStepState('Rec', '🔴', `錄音中 (${duration}s)`, true, '#ef4444');
-            setStepState('Stt', '⚪', '等待錄音結束', false, 'var(--text-muted)');
+            setStepState('Rec', '🔴', `串流錄音中 (${duration}s)`, true, '#ef4444');
+            setStepState('Stt', '⚪', '準備串流分塊 (6s/chunk)', false, 'var(--text-muted)');
             setStepState('Tr', '⚪', '等待轉錄', false, 'var(--text-muted)');
             setStepState('Done', '⚪', '待命', false, 'var(--text-muted)');
 
             // 1. Enter Recording State
             btn.disabled = true;
+            if (btnStop) {
+                btnStop.disabled = false;
+                btnStop.style.display = 'inline-flex';
+                btnStop.innerHTML = `<span>⏹️</span> 說完了立即轉錄`;
+            }
             wave.style.display = 'flex';
             progressBox.style.display = 'flex';
-            statusTitle.innerText = "RECORDING IN PROGRESS";
+            statusTitle.innerText = "STREAMING RECORDING";
             statusTitle.style.color = "#ef4444";
-            btn.innerHTML = `<span class="spinner"></span> 🔴 ① 錄音中 (${duration}s)... 請對耳麥說話`;
+            btn.innerHTML = `<span class="spinner"></span> 🔴 ① 串流錄音中 (${duration}s)... 請對耳麥說話`;
+            document.getElementById('txtTranscribed').innerText = "⏳ 正在啟動串流分塊語音轉錄 (faster-whisper)...";
+            document.getElementById('txtTranslated').innerText = "尚未進行翻譯";
 
             const startTime = Date.now();
             const totalDurationMs = duration * 1000;
@@ -1319,106 +1365,155 @@
             }, 100);
 
             try {
-                // Step 1: Record from mic
-                const recRes = await fetch('/api/voice/record', {
+                // Start streaming session
+                const startRes = await fetch('/api/voice/stream/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ duration_sec: duration })
                 });
 
-                if (!recRes.ok) {
-                    const errData = await recRes.json().catch(() => ({}));
-                    setStepState('Rec', '❌', '錄音失敗', false, '#ef4444');
-                    throw new Error(errData.detail || `HTTP ${recRes.status}`);
+                if (!startRes.ok) {
+                    const errData = await startRes.json().catch(() => ({}));
+                    setStepState('Rec', '❌', '錄音啟動失敗', false, '#ef4444');
+                    throw new Error(errData.detail || `HTTP ${startRes.status}`);
                 }
 
-                const recData = await recRes.json();
-                const recDoneTime = ((Date.now() - pipelineStartTime) / 1000).toFixed(1);
-                setStepState('Rec', '✅', `已完成 (${recDoneTime}s)`, false, '#10b981');
+                const startData = await startRes.json();
+                const sessionId = startData.session_id;
+                currentStreamingSessionId = sessionId;
 
-                // Immediately load and show the Audio Playback Player!
-                if (recData.audio_url) {
-                    const playbackBox = document.getElementById('playbackBox');
-                    const player = document.getElementById('voiceAudioPlayer');
-                    const hintBadge = document.getElementById('audioHintBadge');
-                    playbackBox.style.display = 'flex';
-                    player.src = recData.audio_url + '?t=' + Date.now();
-                    player.load();
-                    hintBadge.innerText = "▶ 音訊就緒可試聽";
+                // Establish Server-Sent Events (SSE) connection
+                if (currentEventSource) {
+                    currentEventSource.close();
                 }
 
-                // Step 2: Whisper STT
-                const sttStartTime = Date.now();
-                setStepState('Stt', '<span class="spinner"></span>', '辨識中 (ARM NEON)...', true, '#06b6d4');
-                statusTitle.innerText = "WHISPER AI TRANSCRIBING";
-                statusTitle.style.color = "#06b6d4";
-                btn.innerHTML = `<span class="spinner"></span> ⚡ ② faster-whisper 語音轉錄中...`;
-                document.getElementById('txtTranscribed').innerText = "⏳ 正在辨識耳麥語音 (faster-whisper)...";
+                await new Promise((resolve, reject) => {
+                    const es = new EventSource(`/api/voice/stream/${sessionId}/events`);
+                    currentEventSource = es;
 
-                const sttRes = await fetch('/api/voice/transcribe', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ audio_id: recData.audio_id })
+                    es.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            console.log("[SSE Event]", data);
+
+                            if (data.type === 'recording_progress') {
+                                setStepState('Rec', '<span class="spinner"></span>', `純淨錄音中 (${data.elapsed_s}s / ${data.duration_sec}s)...`, true, '#3b82f6');
+                                btn.innerHTML = `<span class="spinner"></span> 🎙️ ① 錄音中 (${data.elapsed_s}s / ${data.duration_sec}s)...`;
+                            }
+                            else if (data.type === 'chunk_transcribed') {
+                                // Progressive text output
+                                const chunkIdx = data.chunk_index;
+                                const fullText = data.full_text;
+                                document.getElementById('txtTranscribed').innerText = fullText;
+                                setStepState('Stt', '<span class="spinner"></span>', `分塊 ${chunkIdx + 1} 轉錄完成 (${data.chunk_cost_s}s)`, true, '#06b6d4');
+                            }
+                            else if (data.type === 'recording_done') {
+                                if (btnStop) btnStop.style.display = 'none';
+                                wave.style.display = 'none';
+                                setStepState('Rec', '✅', `錄音結束 (${data.rec_elapsed_s}s)`, false, '#10b981');
+                                setStepState('Stt', '<span class="spinner"></span>', '⚡ 高精度全文語音辨識中...', true, '#06b6d4');
+                                statusTitle.innerText = "HIGH-ACCURACY STT IN PROGRESS";
+                                statusTitle.style.color = "#06b6d4";
+                                btn.innerHTML = `<span class="spinner"></span> ⚡ ② 高精度全文語音辨識中...`;
+                            }
+                            else if (data.type === 'stt_completed') {
+                                setStepState('Stt', '✅', `轉錄完成 (尾端耗時 ${data.tail_stt_cost_s}s)`, false, '#10b981');
+                                if (data.full_text) {
+                                    document.getElementById('txtTranscribed').innerText = data.full_text;
+                                    document.getElementById('audioHintBadge').innerText = "✅ 語音轉錄完成";
+                                    document.getElementById('ttsActionRow').style.display = 'flex';
+                                } else {
+                                    document.getElementById('txtTranscribed').innerText = "未能辨識出清晰人聲語音。您可點擊上方播放器試聽耳麥是否有錄到聲音。";
+                                    document.getElementById('audioHintBadge').innerText = "⚠️ 未辨識到清晰文字";
+                                }
+
+                                if (data.audio_url) {
+                                    currentAudioUrl = data.audio_url;
+                                    const playbackBox = document.getElementById('playbackBox');
+                                    const player = document.getElementById('voiceAudioPlayer');
+                                    playbackBox.style.display = 'flex';
+                                    player.src = data.audio_url + '?t=' + Date.now();
+                                    player.load();
+                                    document.getElementById('audioHintBadge').innerText = "▶ 音訊就緒可試聽";
+                                }
+                            }
+                            else if (data.type === 'translating') {
+                                if (data.stage === 'first_token') {
+                                    setStepState('Tr', '<span class="spinner"></span>', `首字生成 (TTFT: ${data.ttft_s}s)...`, true, '#10b981');
+                                    btn.innerHTML = `<span class="spinner"></span> ⚡ ③ 首字生成 (${data.ttft_s}s) 正在串流輸出...`;
+                                } else {
+                                    setStepState('Tr', '<span class="spinner"></span>', data.message || '連線本地 Qwen 3B 模型中...', true, '#10b981');
+                                    statusTitle.innerText = "QWEN STREAMING TRANSLATION";
+                                    statusTitle.style.color = "#10b981";
+                                    btn.innerHTML = `<span class="spinner"></span> 🌐 ③ Qwen 排隊與載入權重中...`;
+                                }
+                                const txtTr = document.getElementById('txtTranslated');
+                                if (!txtTr.classList.contains('streaming-cursor')) {
+                                    txtTr.innerText = "";
+                                    txtTr.classList.add('streaming-cursor');
+                                }
+                            }
+                            else if (data.type === 'translate_token') {
+                                // Live streaming typewriter token display with TPS speed!
+                                const txtTr = document.getElementById('txtTranslated');
+                                txtTr.innerText = data.accumulated;
+                                const speedStr = data.speed_tps ? ` | ${data.speed_tps} tok/s` : '';
+                                setStepState('Tr', '<span class="spinner"></span>', `產出第 ${data.token_index} 字${speedStr}`, true, '#10b981');
+                                btn.innerHTML = `<span class="spinner"></span> 🌐 ③ 串流口譯中 (${data.token_index} tok${speedStr})`;
+                            }
+                            else if (data.type === 'translate_timeout') {
+                                const txtTr = document.getElementById('txtTranslated');
+                                txtTr.classList.remove('streaming-cursor');
+                                txtTr.innerText = "⚠️ 口譯生成逾時，請點擊右方手動翻譯重試。";
+                                setStepState('Tr', '⚠️', 'Qwen 逾時 (CPU 負載過高)', false, '#f59e0b');
+                            }
+                            else if (data.type === 'translation_completed') {
+                                const txtTr = document.getElementById('txtTranslated');
+                                txtTr.classList.remove('streaming-cursor');
+                                txtTr.innerText = data.english_translation || "(無翻譯結果)";
+                                const speedInfo = data.avg_speed_tps ? `, ${data.avg_speed_tps} tok/s` : '';
+                                setStepState('Tr', '✅', `口譯完成 (${data.tr_cost_s}s, ${data.token_count || 0} tok${speedInfo})`, false, '#10b981');
+                                document.getElementById('audioHintBadge').innerText = "✅ 雙語對照全部就緒";
+                            }
+                            else if (data.type === 'session_completed') {
+                                setStepState('Done', '🎯', `全部完成 (總耗時 ${data.total_time_s}s)`, true, '#10b981');
+                                if (stepperStopwatchInterval) clearInterval(stepperStopwatchInterval);
+                                es.close();
+                                currentEventSource = null;
+                                currentStreamingSessionId = null;
+                                resolve(data);
+                            }
+                            else if (data.type === 'error') {
+                                if (stepperStopwatchInterval) clearInterval(stepperStopwatchInterval);
+                                es.close();
+                                reject(new Error(data.detail || "串流處理發生異常"));
+                            }
+                        } catch (parseErr) {
+                            console.error("Failed to parse SSE data:", parseErr);
+                        }
+                    };
+
+                    es.onerror = (err) => {
+                        console.warn("[SSE Connection Notice]", err);
+                        if (es.readyState === EventSource.CLOSED) {
+                            es.close();
+                            resolve();
+                        }
+                    };
                 });
 
-                if (!sttRes.ok) {
-                    const errData = await sttRes.json().catch(() => ({}));
-                    setStepState('Stt', '❌', '轉錄異常', false, '#ef4444');
-                    throw new Error(errData.detail || `語音轉錄異常 HTTP ${sttRes.status}`);
-                }
-
-                const sttData = await sttRes.json();
-                const sttElapsed = ((Date.now() - sttStartTime) / 1000).toFixed(1);
-
-                if (sttData.status === 'success' && sttData.transcribed_text) {
-                    const zhText = sttData.transcribed_text.trim();
-                    setStepState('Stt', '✅', `辨識成功 (${sttElapsed}s)`, false, '#10b981');
-                    document.getElementById('txtTranscribed').innerText = zhText;
-                    document.getElementById('audioHintBadge').innerText = "✅ 語音轉錄完成";
-                    currentAudioUrl = recData.audio_url || "";
-                    document.getElementById('ttsActionRow').style.display = 'flex';
-
-                    // Step 3: LLM Translation
-                    const trStartTime = Date.now();
-                    setStepState('Tr', '<span class="spinner"></span>', '口譯中 (Qwen 3B)...', true, '#10b981');
-                    statusTitle.innerText = "QWEN AI TRANSLATING";
-                    statusTitle.style.color = "#10b981";
-                    btn.innerHTML = `<span class="spinner"></span> 🌐 ③ Qwen 本地大模型英文口譯中...`;
-                    document.getElementById('txtTranslated').innerText = "⏳ 正在生成道地英文對照...";
-
-                    try {
-                        const trRes = await fetch('/api/voice/translate', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ text: zhText, direction: 'zh2en' })
-                        });
-                        const trData = await trRes.json();
-                        const trElapsed = ((Date.now() - trStartTime) / 1000).toFixed(1);
-                        setStepState('Tr', '✅', `口譯完成 (${trElapsed}s)`, false, '#10b981');
-                        document.getElementById('txtTranslated').innerText = trData.translated_text || "(無翻譯結果)";
-                        document.getElementById('audioHintBadge').innerText = "✅ 雙語對照全部就緒";
-
-                        // Step 4: Finished!
-                        const totalTime = ((Date.now() - pipelineStartTime) / 1000).toFixed(1);
-                        setStepState('Done', '🎯', `全部完成 (總耗時 ${totalTime}s)`, true, '#10b981');
-                    } catch (trErr) {
-                        setStepState('Tr', '⚠️', '逾時 (可手動翻譯)', false, '#f59e0b');
-                        document.getElementById('txtTranslated').innerText = "[翻譯逾時，請點擊下方手動翻譯]";
-                    }
-                } else {
-                    setStepState('Stt', '⚠️', '未偵測到清晰語音', false, '#f59e0b');
-                    setStepState('Tr', '⚪', '跳過口譯', false, 'var(--text-muted)');
-                    setStepState('Done', '⚠️', '結束 (可試聽原音)', false, '#f59e0b');
-                    document.getElementById('txtTranscribed').innerText = sttData.message || "未能辨識出清晰人聲語音。您可點擊上方播放器試聽耳麥是否有錄到聲音。";
-                    document.getElementById('txtTranslated').innerText = "No clear speech detected.";
-                    document.getElementById('audioHintBadge').innerText = "⚠️ 未辨識到清晰文字";
-                }
             } catch (e) {
-                alert("耳麥錄音或處理失敗: " + e.message + "\n請確認藍牙耳麥已連線且麥克風開啟。");
+                alert("耳麥串流錄音或處理失敗: " + e.message + "\n請確認藍牙耳麥已連線且麥克風開啟。");
             } finally {
                 if (recCountdownInterval) clearInterval(recCountdownInterval);
                 if (stepperStopwatchInterval) clearInterval(stepperStopwatchInterval);
+                if (currentEventSource) {
+                    currentEventSource.close();
+                    currentEventSource = null;
+                }
+                currentStreamingSessionId = null;
                 btn.disabled = false;
+                if (btnStop) btnStop.style.display = 'none';
                 wave.style.display = 'none';
                 progressBox.style.display = 'none';
                 btn.innerHTML = `<span>🎙️</span> 開始耳麥錄音 (Record Voice)`;
@@ -1620,6 +1715,7 @@
 
         // Telemetry
         async function fetchTelemetry() {
+            if (currentStreamingSessionId) return; // 錄音進行中暫停非必要進程輪詢
             try {
                 const res = await fetch('/health');
                 const data = await res.json();
@@ -1632,13 +1728,37 @@
             } catch (e) {}
         }
 
+        // In-Memory Storage Stats
+        async function fetchMemoryStorageStats() {
+            if (currentStreamingSessionId) return; // 錄音進行中暫停記憶體輪詢
+            try {
+                const res = await fetch('/api/system/memory_cache');
+                if (!res.ok) return;
+                const data = await res.json();
+                const badge = document.getElementById('badgeMemoryStorage');
+                if (badge && data) {
+                    if (data.is_ramfs) {
+                        badge.innerText = `⚡ RAM-Disk: ${data.total_mb}MB / ${data.quota_mb}MB (0 磁碟寫入)`;
+                        badge.style.color = '#6ee7b7';
+                        badge.style.background = 'rgba(16, 185, 129, 0.15)';
+                    } else {
+                        badge.innerText = `💾 快取: ${data.total_mb}MB / ${data.quota_mb}MB`;
+                        badge.style.color = '#94a3b8';
+                        badge.style.background = 'rgba(255, 255, 255, 0.05)';
+                    }
+                }
+            } catch (e) {}
+        }
+
         // Init
         fetchTelemetry();
         fetchNetworkStatus();
         fetchBTStatus();
+        fetchMemoryStorageStats();
         setInterval(fetchTelemetry, 10000);
         setInterval(fetchNetworkStatus, 10000);
         setInterval(fetchBTStatus, 2500); // Reactive auto-refresh when BT state changes
+        setInterval(fetchMemoryStorageStats, 5000);
     </script>
 </body>
 </html>

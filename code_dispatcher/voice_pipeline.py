@@ -9,6 +9,7 @@ import os
 import asyncio
 import subprocess
 from typing import Optional
+import numpy as np
 
 from config import (
     WHISPER_MODEL_SIZE,
@@ -29,13 +30,14 @@ def get_whisper_model():
         try:
             from faster_whisper import WhisperModel
             print(f"[VoicePipeline] Initializing faster-whisper ({WHISPER_MODEL_SIZE}, {WHISPER_COMPUTE_TYPE})...")
+            # 錄音結束後以全 4 核心極速轉錄，最大化發揮 Cortex-A76 效能
             _whisper_model = WhisperModel(
                 WHISPER_MODEL_SIZE,
                 device=WHISPER_DEVICE,
                 compute_type=WHISPER_COMPUTE_TYPE,
                 cpu_threads=4
             )
-            print("[VoicePipeline] faster-whisper model loaded successfully.")
+            print("[VoicePipeline] faster-whisper model loaded successfully (4 threads).")
         except Exception as e:
             print(f"[VoicePipeline] Error loading faster-whisper: {e}")
             _whisper_model = False
@@ -133,26 +135,34 @@ _whisper_lock = threading.Lock()
 def speech_to_text(audio_path: str) -> Optional[str]:
     """
     Transcribe speech from an audio file to Traditional Chinese text.
-    Thread-safe and optimized for Raspberry Pi 5 ARM NEON:
+    Optimized with 100% Zero-Disk I/O and RAM-based PCM streaming for Raspberry Pi 5:
+    - Decodes audio directly into float32 16kHz PCM array in RAM.
+    - Zero temporary WAV files on physical storage (0 MicroSD wear).
     - Threading lock prevents CTranslate2 OpenMP deadlocks/spin-waits.
     - beam_size=1 (Greedy search) delivers 5x faster transcription with zero hallucination.
-    - Optimized Silero VAD parameters in a single fast pass.
     """
+    # 錄音已結束，使用全核心進行無損音訊的高精度轉錄
+
     if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
         print(f"[VoicePipeline] Audio file missing or empty: {audio_path}")
         return None
 
-    base_name = os.path.splitext(audio_path)[0]
-    wav_path = f"{base_name}_temp.wav"
+    try:
+        from voice_memory import audio_to_pcm_array
+        audio_np = audio_to_pcm_array(audio_path)
+    except Exception as e:
+        print(f"[VoicePipeline] Failed in-memory decoding: {e}")
+        audio_np = None
 
-    if not convert_oga_to_wav(audio_path, wav_path):
-        print(f"[VoicePipeline] Audio conversion to WAV failed for: {audio_path}")
+    if audio_np is None or len(audio_np) < 8000:
+        print(f"[VoicePipeline] Audio PCM decode failed or too short (<0.5s): {audio_path}")
         return None
 
     try:
-        # Pre-check: Discard pure silence
-        if is_silence_or_empty_audio(wav_path):
-            print(f"[VoicePipeline] Audio is silence, skipping Whisper transcription.")
+        # Pre-check: In-memory silence check (RMS amplitude < 0.003 is sub-audible silence)
+        rms = float(np.sqrt(np.mean(audio_np**2)))
+        if rms < 0.003:
+            print(f"[VoicePipeline] In-Memory Audio is silence (RMS={rms:.4f}), skipping Whisper.")
             return None
 
         with _whisper_lock:
@@ -168,9 +178,9 @@ def speech_to_text(audio_path: str) -> Optional[str]:
 
             valid_segments = []
             try:
-                # Fast single-pass transcription with beam_size=1 (5x faster on ARM)
+                # Fast single-pass transcription with beam_size=1 on In-Memory PCM array (Zero-Disk)
                 segments, info = model.transcribe(
-                    wav_path,
+                    audio_np,
                     beam_size=1,
                     best_of=1,
                     language="zh",
@@ -180,13 +190,13 @@ def speech_to_text(audio_path: str) -> Optional[str]:
                     vad_parameters=dict(threshold=0.25, min_silence_duration_ms=250)
                 )
                 for seg in segments:
-                    # Filter out low-confidence hallucinations
-                    if seg.no_speech_prob < 0.65 and seg.avg_logprob > -1.25:
+                    # 放寬分塊邊界語音門檻 (no_speech_prob < 0.85, avg_logprob > -2.20)，防止因切片截斷導致有效語音被誤殺
+                    if seg.no_speech_prob < 0.85 and seg.avg_logprob > -2.20:
                         clean_seg_text = seg.text.strip()
                         if clean_seg_text:
                             valid_segments.append(clean_seg_text)
                     else:
-                        print(f"[VoicePipeline] Discarded low-confidence segment: '{seg.text}' (no_speech_prob={seg.no_speech_prob:.2f})")
+                        print(f"[VoicePipeline] Discarded low-confidence segment: '{seg.text}' (no_speech_prob={seg.no_speech_prob:.2f}, logprob={seg.avg_logprob:.2f})")
             except Exception as vad_err:
                 print(f"[VoicePipeline] Whisper transcribe exception: {vad_err}")
 
@@ -205,21 +215,15 @@ def speech_to_text(audio_path: str) -> Optional[str]:
         # Normalize to pure Taiwan Traditional Chinese
         if text:
             text = to_taiwan_traditional(text)
-            print(f"[VoicePipeline] Transcribed text: '{text}' (Audio size: {os.path.getsize(audio_path)} bytes)")
+            print(f"[VoicePipeline] Zero-Disk Transcribed text: '{text}' (PCM samples: {len(audio_np)})")
             return text
         else:
-            print(f"[VoicePipeline] Empty transcription. Audio size: {os.path.getsize(audio_path)} bytes")
+            print(f"[VoicePipeline] Empty transcription. In-Memory PCM samples: {len(audio_np)}")
             return None
 
     except Exception as e:
         print(f"[VoicePipeline] Transcription failed: {e}")
         return None
-    finally:
-        if os.path.exists(wav_path):
-            try:
-                os.remove(wav_path)
-            except OSError:
-                pass
 
 
 async def text_to_speech_async(text: str, output_ogg_path: Optional[str] = None, voice: str = DEFAULT_TTS_VOICE) -> bool:
@@ -257,6 +261,18 @@ async def ensure_bluetooth_recording_ready() -> str:
     and bound as PipeWire default Audio/Source.
     Never redundantly re-trigger set-profile if already active to avoid SCO packet disruption.
     """
+    # 自動將藍牙與 PipeWire 關鍵音訊服務提升至實時優先級 (-18) 並綁定 CPU 0,1，杜絕 UART 封包丟失
+    try:
+        import subprocess
+        for p in ['bluetoothd', 'pipewire', 'wireplumber', 'pipewire-pulse']:
+            out = subprocess.getoutput(f"pgrep {p}")
+            for pid in out.split():
+                if pid.isdigit():
+                    subprocess.run(f"sudo renice -n -18 -p {pid} 2>/dev/null", shell=True)
+                    subprocess.run(f"sudo taskset -apc 0,1 {pid} 2>/dev/null", shell=True)
+    except Exception:
+        pass
+
     target_source = "default"
     try:
         proc = await asyncio.create_subprocess_exec(

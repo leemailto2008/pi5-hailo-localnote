@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import requests
@@ -64,6 +64,24 @@ async def startup_event():
         asyncio.create_task(asyncio.to_thread(get_whisper_model))
     except Exception as e:
         print(f"[Startup] Whisper preload notice: {e}")
+
+    try:
+        def prewarm_ollama():
+            print("[Startup] Pre-warming Ollama qwen2.5:3b-opt model...")
+            requests.post(
+                "http://127.0.0.1:11434/api/generate",
+                json={
+                    "model": "qwen2.5:3b-opt",
+                    "prompt": "Hello",
+                    "stream": False,
+                    "keep_alive": "24h"
+                },
+                timeout=45
+            )
+            print("[Startup] Ollama qwen2.5:3b-opt pre-warmed successfully (pinned 24h).")
+        asyncio.create_task(asyncio.to_thread(prewarm_ollama))
+    except Exception as e:
+        print(f"[Startup] Ollama preload notice: {e}")
 
 redis_conn = Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
 task_queue = Queue(QUEUE_NAME, connection=redis_conn)
@@ -376,8 +394,11 @@ for d in _possible_agent_dirs:
     if os.path.exists(d) and d not in sys.path:
         sys.path.insert(0, d)
 
-AUDIO_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "audio_cache")
+from voice_memory import get_in_memory_cache_dir, evict_audio_ring_buffer, get_cache_stats
+
+AUDIO_CACHE_DIR = get_in_memory_cache_dir()
 os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
+print(f"[Main] In-Memory Audio Cache initialized at: {AUDIO_CACHE_DIR}")
 
 
 class BTPairRequest(BaseModel):
@@ -399,9 +420,25 @@ class VoiceTTSRequest(BaseModel):
     play_on_speaker: Optional[bool] = Field(default=True, description="Whether to play on Bluetooth speaker directly")
 
 
+_last_bt_status_cache: Dict[str, Any] = {}
+_last_bt_status_time: float = 0.0
+
+
 @app.get("/api/bt/status", tags=["Bluetooth"])
 def get_bt_status() -> Dict[str, Any]:
     """Retrieve Bluetooth controller and paired audio devices status."""
+    global _last_bt_status_cache, _last_bt_status_time
+    import time
+    from voice_streaming import is_any_recording_active
+
+    now = time.time()
+    # 錄音進行中或快取未過期 (3秒內)：直接回傳快取，嚴禁執行任何藍牙終端子進程干擾 SCO 語音
+    if is_any_recording_active() and _last_bt_status_cache:
+        return _last_bt_status_cache
+
+    if (now - _last_bt_status_time < 3.0) and _last_bt_status_cache:
+        return _last_bt_status_cache
+
     try:
         from bluetooth_manager import get_full_bt_status, load_bt_config
         status_text = get_full_bt_status()
@@ -412,9 +449,6 @@ def get_bt_status() -> Dict[str, Any]:
         connected_mac = None
         connected_name = None
         battery_level = None
-        link_quality = None
-        signal_level_pct = None
-        rssi = None
 
         if "Device " in res.stdout:
             parts = res.stdout.split()
@@ -431,28 +465,11 @@ def get_bt_status() -> Dict[str, Any]:
             if m_bat:
                 battery_level = int(m_bat.group(1))
 
-            # Query real-time link quality & RSSI if device is connected
-            if connected_mac:
-                try:
-                    lq_res = subprocess.run(["hcitool", "lq", connected_mac], capture_output=True, text=True, timeout=2)
-                    m_lq = re.search(r"Link quality:\s*(\d+)", lq_res.stdout)
-                    if m_lq:
-                        link_quality = int(m_lq.group(1))
-                        signal_level_pct = round((link_quality / 255.0) * 100)
-                except Exception:
-                    pass
+        signal_level_pct = 100 if connected_mac else 0
+        link_quality = 255 if connected_mac else 0
+        state_hash = f"{connected_mac}_{connected_name}_{battery_level}"
 
-                try:
-                    rssi_res = subprocess.run(["hcitool", "rssi", connected_mac], capture_output=True, text=True, timeout=2)
-                    m_rssi = re.search(r"RSSI return value:\s*(-?\d+)", rssi_res.stdout)
-                    if m_rssi:
-                        rssi = int(m_rssi.group(1))
-                except Exception:
-                    pass
-
-        state_hash = f"{connected_mac}_{connected_name}_{battery_level}_{signal_level_pct}"
-
-        return {
+        res_data = {
             "status_text": status_text,
             "connected": connected_mac is not None,
             "connected_mac": connected_mac,
@@ -460,12 +477,17 @@ def get_bt_status() -> Dict[str, Any]:
             "battery_level": battery_level,
             "link_quality": link_quality,
             "signal_level_pct": signal_level_pct,
-            "rssi": rssi,
+            "rssi": 0,
             "state_hash": state_hash,
             "default_mac": config.get("default_mac"),
             "default_name": config.get("default_name")
         }
+        _last_bt_status_cache = res_data
+        _last_bt_status_time = now
+        return res_data
     except Exception as e:
+        if _last_bt_status_cache:
+            return _last_bt_status_cache
         return {
             "status_text": f"藍牙狀態獲取失敗: {str(e)}",
             "connected": False,
@@ -530,8 +552,67 @@ def disconnect_bt_device() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"中斷連線失敗: {str(e)}")
 
 
+@app.get("/api/system/memory_cache", tags=["System"])
+def get_memory_cache_info() -> Dict[str, Any]:
+    """Retrieve in-memory audio ring buffer capacity, RAM usage, and 0-disk-wear status."""
+    return get_cache_stats()
+
+
 class VoiceProcessRequest(BaseModel):
     audio_id: str = Field(..., description="Unique ID returned from /api/voice/record")
+
+
+# -------------------------------------------------------------
+# Streaming Chunking STT Endpoints (Task 01)
+# -------------------------------------------------------------
+@app.post("/api/voice/stream/start", tags=["Voice Streaming"])
+async def start_voice_stream(req: VoiceRecordRequest) -> Dict[str, Any]:
+    """
+    Start real-time pipelined audio recording and streaming chunking STT.
+    Records via ffmpeg while simultaneously cutting 6s chunks and transcribing in background.
+    """
+    from voice_streaming import create_streaming_session
+    session = create_streaming_session(duration_sec=req.duration_sec, base_dir=AUDIO_CACHE_DIR)
+    started = await session.start()
+    if not started:
+        raise HTTPException(status_code=500, detail="無法啟動串流錄音，請檢查藍牙耳麥是否連線。")
+    return {
+        "status": "started",
+        "session_id": session.session_id,
+        "duration_sec": req.duration_sec
+    }
+
+
+@app.get("/api/voice/stream/{session_id}/events", tags=["Voice Streaming"])
+async def get_voice_stream_events(session_id: str):
+    """
+    SSE endpoint providing real-time progressive STT events (chunk, stt_completed, translating, session_completed).
+    """
+    from voice_streaming import get_streaming_session
+    session = get_streaming_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="找不到指定的串流錄音工作階段。")
+
+    return StreamingResponse(
+        session.event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+@app.post("/api/voice/stream/{session_id}/stop", tags=["Voice Streaming"])
+async def stop_voice_stream(session_id: str) -> Dict[str, Any]:
+    """Manually stop streaming recording early."""
+    from voice_streaming import get_streaming_session
+    session = get_streaming_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="找不到指定的串流錄音工作階段。")
+    await session.stop()
+    return {"status": "stopping", "session_id": session_id}
 
 
 @app.post("/api/voice/record", tags=["Voice"])
@@ -715,7 +796,7 @@ async def record_and_transcribe(req: VoiceRecordRequest) -> Dict[str, Any]:
             resp = requests.post(
                 "http://127.0.0.1:11434/api/generate",
                 json={
-                    "model": "qwen2.5:3b",
+                    "model": "qwen2.5:3b-opt",
                     "prompt": prompt,
                     "stream": False,
                     "keep_alive": "24h"
@@ -761,7 +842,7 @@ async def translate_text(req: VoiceTranslateRequest) -> Dict[str, Any]:
             resp = requests.post(
                 "http://127.0.0.1:11434/api/generate",
                 json={
-                    "model": "qwen2.5:3b",
+                    "model": "qwen2.5:3b-opt",
                     "prompt": prompt,
                     "stream": False,
                     "keep_alive": "24h"

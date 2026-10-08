@@ -1,108 +1,104 @@
-# 規格說明書 (SPEC.md): Raspberry Pi 5 Telegram 雙向語音 AI 助理與三層記憶金字塔
-# (Specification: Pi 5 Telegram Voice AI Agent with Three-Tier Memory Hierarchy)
+# 規格文件 (SPEC.md): Task 05 - 記憶體環形緩衝區與零磁碟 I/O (In-Memory Ring Buffer & Zero-Disk I/O)
 
-## 1. 系統目標與概述 (System Objectives & Overview)
-本規格定義在 **Raspberry Pi 5 (ARM Cortex-A76 四核心 @ 2.40 GHz, 16GB LPDDR4X RAM)** 上構建之 24/7 常駐個人 AI 代理系統：
-- **主要互動介面 (Interface):** Telegram 雙向語音與文字互動 (Voice-to-Voice & Text-to-Text)。
-- **核心推理引擎 (LLM Engine):** 本地 Native Ollama REST API (`http://127.0.0.1:11434`)，優先調用已調優模型 `qwen2.5:3b-opt` (繁中最佳)、`deepseek-r1:1.5b-opt` (極速思考)。
-- **長期記憶系統 (Memory Hierarchy):** 三層記憶金字塔 (Three-Tier Memory Pyramid: 即時緩衝 + 用戶畫像 KV + 本地語意向量庫)。
-- **完全隱私與開銷控制 (Privacy & Efficiency):** 語音轉錄、向量化、記憶檢索與推論 100% 在樹莓派本地閉環運作，記憶體常駐開銷控制於 250 MB 以內。
+> **版本 (Version):** 1.0.0  
+> **模組路徑 (Module Path):** `code_dispatcher/voice_memory.py`, `code_dispatcher/voice_pipeline.py`, `code_dispatcher/voice_streaming.py`, `code_dispatcher/main.py`  
+> **建立日期 (Date):** 2026-10-08  
+> **架構師 (Architect):** Senior Staff Software Engineer  
 
 ---
 
-## 2. 系統架構與資料流 (System Architecture & Data Flow)
+## 1. 背景與現狀問題 (Background & Problem Statement)
+
+目前系統錄音與語音管線在處理音訊時，大量依賴實體快閃儲存 (MicroSD / eMMC / NVMe)：
+1. **實體磁碟過度寫入與耗損 (Flash Storage Wear)：**
+   - 每次錄音生成 `master.ogg`、ffmpeg 轉出 `master.mp3`、切出 `chunk_000.ogg`，全寫入 `/home/pi/code_dispatcher/audio_cache`。
+   - `voice_pipeline.py` 在執行 STT 前，又透過 ffmpeg 將音訊轉存為暫存實體檔案 `temp_whisper_xxx.wav`，辨識完再手動刪除。
+   - 頻繁的建立與刪除造成快閃記憶體區塊磨損 (Write Amplification)，長期運行極易引發檔案系統壞軌。
+2. **I/O 延遲開銷 (I/O Latency Overhead)：**
+   - 磁碟寫入與同步 (fsync) 在 MicroSD 上產生 200~400ms 的無謂等待。
+
+---
+
+## 2. 目標與驗收標準 (Objectives & Acceptance Criteria)
+
+### 2.1 核心目標
+1. **純記憶體 RAM-Disk 快取 (`/dev/shm/audio_cache`)：**
+   - 將音訊暫存目錄掛載/重定向至 Linux 原生 POSIX 共享記憶體 `tmpfs` (`/dev/shm/audio_cache`)。
+   - 所有即時音訊檔讀寫 100% 在 RAM 中完成，**實體磁碟寫入量降為 0**。
+2. **純記憶體音訊串流解碼 (Zero-Disk In-Memory PCM Decoding)：**
+   - 徹底移除 `temp_whisper_xxx.wav` 實體暫存檔機制。
+   - 透過 ffmpeg 管道 (`pipe:1`) 直接將音訊解碼為 16kHz s16le PCM 位元組流至記憶體中，轉為 `np.float32` 陣列直接餵入 `WhisperModel.transcribe()`。
+3. **容量感知環形緩衝區 (Capacity-Aware Ring Buffer)：**
+   - 實作 FIFO 環形配額管理 (`AudioMemoryRingBuffer`)，上限設為 64MB 或最近 15 筆音訊。超過閥值時自動淘汰最舊音訊，嚴防 RAM 洩漏。
+4. **驗收標準：**
+   - 語音轉錄流程全線無任何暫存 `.wav` 檔案落地。
+   - 音訊轉換階段延遲縮減 >150ms。
+
+---
+
+## 3. 系統架構設計 (System Architecture)
 
 ```mermaid
-flowchart TD
-    User([使用者手機 Telegram]) -->|語音 .oga / 文字| TG[python-telegram-bot 長輪詢閘道]
-    
-    subgraph Voice Pipeline [雙向語音處理管線]
-        TG -->|語音輸入| FFMPEG[ffmpeg 音訊轉碼 16kHz WAV]
-        FFMPEG --> STT[faster-whisper 本地轉錄 / Groq 備援]
-        STT --> TextPrompt[使用者提問文字]
-        TG -->|純文字輸入| TextPrompt
+graph TD
+    subgraph 🎙️ 語音收音與切片 (In-Memory POSIX RAM-Disk)
+        MIC["藍牙耳麥輸入"] --> FFMPEG["ffmpeg (pulse)"]
+        FFMPEG --> RAMFS["/dev/shm/audio_cache (tmpfs in RAM)"]
+        RAMFS --> M_OGG["master.ogg (RAM)"]
+        RAMFS --> CHUNKS["chunk_*.ogg (RAM)"]
+        RAMFS --> RING["AudioMemoryRingBuffer (Max 64MB FIFO Eviction)"]
     end
 
-    subgraph Memory Hierarchy [三層記憶金字塔]
-        TextPrompt --> Retr[記憶檢索調度器]
-        Retr <--> Tier1[Tier 1: 短期對話緩衝記憶體最近 8 輪]
-        Retr <--> Tier2[Tier 2: 使用者個人事實特徵 SQLite/JSON]
-        Retr <--> Tier3[Tier 3: 語意長期記憶庫 sqlite-vec + nomic-embed-text]
-        Retr --> PromptAssembler[動態 Prompt 注入組裝器]
+    subgraph ⚡ 零磁碟 STT 串流解碼 (Zero-Disk In-Memory PCM)
+        CHUNKS --> PIPE["ffmpeg pipe:1 (stdout)"]
+        PIPE --> PCM["raw s16le PCM bytes (In-Memory)"]
+        PCM --> NUMPY["np.float32 (16kHz Mono Array)"]
+        NUMPY --> WHISPER["faster-whisper (Direct Array Inference)"]
     end
 
-    subgraph Brain [本機推論大腦]
-        PromptAssembler --> OllamaAPI[Native Ollama REST API :11434]
-        OllamaAPI --> ModelInfer[qwen2.5:3b-opt / deepseek-r1:1.5b-opt]
-        ModelInfer --> TextResponse[LLM 生成文字解答]
+    subgraph 🌐 靜態音訊回放 (Web Player Serving)
+        M_OGG --> MP3["master.mp3 (RAM)"]
+        MP3 --> FASTAPI["FastAPI /audio mount (/dev/shm/audio_cache)"]
+        FASTAPI --> BROWSER["📱 瀏覽器直接試聽 (極速微秒級加載)"]
     end
-
-    subgraph Outbound Voice [語音合成回傳]
-        TextResponse --> Choice{使用者是否用語音提問?}
-        Choice -->|是| TTS[Piper TTS / Edge-TTS 合成語音 .ogg]
-        TTS -->|發送語音訊息| TG
-        Choice -->|否 (純文字)| TextOut[發送 Markdown 文字訊息]
-        TextOut --> TG
-    end
-
-    TG -->|即時語音/文字串流| User
 ```
 
 ---
 
-## 3. 三層記憶金字塔詳細設計 (Three-Tier Memory Hierarchy Specification)
+## 4. 詳細技術規格 (Technical Specifications)
 
-### 3.1 Tier 1: 即時工作對話記憶 (Short-Term Working Memory)
-- **存放媒介:** 記憶體中的 Python `collections.deque(maxlen=16)`（保留最近 8 輪 User & Assistant 對話）。
-- **重置策略:** 使用者發送指令 `/new` 或 `/clear` 時清空。
-- **邊界保護:** 總 Token 數嚴格控制在 1,000 Tokens 以內，避免擠佔 4k Context。
+### 4.1 Linux POSIX 共享記憶體架構
+- 基礎路徑：優先採用 `/dev/shm/audio_cache`。若在非 Linux 系統環境則平滑回退至本機快取目錄。
+- 權限管理：`0755`，確保 FastAPI (Uvicorn) 具備完整讀寫與子目錄建立權限。
 
-### 3.2 Tier 2: 使用者事實畫像特徵 (User Profile & Fact Key-Value)
-- **存放媒介:** 本地 SQLite 資料庫 `telegram_agent/memory.db` 中的 `user_profile` 表格。
-- **欄位結構:**
-  - `key` (TEXT, PRIMARY KEY): 特徵鍵值（如 `user_name`, `preferred_language`, `tech_stack`, `current_project`）。
-  - `value` (TEXT): 特徵內容。
-  - `updated_at` (TIMESTAMP): 最後更新時間。
-- **常駐注入:** 每次發送給 LLM 的 System Prompt 底部均動態附加：
-  ```
-  [User Profile Information]:
-  - Name: Andrew
-  - Preferred Language: Traditional Chinese (繁體中文)
-  - Active Project: pi5-llm-arena on Raspberry Pi 5
-  ```
+### 4.2 零磁碟 PCM 轉換演算法 (In-Memory PCM Streaming)
+```python
+cmd = [
+    "ffmpeg", "-y", "-i", input_audio,
+    "-f", "s16le", "-ac", "1", "-ar", "16000",
+    "-"
+]
+proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+raw_pcm, _ = proc.communicate()
+audio_np = np.frombuffer(raw_pcm, dtype=np.int16).astype(np.float32) / 32768.0
+# 直接傳入 WhisperModel.transcribe(audio_np)
+```
 
-### 3.3 Tier 3: 語意長期記憶庫 (Long-Term Episodic Vector Database)
-- **存放媒介:** `sqlite-vec` 向量資料表或 SQLite + Cosine Distance 檢索庫。
-- **嵌入模型 (Embedding Model):** 本地 Ollama `nomic-embed-text` (768 維度，單次向量化耗時 ~15ms)。
-- **記憶寫入機制 (Consolidation):**
-  - 當短期對話被移出 Tier 1 緩衝區時，觸發背景非同步 Worker。
-  - 提取對話中的關鍵摘要，計算 768 維 Embedding，寫入 `episodic_memories` 表。
-- **記憶檢索機制 (Retrieval):**
-  - 使用者提問時，即時計算提問的 Embedding 向量。
-  - 在 SQLite 執行 KNN 余弦相似度檢索（閾值 > 0.65），擷取 Top-3 相關歷史記憶注入 Prompt。
+### 4.3 環形緩衝區淘汰策略 (Ring Buffer FIFO Eviction)
+- 監控總快取目錄容量。
+- 當容量超過 `MAX_RAMFS_BYTES = 64 * 1024 * 1024` (64MB) 或目錄數超過 `MAX_SESSIONS = 15` 時，依最後修改時間 (mtime) 刪除最舊的 session 目錄。
 
 ---
 
-## 4. 語音雙向管線設計 (Voice Pipeline Specification)
+## 5. 實作檢查清單 (Implementation Checklist)
 
-### 4.1 語音辨識 (STT)
-- **套件:** `faster-whisper` (基於 CTranslate2，支援 ARM64 NEON)。
-- **模型:** `base` 或 `small` (量化 `int8`，佔用 RAM < 200MB)。
-- **流程:** Telegram 下載 `.oga` $\to$ `ffmpeg` 轉碼為 16kHz 單聲道 WAV $\to$ `faster-whisper.transcribe()` $\to$ 輸出文字。
-
-### 4.2 語音合成 (TTS)
-- **引擎選型:**
-  - **首選 (高品質免連線):** `edge-tts` (微軟神經語音，繁體中文台灣女聲 `zh-TW-HsiaoChenNeural` / 男聲 `zh-TW-YunJheNeural`)。
-  - **本地離線備援 (純離線 C++):** `piper` (`zh_CN-huayan-medium`)。
-- **輸出格式:** OGG / OPUS 封裝，發送為 Telegram 原生 Voice Message (語音泡泡)，支援倍速播放。
-
----
-
-## 5. 安全性與生產環境部署 (Security & Production Daemon)
-
-1. **白名單授權防護 (Access Control):**
-   - 伺服器設定 `ALLOWED_TELEGRAM_USER_IDS`（如使用者的個人 Telegram ID）。
-   - 未經授權之 Telegram 使用者發起訊息一律直接拒絕並記錄日誌。
-2. **24/7 Systemd 守護進程:**
-   - 服務檔案: `/etc/systemd/system/pi5-telegram-agent.service`。
-   - 支援開機自動啟動、異常崩潰自動重啟 (`Restart=always`, `RestartSec=5s`)。
+- [ ] **Phase 1: 記憶體環形緩衝區模組實裝 (`code_dispatcher/voice_memory.py`)**
+  - 實作 `init_memory_cache()`、`evict_ring_buffer()`。
+  - 封裝 `audio_to_pcm_array()` 零磁碟記憶體轉換函式。
+- [ ] **Phase 2: 語音管線零磁碟改造 (`code_dispatcher/voice_pipeline.py`)**
+  - 改造 `speech_to_text()`：徹底移除實體 `wav_path` 寫入/刪除邏輯，全面接入 `audio_to_pcm_array()`。
+- [ ] **Phase 3: 串流與 API 目錄重定向至 RAMFS (`code_dispatcher/main.py`, `voice_streaming.py`)**
+  - 將 `AUDIO_CACHE_DIR` 導向 `/dev/shm/audio_cache`。
+  - 在每次 session 完成時觸發環形緩衝區配額維護。
+- [ ] **Phase 4: 本機實測與部署驗證**
+  - 檢查 `/dev/shm/audio_cache` 運作與 `lsof` / `df -h /dev/shm` 佔用。
+  - 驗證無任何檔案寫入 MicroSD 實體磁區。

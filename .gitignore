@@ -18,3 +18,8 @@ telegram_agent/data/
 telegram_agent/temp/
 *.db
 .vscode/
+
+# Audio files
+*.mp3
+*.wav
+*.ogg
