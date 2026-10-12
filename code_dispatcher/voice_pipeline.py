@@ -228,22 +228,88 @@ def speech_to_text(audio_path: str) -> Optional[str]:
 
 async def text_to_speech_async(text: str, output_ogg_path: Optional[str] = None, voice: str = DEFAULT_TTS_VOICE) -> bool:
     """
-    Synthesize text into natural Traditional Chinese neural voice using edge-tts.
-    Outputs as OGG/Opus compatible with Telegram Voice Message.
+    Synthesize text into natural voice with multi-tier fallback:
+    Tier 1: gTTS (Google Translate Neural TTS - ultra stable, natural, zero DRM 403 blocks)
+    Tier 2: edge-tts (Microsoft Neural Voice)
+    Tier 3: espeak-ng (100% offline local speech synthesizer)
+    Outputs audio compatible with PipeWire pw-play / web player.
     """
-    if not text.strip():
+    if not text or not text.strip():
         return False
     if output_ogg_path is None:
         import uuid
         output_ogg_path = os.path.join(TEMP_AUDIO_DIR, f"tts_{uuid.uuid4().hex[:8]}.ogg")
+
+    clean_text = text.strip()
+
+    # Tier 1: 優先嘗試 gTTS (穩定自然，杜絕微軟 403 阻擋)
+    try:
+        from gtts import gTTS
+        is_english = any(ord(c) < 128 and c.isalpha() for c in clean_text[:30]) and not any('\u4e00' <= c <= '\u9fff' for c in clean_text[:30])
+        lang = "en" if is_english else "zh-tw"
+        temp_mp3 = output_ogg_path + ".tmp.mp3"
+        tts_obj = gTTS(text=clean_text, lang=lang)
+        tts_obj.save(temp_mp3)
+
+        if os.path.exists(temp_mp3) and os.path.getsize(temp_mp3) > 0:
+            if output_ogg_path.endswith(".ogg") or output_ogg_path.endswith(".wav"):
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", temp_mp3, "-c:a", "libopus" if output_ogg_path.endswith(".ogg") else "pcm_s16le", output_ogg_path],
+                    capture_output=True, timeout=10
+                )
+                try:
+                    os.remove(temp_mp3)
+                except Exception:
+                    pass
+            else:
+                os.replace(temp_mp3, output_ogg_path)
+
+            if os.path.exists(output_ogg_path) and os.path.getsize(output_ogg_path) > 0:
+                print(f"[VoicePipeline] gTTS ({lang}) synthesis succeeded: {output_ogg_path}")
+                return True
+    except Exception as ge:
+        print(f"[VoicePipeline] gTTS fallback attempt: {ge}")
+
+    # Tier 2: 嘗試 edge-tts (微軟神經語音)
     try:
         import edge_tts
-        communicate = edge_tts.Communicate(text, voice)
+        communicate = edge_tts.Communicate(clean_text, voice)
         await communicate.save(output_ogg_path)
-        return os.path.exists(output_ogg_path) and os.path.getsize(output_ogg_path) > 0
+        if os.path.exists(output_ogg_path) and os.path.getsize(output_ogg_path) > 0:
+            print(f"[VoicePipeline] edge-tts synthesis succeeded: {output_ogg_path}")
+            return True
     except Exception as e:
         print(f"[VoicePipeline] edge-tts synthesis failed: {e}")
-        return False
+
+    # Tier 3: 終極本地離線保底: espeak-ng
+    try:
+        is_english = not any('\u4e00' <= c <= '\u9fff' for c in clean_text[:30])
+        voice_opt = "en" if is_english else "cmn"
+        temp_wav = output_ogg_path + ".tmp.wav"
+        res = subprocess.run(
+            ["espeak-ng", "-v", voice_opt, "-w", temp_wav, clean_text[:500]],
+            capture_output=True, timeout=10
+        )
+        if res.returncode == 0 and os.path.exists(temp_wav) and os.path.getsize(temp_wav) > 0:
+            if output_ogg_path.endswith(".ogg"):
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", temp_wav, "-c:a", "libopus", output_ogg_path],
+                    capture_output=True, timeout=10
+                )
+                try:
+                    os.remove(temp_wav)
+                except Exception:
+                    pass
+            else:
+                os.replace(temp_wav, output_ogg_path)
+
+            if os.path.exists(output_ogg_path) and os.path.getsize(output_ogg_path) > 0:
+                print(f"[VoicePipeline] espeak-ng offline synthesis succeeded: {output_ogg_path}")
+                return True
+    except Exception as ee:
+        print(f"[VoicePipeline] espeak-ng synthesis failed: {ee}")
+
+    return False
 
 
 def text_to_speech(text: str, output_ogg_path: str, voice: str = DEFAULT_TTS_VOICE) -> bool:
