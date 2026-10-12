@@ -252,10 +252,11 @@ details[open] summary::after{content:"收起 ▴"}
         <div class="row" style="gap:14px">
           <span style="font-size:28px">🎧</span>
           <div style="flex:1 1 200px;min-width:0">
-            <div class="row" style="gap:8px">
+            <div class="row" style="gap:8px;flex-wrap:wrap">
               <h2 id="hubCurName" style="font-size:18px;margin:0">檢查中...</h2>
               <span class="chip off" id="hubCurBadge"><span class="dot"></span><span id="hubCurStatus">未連線</span></span>
-              <span class="chip out" id="hubBatteryPill" hidden>🔋 <span id="hubBatteryVal">--%</span></span>
+              <span class="chip off" id="hubBatteryPill" style="font-size:12px">🔋 <span id="hubBatteryVal">--</span></span>
+              <span class="chip off" id="hubSignalPill" style="font-size:12px">📶 <span id="hubSignalVal">--</span></span>
             </div>
             <div id="hubCurMac" style="font-size:12px;color:var(--muted);font-family:monospace;margin-top:2px">MAC: --:--:--:--:--:--</div>
           </div>
@@ -328,7 +329,8 @@ const el = {
   btnOpenBtMgr: $('btnOpenBtMgr'), btnConnectDefault: $('btnConnectDefault'), btnQuickDisconnect: $('btnQuickDisconnect'),
   btnBackToMain: $('btnBackToMain'), btnRefreshBtHub: $('btnRefreshBtHub'),
   hubCurName: $('hubCurName'), hubCurMac: $('hubCurMac'), hubCurBadge: $('hubCurBadge'), hubCurStatus: $('hubCurStatus'),
-  hubBatteryPill: $('hubBatteryPill'), hubBatteryVal: $('hubBatteryVal'), hubBtnDisconnect: $('hubBtnDisconnect'),
+  hubBatteryPill: $('hubBatteryPill'), hubBatteryVal: $('hubBatteryVal'),
+  hubSignalPill: $('hubSignalPill'), hubSignalVal: $('hubSignalVal'), hubBtnDisconnect: $('hubBtnDisconnect'),
   hubBtnScan: $('hubBtnScan'), hubScanContainer: $('hubScanContainer'), hubTrustedContainer: $('hubTrustedContainer')
 };
 
@@ -400,6 +402,13 @@ async function refreshBt() {
 }
 
 /* ---------- 藍牙裝置管理中心 (Bluetooth Hub) ---------- */
+function getRssiQualityText(rssi) {
+  if (rssi == null) return '';
+  if (rssi >= -60) return '極佳';
+  if (rssi >= -75) return '良好';
+  return '微弱';
+}
+
 async function refreshBtHub() {
   try {
     const b = await api(API.btStatus);
@@ -410,11 +419,34 @@ async function refreshBtHub() {
     el.hubCurStatus.textContent = conn ? 'CONNECTED' : 'DISCONNECTED';
     el.hubBtnDisconnect.disabled = !conn;
 
-    if (conn && b.battery_level != null) {
-      el.hubBatteryPill.hidden = false;
-      el.hubBatteryVal.textContent = b.battery_level + '%';
+    // 電量顯示
+    if (conn) {
+      if (b.battery_level != null) {
+        el.hubBatteryPill.className = 'chip ' + (b.battery_level <= 20 ? 'err' : (b.battery_level <= 50 ? 'minor' : 'out'));
+        el.hubBatteryVal.textContent = b.battery_level + '%';
+      } else {
+        el.hubBatteryPill.className = 'chip off';
+        el.hubBatteryVal.textContent = '電量未回報';
+      }
     } else {
-      el.hubBatteryPill.hidden = true;
+      el.hubBatteryPill.className = 'chip off';
+      el.hubBatteryVal.textContent = '未連線';
+    }
+
+    // 訊號強度顯示
+    if (conn) {
+      el.hubSignalPill.className = 'chip';
+      if (b.rssi != null && b.rssi !== 0) {
+        const q = getRssiQualityText(b.rssi);
+        el.hubSignalVal.textContent = `${b.rssi} dBm (${q})`;
+      } else if (b.signal_level_pct) {
+        el.hubSignalVal.textContent = `訊號良好 (${b.signal_level_pct}%)`;
+      } else {
+        el.hubSignalVal.textContent = '已連線 (正常)';
+      }
+    } else {
+      el.hubSignalPill.className = 'chip off';
+      el.hubSignalVal.textContent = '離線';
     }
 
     renderTrustedDevices(b.trusted_devices || []);
@@ -432,11 +464,21 @@ function renderTrustedDevices(list) {
     const isConn = dev.connected;
     const isDef = dev.is_default;
     const autoConn = dev.auto_connect;
+    const batBadge = (isConn && dev.battery_level != null)
+      ? `<span class="chip ${dev.battery_level <= 20 ? 'err' : 'out'}" style="font-size:11px">🔋 ${dev.battery_level}%</span>`
+      : '';
+    const rssiBadge = (isConn && dev.rssi)
+      ? `<span class="chip" style="font-size:11px">📶 ${dev.rssi} dBm</span>`
+      : '';
     return `
       <div class="bt-item">
         <div class="bt-item-info">
           <strong>${esc(dev.name || '耳麥')} ${isDef ? '<span class="tag set" style="font-size:10px">⭐ 預設</span>' : ''}</strong>
-          <span>${esc(dev.mac)}</span>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:2px;flex-wrap:wrap">
+            <span style="font-family:monospace">${esc(dev.mac)}</span>
+            ${batBadge}
+            ${rssiBadge}
+          </div>
         </div>
         <div class="bt-item-actions">
           <span class="chip ${isConn ? '' : 'off'}" style="font-size:12px"><span class="dot"></span>${isConn ? '已連線' : '離線'}</span>
@@ -495,17 +537,26 @@ el.hubBtnScan.addEventListener('click', async () => {
     if (devs.length === 0) {
       el.hubScanContainer.innerHTML = '<div class="empty">未找到可配對的耳麥。請確認耳麥處於紅藍燈配對狀態後重試。</div>';
     } else {
-      el.hubScanContainer.innerHTML = devs.map(d => `
-        <div class="bt-item">
-          <div class="bt-item-info">
-            <strong>🎧 ${esc(d.name || '未知藍牙設備')}</strong>
-            <span>${esc(d.mac)} ${d.rssi ? `(訊號: ${d.rssi} dBm)` : ''}</span>
+      el.hubScanContainer.innerHTML = devs.map(d => {
+        const q = getRssiQualityText(d.rssi);
+        const rssiLabel = d.rssi != null ? `<span class="chip" style="font-size:11px">📶 ${d.rssi} dBm (${q})</span>` : '';
+        const batLabel = d.battery_level != null ? `<span class="chip out" style="font-size:11px">🔋 ${d.battery_level}%</span>` : '';
+        return `
+          <div class="bt-item">
+            <div class="bt-item-info">
+              <strong>🎧 ${esc(d.name || '未知藍牙設備')}</strong>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:2px;flex-wrap:wrap">
+                <span style="font-family:monospace">${esc(d.mac)}</span>
+                ${rssiLabel}
+                ${batLabel}
+              </div>
+            </div>
+            <div class="bt-item-actions">
+              <button class="btn sm primary" data-pair="${esc(d.mac)}">🔗 配對並連線</button>
+            </div>
           </div>
-          <div class="bt-item-actions">
-            <button class="btn sm primary" data-pair="${esc(d.mac)}">🔗 配對並連線</button>
-          </div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
 
       el.hubScanContainer.querySelectorAll('[data-pair]').forEach(pBtn => {
         pBtn.addEventListener('click', async () => {
@@ -681,9 +732,9 @@ function mock(path, body) {
   if (path === API.bt) return { connected: true, name: 'RichChipAN' };
   if (path === API.btStatus) return {
     connected: true, connected_name: 'RichChipAN', connected_mac: 'E8:07:BF:22:A1:99',
-    battery_level: 80, signal_level_pct: 95,
+    battery_level: 85, signal_level_pct: 92, rssi: -56,
     trusted_devices: [
-      { mac: 'E8:07:BF:22:A1:99', name: 'RichChipAN (當前耳麥)', connected: true, is_default: true, auto_connect: true },
+      { mac: 'E8:07:BF:22:A1:99', name: 'RichChipAN (當前耳麥)', connected: true, is_default: true, auto_connect: true, battery_level: 85, rssi: -56 },
       { mac: '00:1B:66:88:99:AA', name: 'Sony WH-1000XM4', connected: false, is_default: false, auto_connect: true },
       { mac: '44:5C:E9:12:34:56', name: 'AirPods Pro 2', connected: false, is_default: false, auto_connect: false }
     ]
@@ -691,8 +742,8 @@ function mock(path, body) {
   if (path === API.btScan) return {
     ok: true, count: 2, msg: '找到 2 個周圍設備',
     devices: [
-      { mac: 'A4:C1:38:99:88:77', name: 'Bose QuietComfort 45', rssi: -58 },
-      { mac: 'B8:D5:0B:44:33:22', name: 'Jabra Evolve2 65', rssi: -72 }
+      { mac: 'A4:C1:38:99:88:77', name: 'Bose QuietComfort 45', rssi: -58, battery_level: 70 },
+      { mac: 'B8:D5:0B:44:33:22', name: 'Jabra Evolve2 65', rssi: -72, battery_level: 45 }
     ]
   };
   if (path === API.btPair) return { ok: true, msg: '已成功配對並信任設備' };

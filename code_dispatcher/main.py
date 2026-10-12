@@ -497,6 +497,7 @@ def get_bt_status() -> Dict[str, Any]:
     """Retrieve Bluetooth controller and paired audio devices status."""
     global _last_bt_status_cache, _last_bt_status_time
     import time
+    import re
     from voice_streaming import is_any_recording_active
 
     now = time.time()
@@ -512,32 +513,71 @@ def get_bt_status() -> Dict[str, Any]:
         status_text = get_full_bt_status()
         config = load_bt_config()
 
-        # Check connected device
-        res = subprocess.run(["bluetoothctl", "info"], capture_output=True, text=True, timeout=3)
+        # 1. 檢測真實連線中的藍牙設備 (優先查詢 devices Connected，避免誤判離線設備)
         connected_mac = None
         connected_name = None
         battery_level = None
+        rssi = None
+        signal_level_pct = 0
+        link_quality = 0
 
-        if "Device " in res.stdout:
-            parts = res.stdout.split()
-            idx = parts.index("Device") if "Device" in parts else -1
-            if idx != -1 and idx + 1 < len(parts):
-                connected_mac = parts[idx + 1]
-            import re
-            m = re.search(r"Name:\s*(.+)", res.stdout)
-            if m:
-                connected_name = m.group(1).strip()
+        res_conn = subprocess.run(["bluetoothctl", "devices", "Connected"], capture_output=True, text=True, timeout=3)
+        for line in res_conn.stdout.strip().split("\n"):
+            m_c = re.match(r"^Device\s+([0-9A-Fa-f:]{17})\s*(.*)$", line.strip())
+            if m_c:
+                connected_mac = m_c.group(1).upper()
+                connected_name = m_c.group(2).strip() or None
+                break
 
-            # Battery parsing e.g. "Battery Percentage: 0x28 (40)"
-            m_bat = re.search(r"Battery Percentage:\s*.*\((\d+)\)", res.stdout)
+        # 備用檢查：若 devices Connected 未列出，查詢 bluetoothctl info 確認是否包含 Connected: yes
+        if not connected_mac:
+            res_info_any = subprocess.run(["bluetoothctl", "info"], capture_output=True, text=True, timeout=3)
+            if "Connected: yes" in res_info_any.stdout:
+                m_dev = re.search(r"Device\s+([0-9A-Fa-f:]{17})", res_info_any.stdout)
+                if m_dev:
+                    connected_mac = m_dev.group(1).upper()
+                    m_name = re.search(r"Name:\s*(.+)", res_info_any.stdout)
+                    if m_name:
+                        connected_name = m_name.group(1).strip()
+
+        # 2. 若有設備已連線，針對該設備提取電池電量與訊號強度
+        if connected_mac:
+            res_dev_info = subprocess.run(["bluetoothctl", "info", connected_mac], capture_output=True, text=True, timeout=3)
+            if not connected_name:
+                m_n = re.search(r"Name:\s*(.+)", res_dev_info.stdout)
+                if m_n:
+                    connected_name = m_n.group(1).strip()
+
+            # 電量解析 (支援 0x.. (85) 與純數字 (85))
+            m_bat = re.search(r"Battery Percentage:\s*.*\((\d+)\)", res_dev_info.stdout) or re.search(r"Battery Percentage:\s*(\d+)", res_dev_info.stdout)
             if m_bat:
                 battery_level = int(m_bat.group(1))
 
-        signal_level_pct = 100 if connected_mac else 0
-        link_quality = 255 if connected_mac else 0
-        state_hash = f"{connected_mac}_{connected_name}_{battery_level}"
+            # RSSI 訊號強度解析
+            m_rssi = re.search(r"RSSI:\s*(-?\d+)", res_dev_info.stdout)
+            if m_rssi:
+                rssi = int(m_rssi.group(1))
 
-        # Fetch trusted devices list for multi-device management
+            # 錄音未進行時，若 BlueZ 未回報 RSSI 且具備 hcitool，嘗試安全獲取
+            if rssi is None and not is_any_recording_active():
+                try:
+                    res_hcitool = subprocess.run(["hcitool", "rssi", connected_mac], capture_output=True, text=True, timeout=2)
+                    m_h_rssi = re.search(r"RSSI return value:\s*(-?\d+)", res_hcitool.stdout)
+                    if m_h_rssi:
+                        rssi = int(m_h_rssi.group(1))
+                except Exception:
+                    pass
+
+            # 計算訊號百分比 (若有 RSSI 則依 -100 ~ -40 dBm 轉換；若無則依連線狀態給予預設值)
+            if rssi is not None:
+                signal_level_pct = max(10, min(100, int((rssi + 100) * 1.8)))
+            else:
+                signal_level_pct = 90
+            link_quality = int(signal_level_pct * 2.55)
+
+        state_hash = f"{connected_mac}_{connected_name}_{battery_level}_{rssi}"
+
+        # 3. 取得已信任設備清單
         trusted_devices = []
         try:
             res_trusted = subprocess.run(["bluetoothctl", "devices", "Trusted"], capture_output=True, text=True, timeout=3)
@@ -555,7 +595,9 @@ def get_bt_status() -> Dict[str, Any]:
                         "name": d_name,
                         "connected": is_conn,
                         "is_default": is_def,
-                        "auto_connect": auto_conn
+                        "auto_connect": auto_conn,
+                        "battery_level": battery_level if is_conn else None,
+                        "rssi": rssi if is_conn else None
                     })
         except Exception as e_t:
             logger.warning(f"Error fetching trusted devices: {e_t}")
@@ -568,7 +610,7 @@ def get_bt_status() -> Dict[str, Any]:
             "battery_level": battery_level,
             "link_quality": link_quality,
             "signal_level_pct": signal_level_pct,
-            "rssi": 0,
+            "rssi": rssi,
             "state_hash": state_hash,
             "default_mac": config.get("default_mac"),
             "default_name": config.get("default_name"),

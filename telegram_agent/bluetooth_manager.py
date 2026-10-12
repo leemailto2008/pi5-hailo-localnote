@@ -120,12 +120,21 @@ def scan_devices(timeout_sec: int = 10) -> List[Dict[str, str]]:
                     is_paired = "Paired: yes" in info_res.stdout
                     is_trusted = "Trusted: yes" in info_res.stdout
 
+                    # 提取 RSSI 訊號強度與電池電量
+                    rssi_m = re.search(r"RSSI:\s*(-?\d+)", info_res.stdout)
+                    rssi = int(rssi_m.group(1)) if rssi_m else None
+
+                    bat_m = re.search(r"Battery Percentage:\s*.*\((\d+)\)", info_res.stdout) or re.search(r"Battery Percentage:\s*(\d+)", info_res.stdout)
+                    battery = int(bat_m.group(1)) if bat_m else None
+
                     devices.append({
                         "mac": mac,
                         "name": name,
                         "connected": is_connected,
                         "paired": is_paired,
-                        "trusted": is_trusted
+                        "trusted": is_trusted,
+                        "rssi": rssi,
+                        "battery_level": battery
                     })
     except Exception as e:
         logger.error(f"Error querying scanned devices: {e}")
@@ -410,7 +419,7 @@ def get_device_battery(mac: str) -> Optional[int]:
     """Retrieve device battery percentage from BlueZ info."""
     try:
         res = subprocess.run(["bluetoothctl", "info", mac], capture_output=True, text=True, timeout=3)
-        m = re.search(r"Battery Percentage:\s*0x[0-9a-fA-F]+\s*\((\d+)\)", res.stdout)
+        m = re.search(r"Battery Percentage:\s*.*\((\d+)\)", res.stdout) or re.search(r"Battery Percentage:\s*(\d+)", res.stdout)
         if m:
             return int(m.group(1))
     except Exception:
