@@ -7,8 +7,14 @@ Exposes REST endpoints for pushing code analysis tasks to Redis Queue.
 import os
 import sys
 import subprocess
+import logging
+import re
+import time
+import json
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+
+logger = logging.getLogger("pi5-dispatcher")
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -735,7 +741,7 @@ def connect_bt_device(req: Optional[BTConnectRequest] = None) -> Dict[str, Any]:
 
         for curr_mac in connected_macs:
             if curr_mac != target_mac_upper:
-                logger.info(f"[BT Handover] 自動中斷已連線設備 {curr_mac}，以準備切換至 {target_mac}")
+                print(f"[BT Handover] 自動中斷已連線設備 {curr_mac}，以準備切換至 {target_mac}")
                 subprocess.run(["bluetoothctl", "disconnect", curr_mac], capture_output=True, text=True, timeout=5)
                 time.sleep(0.5)
 

@@ -343,7 +343,14 @@ let state = 'idle', result = null, pollTimer = null, lastJob = null;
 async function api(path, body) {
   if (MOCK) return mock(path, body);
   const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
-  if (!r.ok) throw new Error(path + ' ' + r.status);
+  if (!r.ok) {
+    let detail = '';
+    try {
+      const errData = await r.json();
+      detail = errData.detail || errData.msg || errData.message || '';
+    } catch (_) {}
+    throw new Error(detail || (path + ' ' + r.status));
+  }
   return r.json();
 }
 function toast(msg, ms = 1800) { el.toast.textContent = msg; el.toast.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.toast.classList.remove('show'), ms); }
