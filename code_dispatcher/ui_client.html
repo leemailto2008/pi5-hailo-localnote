@@ -128,17 +128,37 @@ details[open] summary::after{content:"收起 ▴"}
 .spinner{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-@media (max-width:480px){main{padding:14px 16px 56px}.card{padding:16px}.topbar .pill.sys{display:none}}
+@keyframes pulseHighlight{0%{transform:scale(1);box-shadow:0 0 0 0 rgba(30,58,95,.4)}50%{transform:scale(1.008);box-shadow:0 0 0 8px rgba(30,58,95,0)}100%{transform:scale(1);box-shadow:0 0 0 0 rgba(30,58,95,0)}}
+.pulse-highlight{animation:pulseHighlight 1.4s ease-out}
+
+@media (max-width:600px){
+  .topbar{padding:10px 14px;gap:8px}
+  .brand span{display:none}
+  .brand b{font-size:16px}
+  .logo{width:32px;height:32px;font-size:13px;border-radius:8px}
+  .pill{padding:5px 9px;font-size:12px;gap:5px}
+  .topbar .pill.sys{display:inline-flex}
+}
+@media (max-width:480px){
+  main{padding:14px 14px 56px}
+  .card{padding:16px}
+  .topbar{justify-content:space-between}
+  .topbar-pills{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+}
 </style>
 </head>
 <body>
 
 <header class="topbar">
-  <span class="logo">LN</span>
-  <div class="brand"><b>LocalNote 聽記盒</b><span>會議錄音，紀要在盒子裡生成</span></div>
+  <div style="display:flex;align-items:center;gap:10px;min-width:0">
+    <span class="logo">LN</span>
+    <div class="brand"><b>LocalNote 聽記盒</b><span>會議錄音，紀要在盒子裡生成</span></div>
+  </div>
   <span class="spacer"></span>
-  <span class="pill net" id="netPill"><span class="dot"></span><span id="netText">檢查連線狀態…</span></span>
-  <span class="pill sys" id="sysPill">盒子：—</span>
+  <div class="topbar-pills" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
+    <span class="pill net" id="netPill"><span class="dot"></span><span id="netText">檢查連線狀態…</span></span>
+    <span class="pill sys" id="sysPill">盒子：—</span>
+  </div>
 </header>
 
 <main>
@@ -203,7 +223,7 @@ details[open] summary::after{content:"收起 ▴"}
       </section>
 
       <!-- ================= 輸出 ================= -->
-      <section class="col out">
+      <section class="col out" id="secMinutes">
         <span class="tag out">輸出</span>
         <div class="card out">
           <div class="row">
@@ -338,6 +358,7 @@ const el = {
 };
 
 let state = 'idle', result = null, pollTimer = null, lastJob = null;
+let handledDoneJob = null, doneHideTimer = null;
 
 /* ---------- 工具 ---------- */
 async function api(path, body) {
@@ -426,10 +447,15 @@ if (window.location.hash === '#bt' || window.location.pathname === '/bluetooth' 
 /* ---------- 頂部狀態 ---------- */
 async function refreshSystem() {
   try {
-    const s = await api(API.system);
+    const isNarrow = window.innerWidth <= 600;
     el.netPill.classList.toggle('online', !s.offline);
-    el.netText.textContent = s.offline ? '離線運作 · 資料不出盒子' : '維護模式 · 有外網';
-    el.sysPill.textContent = `盒子：${state === 'processing' ? '整理中' : state === 'recording' ? '錄音中' : '待命'} · 負載 ${Math.round(s.cpu)}% · ${Math.round(s.temp)}°C`;
+    if (isNarrow) {
+      el.netText.textContent = s.offline ? '離線模式' : '維護 · 有外網';
+      el.sysPill.textContent = `⚡ ${Math.round(s.cpu)}% · ${Math.round(s.temp)}°C`;
+    } else {
+      el.netText.textContent = s.offline ? '離線運作 · 資料不出盒子' : '維護模式 · 有外網';
+      el.sysPill.textContent = `盒子：${state === 'processing' ? '整理中' : state === 'recording' ? '錄音中' : '待命'} · 負載 ${Math.round(s.cpu)}% · ${Math.round(s.temp)}°C`;
+    }
     if (s.ssid) el.ssid.textContent = s.ssid;
     if (s.host) el.host.textContent = s.host;
     if (s.wifi_qr) { el.qr.src = s.wifi_qr; el.qr.hidden = false; }
@@ -698,28 +724,65 @@ function setState(s) {
   el.regenBtn.disabled = !(result && (s === 'done' || s === 'idle' || s === 'error'));
   refreshSystem();
 }
+function scrollToMinutes() {
+  const target = document.getElementById('secMinutes') || el.minutes;
+  if (target) {
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    target.classList.remove('pulse-highlight');
+    void target.offsetWidth;
+    target.classList.add('pulse-highlight');
+  }
+}
 function renderProgress(st) {
   const p = el.progress;
-  if (st.state === 'idle') { p.hidden = true; return; }
-  p.hidden = false; p.className = 'progress';
+  if (st.state === 'idle') {
+    p.hidden = true;
+    handledDoneJob = null;
+    return;
+  }
   if (st.state === 'recording') {
-    p.classList.add('rec');
+    p.hidden = false; p.className = 'progress rec';
     el.pTitle.textContent = '錄音中';
     el.pEta.textContent = `${fmt(st.elapsed)} / ${fmt(st.total)}`;
     el.pBar.style.width = Math.min(100, 100 * st.elapsed / Math.max(1, st.total)) + '%';
     el.pSteps.textContent = '時間到會自動停';
     el.recSub.textContent = fmt(Math.max(0, st.total - st.elapsed));
+    handledDoneJob = null;
+    clearTimeout(doneHideTimer);
   } else if (st.state === 'processing') {
+    p.hidden = false; p.className = 'progress';
     el.pTitle.textContent = '盒子正在整理紀要';
     el.pEta.textContent = st.eta != null ? `還要約 ${Math.round(st.eta)} 秒` : '';
     el.pBar.style.width = (st.progress ?? 0) + '%';
     const done = (k) => (['record', 'transcribe', 'summarize'].indexOf(st.phase) > ['record', 'transcribe', 'summarize'].indexOf(k)) ? ' ✓' : (st.phase === k ? '…' : '');
     el.pSteps.textContent = `錄音完成 ✓ → 聽寫${done('transcribe')} → 整理紀要${done('summarize')}`;
+    handledDoneJob = null;
+    clearTimeout(doneHideTimer);
   } else if (st.state === 'done') {
-    p.classList.add('ok'); el.pTitle.textContent = '紀要已完成'; el.pEta.textContent = ''; el.pBar.style.width = '100%'; el.pSteps.textContent = '看右邊';
-    setTimeout(() => { if (state === 'done') p.hidden = true; }, 6000);
+    const currentJobKey = st.job || 'done';
+    if (handledDoneJob !== currentJobKey) {
+      handledDoneJob = currentJobKey;
+      p.hidden = false; p.className = 'progress ok';
+      el.pTitle.textContent = '紀要已完成 ✓';
+      el.pEta.textContent = '';
+      el.pBar.style.width = '100%';
+      const isSingleCol = window.innerWidth <= 700;
+      if (isSingleCol) {
+        el.pSteps.innerHTML = '<span style="cursor:pointer;text-decoration:underline" onclick="scrollToMinutes()">👇 紀要已在下方生成 (點擊查看)</span>';
+        setTimeout(() => { scrollToMinutes(); }, 350);
+      } else {
+        el.pSteps.textContent = '👉 請看右側輸出區';
+      }
+      clearTimeout(doneHideTimer);
+      doneHideTimer = setTimeout(() => { p.hidden = true; }, 7000);
+    }
   } else if (st.state === 'error') {
-    p.classList.add('err'); el.pTitle.textContent = '出錯了'; el.pEta.textContent = ''; el.pBar.style.width = '0%'; el.pSteps.textContent = st.msg || '再按一次開始錄音';
+    p.hidden = false; p.className = 'progress err';
+    el.pTitle.textContent = '出錯了';
+    el.pEta.textContent = '';
+    el.pBar.style.width = '0%';
+    el.pSteps.textContent = st.msg || '再按一次開始錄音';
+    handledDoneJob = null;
   }
 }
 async function poll() {
