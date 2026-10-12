@@ -843,14 +843,42 @@ el.copyBtn.addEventListener('click', async () => {
 });
 
 /* ---------- 加分項 ---------- */
+function getMinutesSummaryForTranslation() {
+  if (!result) return '';
+  const lines = [];
+  if (result.summary && result.summary.length) {
+    lines.push('【摘要】');
+    result.summary.forEach(s => lines.push(`• ${s}`));
+  }
+  if (result.todos && result.todos.length) {
+    lines.push('\n【待辦事項】');
+    result.todos.forEach(t => lines.push(`• ${t.item} (${t.owner || '待定'})`));
+  }
+  if (result.decisions && result.decisions.length && result.decisions[0] !== '—') {
+    lines.push('\n【決議】');
+    result.decisions.forEach(d => lines.push(`• ${d}`));
+  }
+  if (lines.length > 0) return lines.join('\n');
+  if (result.markdown) {
+    const withoutTranscript = result.markdown.split('## 逐字稿')[0].split('## 完整逐字稿')[0];
+    return withoutTranscript.trim();
+  }
+  return '';
+}
+
 el.toEnBtn.addEventListener('click', async () => {
-  const textToTranslate = result?.markdown || (result?.summary ? result.summary.join('\n') : '');
+  const textToTranslate = getMinutesSummaryForTranslation();
   if (!textToTranslate || !textToTranslate.trim()) {
     toast('目前尚無會議紀要可供翻譯，請先錄音生成紀要');
     return;
   }
   el.toEnBtn.disabled = true;
-  el.enBox.textContent = '翻譯中（邊緣 AI 模型推論約 2~4 秒）…';
+  let secs = 0;
+  el.enBox.textContent = '翻譯中（樹莓派邊緣推論約需 10~15 秒，已耗時 0s）…';
+  const timer = setInterval(() => {
+    secs++;
+    el.enBox.textContent = `翻譯中（樹莓派邊緣推論約需 10~15 秒，已耗時 ${secs}s）…`;
+  }, 1000);
   try {
     const r = await api(API.translate, { text: textToTranslate, to: 'en' });
     el.enBox.textContent = r.text || '（無翻譯結果）';
@@ -858,6 +886,7 @@ el.toEnBtn.addEventListener('click', async () => {
   } catch (e) {
     el.enBox.textContent = '翻譯失敗：' + e.message;
   } finally {
+    clearInterval(timer);
     el.toEnBtn.disabled = false;
   }
 });

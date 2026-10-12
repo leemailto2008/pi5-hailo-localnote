@@ -1106,20 +1106,25 @@ async def translate_text(req: VoiceTranslateRequest) -> Dict[str, Any]:
     if not clean_text:
         return {"status": "success", "translated_text": "（尚無內容可翻譯，請先錄音生成會議紀要）"}
 
-    # 針對長篇紀要進行邊緣推論長度保護（1200 字以內），確保在樹莓派上 3-5 秒內快速響應
-    if len(clean_text) > 1200:
-        clean_text = clean_text[:1200] + "\n..."
+    # 若傳入的文本包含逐字稿段落，自動剝離，僅翻譯核心紀要（摘要、待辦、決議），節省邊緣運算開銷
+    for marker in ["## 逐字稿", "## 完整逐字稿", "### 逐字稿"]:
+        if marker in clean_text:
+            clean_text = clean_text.split(marker)[0].strip()
+
+    # 針對長篇紀要進行邊緣推論長度保護（600 字以內）
+    if len(clean_text) > 600:
+        clean_text = clean_text[:600] + "\n..."
 
     if req.direction == "zh2en":
         prompt = (
             "You are a professional bilingual interpreter. "
-            "Translate the following Traditional Chinese speech into natural, fluent, idiomatic English. "
-            "Output ONLY the translated English sentence without explanations, notes, or Chinese characters:\n\n"
+            "Translate the following meeting minutes summary and action items into concise, natural, fluent English. "
+            "Keep clean bullet points format. Output ONLY the translated English text without explanations, notes, or Chinese characters:\n\n"
             f"{clean_text}"
         )
     else:
         prompt = (
-            "請將以下英文翻譯成道地流暢的繁體中文 (台灣)，僅輸出翻譯結果，不要包含任何多餘說明：\n\n"
+            "請將以下英文會議紀要翻譯成道地流暢的繁體中文 (台灣)，保持列點格式，僅輸出翻譯結果，不要包含任何多餘說明：\n\n"
             f"{clean_text}"
         )
 
@@ -1133,11 +1138,11 @@ async def translate_text(req: VoiceTranslateRequest) -> Dict[str, Any]:
                     "stream": False,
                     "keep_alive": "24h",
                     "options": {
-                        "num_predict": 300,
+                        "num_predict": 250,
                         "temperature": 0.2
                     }
                 },
-                timeout=45
+                timeout=90
             )
             if resp.status_code == 200:
                 out = resp.json().get("response", "").strip()
