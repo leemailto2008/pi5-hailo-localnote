@@ -350,14 +350,48 @@ function toast(msg, ms = 1800) { el.toast.textContent = msg; el.toast.classList.
 function fmt(s) { s = Math.max(0, Math.round(s)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-/* ---------- 視圖切換 (SPA Router) ---------- */
+/* ---------- 視圖切換 (SPA Router) 與藍牙智慧自動更新 ---------- */
+let btHubHeartbeatTimer = null;
+let lastBtHubStateJson = '';
+
+function startBtHubHeartbeat() {
+  stopBtHubHeartbeat();
+  // 每 3.5 秒在背景自動獲取最新狀態，讓電量、訊號與連線變更無感即時反映
+  btHubHeartbeatTimer = setInterval(() => {
+    if (!el.viewBt.hidden && state !== 'recording') {
+      refreshBtHub(true);
+    }
+  }, 3500);
+}
+
+function stopBtHubHeartbeat() {
+  if (btHubHeartbeatTimer) {
+    clearInterval(btHubHeartbeatTimer);
+    btHubHeartbeatTimer = null;
+  }
+}
+
+function triggerBurstRefresh() {
+  // 切換或中斷連線後，於 0.8s、2s、4s 執行三次快速更新，立即捕捉 PipeWire Sink 與電量
+  [800, 2000, 4000].forEach(delay => {
+    setTimeout(() => {
+      if (!el.viewBt.hidden && state !== 'recording') {
+        refreshBtHub(true);
+      }
+      refreshBt();
+    }, delay);
+  });
+}
+
 function openBtView() {
   el.viewMain.hidden = true;
   el.viewBt.hidden = false;
   window.location.hash = 'bt';
   refreshBtHub();
+  startBtHubHeartbeat();
 }
 function closeBtView() {
+  stopBtHubHeartbeat();
   el.viewBt.hidden = true;
   el.viewMain.hidden = false;
   if (window.location.hash === '#bt') {
@@ -372,7 +406,7 @@ window.closeBtView = closeBtView;
 el.btnOpenBtMgr.addEventListener('click', openBtView);
 el.btChip.addEventListener('click', openBtView);
 el.btnBackToMain.addEventListener('click', closeBtView);
-el.btnRefreshBtHub.addEventListener('click', refreshBtHub);
+el.btnRefreshBtHub.addEventListener('click', () => refreshBtHub(false));
 
 window.addEventListener('hashchange', () => {
   if (window.location.hash === '#bt') openBtView();
@@ -415,7 +449,7 @@ function getRssiQualityText(rssi) {
   return '微弱';
 }
 
-async function refreshBtHub() {
+async function refreshBtHub(silent = false) {
   try {
     const b = await api(API.btStatus);
     const conn = !!b.connected;
@@ -455,9 +489,14 @@ async function refreshBtHub() {
       el.hubSignalVal.textContent = '離線';
     }
 
-    renderTrustedDevices(b.trusted_devices || []);
+    // 只有資料發生變動時才重新渲染 DOM，避免打斷使用者點擊
+    const currentJson = JSON.stringify(b.trusted_devices || []);
+    if (currentJson !== lastBtHubStateJson) {
+      lastBtHubStateJson = currentJson;
+      renderTrustedDevices(b.trusted_devices || []);
+    }
   } catch (e) {
-    toast('讀取藍牙詳細狀態失敗');
+    if (!silent) toast('讀取藍牙詳細狀態失敗');
   }
 }
 
@@ -467,9 +506,9 @@ function renderTrustedDevices(list) {
     return;
   }
   el.hubTrustedContainer.innerHTML = list.map(dev => {
-    const isConn = dev.connected;
-    const isDef = dev.is_default;
-    const autoConn = dev.auto_connect;
+    const isConn = !!dev.connected;
+    const isDef = !!dev.is_default;
+    const autoConn = !!dev.auto_connect;
     const batBadge = (isConn && dev.battery_level != null)
       ? `<span class="chip ${dev.battery_level <= 20 ? 'err' : 'out'}" style="font-size:11px">🔋 ${dev.battery_level}%</span>`
       : '';
@@ -488,13 +527,13 @@ function renderTrustedDevices(list) {
         </div>
         <div class="bt-item-actions">
           <span class="chip ${isConn ? '' : 'off'}" style="font-size:12px"><span class="dot"></span>${isConn ? '已連線' : '離線'}</span>
-          <button class="btn sm ${isConn ? 'ghost' : 'primary'}" data-action="connect" data-mac="${esc(dev.mac)}" ${isConn ? 'disabled' : ''}>
-            ${isConn ? '連線中' : '連線'}
+          <button class="btn sm ${isConn ? 'ghost' : 'primary'}" data-action="connect" data-mac="${esc(dev.mac)}" data-name="${esc(dev.name || dev.mac)}" ${isConn ? 'disabled' : ''}>
+            ${isConn ? '已連線' : '連線'}
           </button>
-          <button class="btn sm ghost" data-action="default" data-mac="${esc(dev.mac)}" ${isDef ? 'disabled' : ''}>
+          <button class="btn sm ghost" data-action="default" data-mac="${esc(dev.mac)}" data-name="${esc(dev.name || dev.mac)}" ${isDef ? 'disabled' : ''}>
             ${isDef ? '已設預設' : '設為預設'}
           </button>
-          <button class="toggle-btn ${autoConn ? 'active' : ''}" data-action="toggle-auto" data-mac="${esc(dev.mac)}" data-curr="${autoConn}">
+          <button class="toggle-btn ${autoConn ? 'active' : ''}" data-action="toggle-auto" data-mac="${esc(dev.mac)}" data-name="${esc(dev.name || dev.mac)}" data-curr="${autoConn}">
             ${autoConn ? '✓ 自動連線: 開' : '✕ 自動連線: 關'}
           </button>
         </div>
@@ -507,23 +546,39 @@ function renderTrustedDevices(list) {
     btn.addEventListener('click', async () => {
       const act = btn.dataset.action;
       const mac = btn.dataset.mac;
+      const devName = btn.dataset.name || mac;
       btn.disabled = true;
       try {
         if (act === 'connect') {
-          toast(`正在連線 ${mac}...`);
+          const isCurrentlyConnectedToOther = el.hubCurStatus.textContent === 'CONNECTED' && !el.hubCurMac.textContent.includes(mac);
+          btn.innerHTML = '<span class="spinner"></span> 切換中...';
+          if (isCurrentlyConnectedToOther) {
+            toast(`正在自動中斷原設備並切換至 ${devName}...`, 3000);
+          } else {
+            toast(`正在連線 ${devName}...`);
+          }
           const r = await api(API.btConnect, { target: mac });
-          toast(r.msg || r.message || '連線成功');
+          toast(r.msg || r.message || `🎧 已成功切換連線至 ${devName}`);
+          lastBtHubStateJson = ''; // 強制更新 DOM
+          await refreshBtHub(true);
+          await refreshBt();
+          triggerBurstRefresh();
         } else if (act === 'default') {
           await api(API.btAuto, { mac: mac, auto_connect: true, set_default: true });
-          toast(`已將 ${mac} 設為預設耳麥`);
+          toast(`已將 ${devName} 設為預設耳麥`);
+          lastBtHubStateJson = '';
+          await refreshBtHub(true);
         } else if (act === 'toggle-auto') {
           const nextVal = btn.dataset.curr !== 'true';
           await api(API.btAuto, { mac: mac, auto_connect: nextVal, set_default: false });
-          toast(`已更新 ${mac} 自動連線設定`);
+          toast(`已更新 ${devName} 自動連線設定為 ${nextVal ? '開' : '關'}`);
+          lastBtHubStateJson = '';
+          await refreshBtHub(true);
         }
-        await refreshBtHub();
       } catch (err) {
         toast('操作失敗：' + err.message);
+        lastBtHubStateJson = '';
+        await refreshBtHub(true);
       } finally {
         btn.disabled = false;
       }
@@ -574,8 +629,9 @@ el.hubBtnScan.addEventListener('click', async () => {
             await api(API.btPair, { target: targetMac });
             toast(`配對成功，正在建立音訊連線...`);
             await api(API.btConnect, { target: targetMac });
-            toast(`🎉 已成功連線至 ${targetMac}`);
-            await refreshBtHub();
+            lastBtHubStateJson = '';
+            await refreshBtHub(true);
+            triggerBurstRefresh();
           } catch (pErr) {
             toast('配對連線失敗：' + pErr.message);
           } finally {
@@ -599,8 +655,10 @@ async function handleBtDisconnect() {
     toast('正在中斷耳麥連線...');
     const r = await api(API.btDisconnect, {});
     toast(r.msg || r.message || '已中斷連線');
-    await refreshBtHub();
+    lastBtHubStateJson = '';
+    await refreshBtHub(true);
     await refreshBt();
+    triggerBurstRefresh();
   } catch (err) {
     toast('中斷失敗：' + err.message);
   }
@@ -731,20 +789,30 @@ refreshSystem(); refreshBt(); poll();
 setInterval(refreshSystem, 2000); setInterval(refreshBt, 5000);
 
 /* ---------- 假後端（?mock=1 預覽用） ---------- */
-let M = { state: 'idle', t0: 0, total: 90, job: 0 };
+let M = {
+  state: 'idle', t0: 0, total: 90, job: 0,
+  connectedMac: 'E8:07:BF:22:A1:99', connectedName: 'RichChipAN',
+  mockTrusted: [
+    { mac: 'E8:07:BF:22:A1:99', name: 'RichChipAN', is_default: true, auto_connect: true, battery_level: 85, rssi: -56 },
+    { mac: '00:1B:66:88:99:AA', name: 'Sony WH-1000XM4', is_default: false, auto_connect: true, battery_level: 90, rssi: -62 },
+    { mac: '44:5C:E9:12:34:56', name: 'AirPods Pro 2', is_default: false, auto_connect: false, battery_level: 75, rssi: -70 }
+  ]
+};
 function mock(path, body) {
   const now = Date.now();
   if (path === API.system) return { offline: true, cpu: M.state === 'processing' ? 97 : 6, temp: M.state === 'processing' ? 52 : 44, mode: 'ap', ssid: 'raspi543_AI', host: 'localnote.local' };
-  if (path === API.bt) return { connected: true, name: 'RichChipAN' };
-  if (path === API.btStatus) return {
-    connected: true, connected_name: 'RichChipAN', connected_mac: 'E8:07:BF:22:A1:99',
-    battery_level: 85, signal_level_pct: 92, rssi: -56,
-    trusted_devices: [
-      { mac: 'E8:07:BF:22:A1:99', name: 'RichChipAN (當前耳麥)', connected: true, is_default: true, auto_connect: true, battery_level: 85, rssi: -56 },
-      { mac: '00:1B:66:88:99:AA', name: 'Sony WH-1000XM4', connected: false, is_default: false, auto_connect: true },
-      { mac: '44:5C:E9:12:34:56', name: 'AirPods Pro 2', connected: false, is_default: false, auto_connect: false }
-    ]
-  };
+  if (path === API.bt) return { connected: !!M.connectedMac, name: M.connectedName || '' };
+  if (path === API.btStatus) {
+    const isConn = !!M.connectedMac;
+    return {
+      connected: isConn, connected_name: M.connectedName, connected_mac: M.connectedMac,
+      battery_level: isConn ? 85 : null, signal_level_pct: isConn ? 92 : 0, rssi: isConn ? -56 : null,
+      trusted_devices: M.mockTrusted.map(d => ({
+        ...d,
+        connected: d.mac === M.connectedMac
+      }))
+    };
+  }
   if (path === API.btScan) return {
     ok: true, count: 2, msg: '找到 2 個周圍設備',
     devices: [
@@ -752,10 +820,34 @@ function mock(path, body) {
       { mac: 'B8:D5:0B:44:33:22', name: 'Jabra Evolve2 65', rssi: -72, battery_level: 45 }
     ]
   };
-  if (path === API.btPair) return { ok: true, msg: '已成功配對並信任設備' };
-  if (path === API.btConnect) return { ok: true, msg: '🎧 已成功連線至耳麥' };
-  if (path === API.btDisconnect) return { ok: true, msg: '已中斷連線' };
-  if (path === API.btAuto) return { ok: true, msg: '已更新自動連線設定' };
+  if (path === API.btPair) {
+    if (body?.target && !M.mockTrusted.some(d => d.mac === body.target)) {
+      M.mockTrusted.push({ mac: body.target, name: '新耳麥', is_default: false, auto_connect: true, battery_level: 80, rssi: -60 });
+    }
+    return { ok: true, msg: '已成功配對並信任設備' };
+  }
+  if (path === API.btConnect) {
+    const target = body?.target || M.mockTrusted[0]?.mac;
+    M.connectedMac = target;
+    const found = M.mockTrusted.find(d => d.mac === target);
+    M.connectedName = found ? found.name : '耳麥';
+    return { ok: true, msg: `🎧 已成功切換連線至耳麥：${M.connectedName}` };
+  }
+  if (path === API.btDisconnect) {
+    M.connectedMac = null;
+    M.connectedName = null;
+    return { ok: true, msg: '已中斷連線' };
+  }
+  if (path === API.btAuto) {
+    const d = M.mockTrusted.find(item => item.mac === body?.mac);
+    if (d) {
+      if (body.auto_connect !== undefined) d.auto_connect = !!body.auto_connect;
+      if (body.set_default) {
+        M.mockTrusted.forEach(item => item.is_default = (item.mac === body.mac));
+      }
+    }
+    return { ok: true, msg: '已更新設定' };
+  }
   if (path === API.record) { M = { state: 'recording', t0: now, total: Math.min(body.seconds, 8), job: M.job + 1 }; return { job: 'j' + M.job }; }
   if (path === API.regenerate) { M.state = 'processing'; M.t0 = now; M.job++; return { job: 'j' + M.job }; }
   if (path === API.status) {

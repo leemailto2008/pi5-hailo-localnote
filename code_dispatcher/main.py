@@ -711,29 +711,49 @@ def set_bt_device_auto_connect(req: BTAutoConnectRequest) -> Dict[str, Any]:
 
 @app.post("/api/bt/connect", tags=["Bluetooth"])
 def connect_bt_device(req: Optional[BTConnectRequest] = None) -> Dict[str, Any]:
-    """Connect to default or specified Bluetooth headset."""
+    """Connect to default or specified Bluetooth headset, automatically disconnecting any existing device first."""
     try:
-        target_mac = req.target.strip() if (req and req.target) else None
-        from bluetooth_manager import connect_default_device, _switch_pipewire_default_sink
+        import time
+        from bluetooth_manager import load_bt_config, _switch_pipewire_default_sink
         
+        target_mac = req.target.strip() if (req and req.target) else None
         if not target_mac:
-            ok, msg = connect_default_device()
-        else:
-            # 連線到指定的 MAC
-            res = subprocess.run(["bluetoothctl", "connect", target_mac], capture_output=True, text=True, timeout=10)
-            res_info = subprocess.run(["bluetoothctl", "info", target_mac], capture_output=True, text=True, timeout=3)
-            dev_name = "耳麥"
-            m = re.search(r"Name:\s*(.+)", res_info.stdout)
-            if m:
-                dev_name = m.group(1).strip()
+            cfg = load_bt_config()
+            target_mac = cfg.get("default_mac")
+            if not target_mac:
+                raise HTTPException(status_code=400, detail="尚未設定預設耳麥，請指定欲連線設備的 MAC 位址。")
 
-            if "Connected: yes" in res_info.stdout or "Connection successful" in res.stdout:
-                _switch_pipewire_default_sink(dev_name)
-                ok = True
-                msg = f"🎧 已成功連線至耳麥：{dev_name} ({target_mac})"
-            else:
-                ok = False
-                msg = f"連線至 {dev_name} ({target_mac}) 失敗，請確認耳麥處於待連線或開機狀態。"
+        target_mac_upper = target_mac.upper()
+
+        # 1. 偵測目前所有連線中的藍牙設備，若存在非目標設備則先自動中斷 (Auto-Disconnect)
+        res_conn = subprocess.run(["bluetoothctl", "devices", "Connected"], capture_output=True, text=True, timeout=4)
+        connected_macs = []
+        for line in res_conn.stdout.splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 2 and parts[0].lower() == "device":
+                connected_macs.append(parts[1].upper())
+
+        for curr_mac in connected_macs:
+            if curr_mac != target_mac_upper:
+                logger.info(f"[BT Handover] 自動中斷已連線設備 {curr_mac}，以準備切換至 {target_mac}")
+                subprocess.run(["bluetoothctl", "disconnect", curr_mac], capture_output=True, text=True, timeout=5)
+                time.sleep(0.5)
+
+        # 2. 連線到目標 MAC
+        res = subprocess.run(["bluetoothctl", "connect", target_mac], capture_output=True, text=True, timeout=10)
+        res_info = subprocess.run(["bluetoothctl", "info", target_mac], capture_output=True, text=True, timeout=3)
+        dev_name = "耳麥"
+        m = re.search(r"Name:\s*(.+)", res_info.stdout)
+        if m:
+            dev_name = m.group(1).strip()
+
+        if "Connected: yes" in res_info.stdout or "Connection successful" in res.stdout:
+            _switch_pipewire_default_sink(dev_name)
+            ok = True
+            msg = f"🎧 已成功連線至耳麥：{dev_name} ({target_mac})"
+        else:
+            ok = False
+            msg = f"連線至 {dev_name} ({target_mac}) 失敗，請確認耳麥處於待連線或開機狀態。"
 
         # Invalidate cache
         global _last_bt_status_time
