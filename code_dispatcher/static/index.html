@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>LocalNote 聽記盒</title>
 <meta name="theme-color" content="#0f766e">
 <link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiTG9jYWxOb3RlIiwic2hvcnRfbmFtZSI6IkxvY2FsTm90ZSIsInN0YXJ0X3VybCI6Ii8iLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsImJhY2tncm91bmRfY29sb3IiOiIjZjNmNmY4IiwidGhlbWVfY29sb3IiOiIjMGY3NjZlIn0=">
@@ -191,7 +194,7 @@ details[open] summary::after{content:"收起 ▴"}
           <div class="row">
             <div style="flex:1 1 150px"><h2>耳麥</h2><div id="btDetail">—</div></div>
             <div class="row">
-              <button class="btn ghost" id="btnOpenBtMgr" style="border-color:var(--op);color:var(--op);font-weight:700">🔍 找耳麥 / 管理 ↗</button>
+              <button class="btn ghost" id="btnOpenBtMgr" onclick="openBtView()" style="border-color:var(--op);color:var(--op);font-weight:700">🔍 找耳麥 / 管理 ↗</button>
               <button class="btn ghost" id="btnConnectDefault">連線常用耳麥</button>
               <button class="btn ghost danger" id="btnQuickDisconnect">中斷</button>
             </div>
@@ -237,7 +240,7 @@ details[open] summary::after{content:"收起 ▴"}
   <!-- ================= 藍牙管理子頁面 ================= -->
   <div id="viewBt" hidden>
     <div class="row" style="margin-bottom:14px;justify-content:space-between">
-      <button class="btn primary" id="btnBackToMain" style="padding:10px 18px;font-size:14px;display:inline-flex;align-items:center;gap:6px">
+      <button class="btn primary" id="btnBackToMain" onclick="closeBtView()" style="padding:10px 18px;font-size:14px;display:inline-flex;align-items:center;gap:6px">
         <span>← 返回 LocalNote 聽記盒</span>
       </button>
       <div class="row">
@@ -362,6 +365,9 @@ function closeBtView() {
   }
   refreshBt();
 }
+
+window.openBtView = openBtView;
+window.closeBtView = closeBtView;
 
 el.btnOpenBtMgr.addEventListener('click', openBtView);
 el.btChip.addEventListener('click', openBtView);

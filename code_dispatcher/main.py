@@ -139,13 +139,18 @@ class CodeTaskRequest(BaseModel):
 @app.get("/", response_class=HTMLResponse, tags=["Web UI"])
 def get_web_ui():
     """Serve the client-facing LocalNote Meeting Minutes Dashboard."""
+    headers = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
+    }
     if os.path.exists(HTML_CLIENT_UI_PATH):
         with open(HTML_CLIENT_UI_PATH, "r", encoding="utf-8") as f:
-            return f.read()
+            return HTMLResponse(content=f.read(), headers=headers)
     if os.path.exists(HTML_UI_PATH):
         with open(HTML_UI_PATH, "r", encoding="utf-8") as f:
-            return f.read()
-    return "<h1>LocalNote 聽記盒</h1><p>ui_client.html not found.</p>"
+            return HTMLResponse(content=f.read(), headers=headers)
+    return HTMLResponse(content="<h1>LocalNote 聽記盒</h1><p>ui_client.html not found.</p>", headers=headers)
 
 
 @app.get("/dbg01", response_class=HTMLResponse, tags=["Web UI"])
@@ -154,8 +159,8 @@ def get_dbg01_ui():
     """Serve the Bluetooth Gateway & Voice Application Studio at /dbg01."""
     if os.path.exists(HTML_UI_PATH):
         with open(HTML_UI_PATH, "r", encoding="utf-8") as f:
-            return f.read()
-    return "<h1>Pi 5 Studio (DBG01)</h1><p>ui.html not found.</p>"
+            return HTMLResponse(content=f.read(), headers={"Cache-Control": "no-cache"})
+    return HTMLResponse(content="<h1>Pi 5 Studio (DBG01)</h1><p>ui.html not found.</p>")
 
 
 @app.get("/arena", response_class=HTMLResponse, tags=["Web UI"])
@@ -163,18 +168,24 @@ def get_arena_ui():
     """Serve the original Code Review & LLM Arena interface at /arena."""
     if os.path.exists(HTML_DBG01_PATH):
         with open(HTML_DBG01_PATH, "r", encoding="utf-8") as f:
-            return f.read()
-    return "<h1>Pi 5 LLM Arena (DBG01)</h1><p>ui_dbg01.html not found.</p>"
+            return HTMLResponse(content=f.read(), headers={"Cache-Control": "no-cache"})
+    return HTMLResponse(content="<h1>Pi 5 LLM Arena (DBG01)</h1><p>ui_dbg01.html not found.</p>")
 
 
 @app.get("/bluetooth", response_class=HTMLResponse, tags=["Web UI"])
 @app.get("/bt", response_class=HTMLResponse, include_in_schema=False)
 def get_bluetooth_ui():
     """Serve the LocalNote client interface directly on the Bluetooth Management view."""
+    headers = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
+    }
     if os.path.exists(HTML_CLIENT_UI_PATH):
         with open(HTML_CLIENT_UI_PATH, "r", encoding="utf-8") as f:
             html = f.read()
-            return html.replace('id="viewBt" hidden', 'id="viewBt"').replace('id="viewMain"', 'id="viewMain" hidden')
+            html = html.replace('id="viewBt" hidden', 'id="viewBt"').replace('id="viewMain"', 'id="viewMain" hidden')
+            return HTMLResponse(content=html, headers=headers)
     return get_web_ui()
 
 
