@@ -779,9 +779,60 @@ el.copyBtn.addEventListener('click', async () => {
 });
 
 /* ---------- 加分項 ---------- */
-el.toEnBtn.addEventListener('click', async () => { el.enBox.textContent = '翻譯中…'; try { const r = await api(API.translate, { text: result?.markdown || '', to: 'en' }); el.enBox.textContent = r.text; el.ttsBtn.disabled = false; } catch (e) { el.enBox.textContent = '翻譯失敗：' + e.message; } });
-el.toZhBtn.addEventListener('click', async () => { const src = el.enBox.textContent; el.enBox.textContent = '翻譯中…'; try { const r = await api(API.translate, { text: src, to: 'zh' }); el.enBox.textContent = r.text; } catch (e) { el.enBox.textContent = '翻譯失敗：' + e.message; } });
-el.ttsBtn.addEventListener('click', async () => { try { await api(API.tts, { text: el.enBox.textContent }); toast('正在耳麥播放'); } catch (e) { toast('播放失敗：' + e.message); } });
+el.toEnBtn.addEventListener('click', async () => {
+  const textToTranslate = result?.markdown || (result?.summary ? result.summary.join('\n') : '');
+  if (!textToTranslate || !textToTranslate.trim()) {
+    toast('目前尚無會議紀要可供翻譯，請先錄音生成紀要');
+    return;
+  }
+  el.toEnBtn.disabled = true;
+  el.enBox.textContent = '翻譯中（邊緣 AI 模型推論約 2~4 秒）…';
+  try {
+    const r = await api(API.translate, { text: textToTranslate, to: 'en' });
+    el.enBox.textContent = r.text || '（無翻譯結果）';
+    el.ttsBtn.disabled = false;
+  } catch (e) {
+    el.enBox.textContent = '翻譯失敗：' + e.message;
+  } finally {
+    el.toEnBtn.disabled = false;
+  }
+});
+
+el.toZhBtn.addEventListener('click', async () => {
+  const src = el.enBox.textContent;
+  if (!src || src === '—' || src.startsWith('翻譯') || !src.trim()) {
+    toast('目前無英文內容可供反向翻譯');
+    return;
+  }
+  el.toZhBtn.disabled = true;
+  el.enBox.textContent = '翻譯中…';
+  try {
+    const r = await api(API.translate, { text: src, to: 'zh' });
+    el.enBox.textContent = r.text || '（無翻譯結果）';
+  } catch (e) {
+    el.enBox.textContent = '翻譯失敗：' + e.message;
+  } finally {
+    el.toZhBtn.disabled = false;
+  }
+});
+
+el.ttsBtn.addEventListener('click', async () => {
+  const txt = el.enBox.textContent;
+  if (!txt || txt === '—' || txt.startsWith('翻譯') || !txt.trim()) {
+    toast('目前無內容可朗讀');
+    return;
+  }
+  el.ttsBtn.disabled = true;
+  try {
+    toast('正在耳麥朗讀...');
+    await api(API.tts, { text: txt });
+    toast('耳麥朗讀完成');
+  } catch (e) {
+    toast('播放失敗：' + e.message);
+  } finally {
+    el.ttsBtn.disabled = false;
+  }
+});
 
 /* ---------- 網路切換 ---------- */
 el.netSwitch.addEventListener('click', async () => {

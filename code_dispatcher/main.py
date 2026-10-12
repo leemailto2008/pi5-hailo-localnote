@@ -1069,22 +1069,58 @@ async def record_and_transcribe(req: VoiceRecordRequest) -> Dict[str, Any]:
     }
 
 
+# -------------------------------------------------------------
+# Captive Portal & Hotspot Probes (Prevent OS from dropping Wi-Fi)
+# -------------------------------------------------------------
+@app.get("/hotspot-detect.html", response_class=HTMLResponse, include_in_schema=False)
+def captive_apple():
+    """Satisfy Apple iOS / macOS captive portal probe to prevent disconnecting hotspot."""
+    return HTMLResponse(content="<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>")
+
+@app.get("/generate_204", include_in_schema=False)
+@app.get("/gen_204", include_in_schema=False)
+def captive_google():
+    """Satisfy Android / Chrome OS captive portal probe."""
+    from fastapi import Response
+    return Response(status_code=204)
+
+@app.get("/ncsi.txt", include_in_schema=False)
+def captive_windows():
+    """Satisfy Windows NCSI probe."""
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse("Microsoft NCSI")
+
+@app.get("/connecttest.txt", include_in_schema=False)
+def captive_android_txt():
+    """Satisfy Android network probe."""
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse("Microsoft Connect Test")
+
+
 @app.post("/api/voice/translate", tags=["Voice"])
 async def translate_text(req: VoiceTranslateRequest) -> Dict[str, Any]:
     """Translate text between Traditional Chinese and English via local LLM."""
     import asyncio
+
+    clean_text = req.text.strip() if req.text else ""
+    if not clean_text:
+        return {"status": "success", "translated_text": "（尚無內容可翻譯，請先錄音生成會議紀要）"}
+
+    # 針對長篇紀要進行邊緣推論長度保護（1200 字以內），確保在樹莓派上 3-5 秒內快速響應
+    if len(clean_text) > 1200:
+        clean_text = clean_text[:1200] + "\n..."
 
     if req.direction == "zh2en":
         prompt = (
             "You are a professional bilingual interpreter. "
             "Translate the following Traditional Chinese speech into natural, fluent, idiomatic English. "
             "Output ONLY the translated English sentence without explanations, notes, or Chinese characters:\n\n"
-            f"{req.text}"
+            f"{clean_text}"
         )
     else:
         prompt = (
             "請將以下英文翻譯成道地流暢的繁體中文 (台灣)，僅輸出翻譯結果，不要包含任何多餘說明：\n\n"
-            f"{req.text}"
+            f"{clean_text}"
         )
 
     def do_call():
@@ -1095,15 +1131,22 @@ async def translate_text(req: VoiceTranslateRequest) -> Dict[str, Any]:
                     "model": "qwen2.5:3b-opt",
                     "prompt": prompt,
                     "stream": False,
-                    "keep_alive": "24h"
+                    "keep_alive": "24h",
+                    "options": {
+                        "num_predict": 300,
+                        "temperature": 0.2
+                    }
                 },
-                timeout=60
+                timeout=45
             )
             if resp.status_code == 200:
-                return resp.json().get("response", "").strip()
+                out = resp.json().get("response", "").strip()
+                return out if out else "（模型未輸出翻譯內容）"
             return f"[LLM 狀態碼 {resp.status_code}]"
+        except requests.exceptions.Timeout:
+            return "[翻譯逾時：模型推論忙碌中，請稍後重試]"
         except Exception as e:
-            return f"[翻譯逾時: {str(e)}]"
+            return f"[翻譯失敗: {str(e)}]"
 
     translated = await asyncio.to_thread(do_call)
     return {"status": "success", "translated_text": translated}
