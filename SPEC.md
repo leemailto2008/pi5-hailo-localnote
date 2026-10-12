@@ -88,8 +88,28 @@ stateDiagram-v2
 4. **無縫返回 (Back to Notes):** 頂部提供導航按鈕，隨時一鍵返回會議聽記主畫面。
 
 ### 5.2 實作檢查清單
-- [ ] **Task 32-A: 在 `ui_client.html` 構建 SPA 視圖切換器 (Main View vs Bluetooth View)**
-- [ ] **Task 32-B: 整合豐富的藍牙操作 API (Scan, Pair, Connect, Disconnect, Auto-connect, Set Default)**
-- [ ] **Task 32-C: 在 `main.py` 支援 `/bluetooth` 與 `/bt` 路由直達**
-- [ ] **Task 32-D: 實體機部署與驗收驗證**
+- [x] **Task 32-A: 在 `ui_client.html` 構建 SPA 視圖切換器 (Main View vs Bluetooth View)**
+- [x] **Task 32-B: 整合豐富的藍牙操作 API (Scan, Pair, Connect, Disconnect, Auto-connect, Set Default)**
+- [x] **Task 32-C: 在 `main.py` 支援 `/bluetooth` 與 `/bt` 路由直達**
+- [x] **Task 32-D: 實體機部署與驗收驗證**
+
+---
+
+## 6. 規格文件 (Task 33): 工程除錯工作台路由掛載 (`/dbg02`)
+
+### 6.1 需求背景
+為了方便開發與除錯 (Troubleshooting)，將包含系統溫度、RAM、STA/AP 網路熱點切換、Whisper STT 測試、手動翻譯/TTS 語音合成及完整 PipeWire 端點監控的工程版工作台部署於專屬路由 `/dbg02` (與防呆別名 `/dgb02`)。
+
+### 6.2 路由對照
+- `/`: LocalNote 聽記盒客戶端介面 (`ui_client.html`)
+- `/bluetooth`, `/bt`: LocalNote 藍牙音訊設備中心直達視圖
+- `/dbg02`, `/dgb02`: 全功能藍牙與語音工程工作台 (`ui.html`)
+- `/dbg01`, `/dgb01`, `/arena`: 原始程式碼審查與 LLM Arena 介面 (`ui_dbg01.html`)
+
+### 6.3 實作檢查清單
+- [x] **Task 33-A: 在 `code_dispatcher/main.py` 掛載 `/dbg02` 與 `/dgb02` 指向 `ui.html`**
+- [x] **Task 33-B: 在 `code_dispatcher/ui.html` 頂部導航列加入返回首頁與 Code Review 連結**
+- [x] **Task 33-C: 在 `code_dispatcher/ui_client.html` 的開發者工具列加入 `/dbg02` 入口**
+- [x] **Task 33-D: 單元測試與實機驗收部署**
+
 

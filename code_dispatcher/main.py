@@ -161,21 +161,25 @@ def get_web_ui():
 
 @app.get("/dbg01", response_class=HTMLResponse, tags=["Web UI"])
 @app.get("/dgb01", response_class=HTMLResponse, include_in_schema=False)
-def get_dbg01_ui():
-    """Serve the Bluetooth Gateway & Voice Application Studio at /dbg01."""
-    if os.path.exists(HTML_UI_PATH):
-        with open(HTML_UI_PATH, "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read(), headers={"Cache-Control": "no-cache"})
-    return HTMLResponse(content="<h1>Pi 5 Studio (DBG01)</h1><p>ui.html not found.</p>")
-
-
 @app.get("/arena", response_class=HTMLResponse, tags=["Web UI"])
-def get_arena_ui():
-    """Serve the original Code Review & LLM Arena interface at /arena."""
+def get_dbg01_ui():
+    """Serve the original Code Review & LLM Arena interface at /dbg01 and /arena."""
+    headers = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
     if os.path.exists(HTML_DBG01_PATH):
         with open(HTML_DBG01_PATH, "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read(), headers={"Cache-Control": "no-cache"})
-    return HTMLResponse(content="<h1>Pi 5 LLM Arena (DBG01)</h1><p>ui_dbg01.html not found.</p>")
+            return HTMLResponse(content=f.read(), headers=headers)
+    return HTMLResponse(content="<h1>Pi 5 LLM Arena (DBG01)</h1><p>ui_dbg01.html not found.</p>", headers=headers)
+
+
+@app.get("/dbg02", response_class=HTMLResponse, tags=["Web UI"])
+@app.get("/dgb02", response_class=HTMLResponse, include_in_schema=False)
+def get_dbg02_ui():
+    """Serve the Engineering Bluetooth Gateway & Voice Application Studio at /dbg02."""
+    headers = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+    if os.path.exists(HTML_UI_PATH):
+        with open(HTML_UI_PATH, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read(), headers=headers)
+    return HTMLResponse(content="<h1>Pi 5 Studio (DBG02)</h1><p>ui.html not found.</p>", headers=headers)
 
 
 @app.get("/bluetooth", response_class=HTMLResponse, tags=["Web UI"])
