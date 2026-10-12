@@ -34,6 +34,14 @@ class TestDemoUIEndpoints(unittest.TestCase):
         resp_arena = self.client.get("/arena")
         self.assertEqual(resp_arena.status_code, 200)
 
+        resp_bt = self.client.get("/bluetooth")
+        self.assertEqual(resp_bt.status_code, 200)
+        self.assertIn("藍牙音訊設備中心", resp_bt.text)
+
+        resp_bt_short = self.client.get("/bt")
+        self.assertEqual(resp_bt_short.status_code, 200)
+
+
     def test_api_system(self):
         resp = self.client.get("/api/system")
         self.assertEqual(resp.status_code, 200)

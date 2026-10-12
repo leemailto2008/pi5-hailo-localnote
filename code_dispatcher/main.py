@@ -167,6 +167,18 @@ def get_arena_ui():
     return "<h1>Pi 5 LLM Arena (DBG01)</h1><p>ui_dbg01.html not found.</p>"
 
 
+@app.get("/bluetooth", response_class=HTMLResponse, tags=["Web UI"])
+@app.get("/bt", response_class=HTMLResponse, include_in_schema=False)
+def get_bluetooth_ui():
+    """Serve the LocalNote client interface directly on the Bluetooth Management view."""
+    if os.path.exists(HTML_CLIENT_UI_PATH):
+        with open(HTML_CLIENT_UI_PATH, "r", encoding="utf-8") as f:
+            html = f.read()
+            return html.replace('id="viewBt" hidden', 'id="viewBt"').replace('id="viewMain"', 'id="viewMain" hidden')
+    return get_web_ui()
+
+
+
 
 
 class TaskEnqueueResponse(BaseModel):

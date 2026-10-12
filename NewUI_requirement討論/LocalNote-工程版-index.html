@@ -8,11 +8,10 @@
 <link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiTG9jYWxOb3RlIiwic2hvcnRfbmFtZSI6IkxvY2FsTm90ZSIsInN0YXJ0X3VybCI6Ii8iLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsImJhY2tncm91bmRfY29sb3IiOiIjZjNmNmY4IiwidGhlbWVfY29sb3IiOiIjMGY3NjZlIn0=">
 <style>
 /* ============================================================
-   LocalNote Demo UI · 工程版
-   - 純靜態單檔案，放進 FastAPI 的 static/ 目錄即可
-   - 不依賴任何外網資源（盒子離線）
-   - 後端介面見底部 <script> 的 API 常量，改成你們的路徑即可
+   LocalNote Demo UI · 工程版 (含藍牙音訊設備管理中心)
+   - 純靜態單檔案，離線運作不依賴外網
    - 網址加 ?mock=1 可脫離後端預覽；加 ?dev=1 顯示開發工具連結
+   - 支援 #bt 或 /bluetooth 直達藍牙設備管理介面
    ============================================================ */
 :root{
   --bg:#f3f6f8; --card:#ffffff; --fg:#1f2933; --muted:#627d98; --line:#e3e9ee;
@@ -61,10 +60,13 @@ main{max-width:1200px;margin:0 auto;padding:18px 20px 56px}
 .chip.out{background:var(--out-soft);color:var(--out)}
 .chip.minor{background:#eef2f7;color:var(--set)}
 
-.btn{border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:9px 14px;border-radius:10px;font-size:13px;min-height:40px}
+.btn{border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:9px 14px;border-radius:10px;font-size:13px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:all .15s}
+.btn:hover:not(:disabled){filter:brightness(.96)}
 .btn.primary{background:var(--out);color:#fff;border-color:var(--out);font-weight:700}
 .btn.ghost{background:var(--card);color:var(--set);border-color:var(--set-line);font-size:12px}
-.btn.danger{color:#b33a36}
+.btn.danger{color:#b33a36;border-color:#f3cfcd}
+.btn.danger:hover:not(:disabled){background:var(--rec-soft)}
+.btn.sm{min-height:32px;padding:4px 10px;font-size:12px;border-radius:8px}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 
 .recwrap{display:flex;flex-direction:column;align-items:center;gap:14px;padding:4px 0}
@@ -106,10 +108,23 @@ details[open] summary::after{content:"收起 ▴"}
 .card.minor summary{color:var(--fg);font-weight:700;font-size:15px}
 .en{white-space:pre-wrap;font-size:14px;background:var(--set-bg);border-radius:10px;padding:12px;min-height:48px}
 .qr{width:56px;height:56px;border-radius:8px;border:1px solid var(--line);background:#fff;object-fit:contain;flex:none}
-.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#1f2933;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#1f2933;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:9999}
 .toast.show{opacity:1}
 .devlinks{font-size:12px;color:var(--muted)}
 .devlinks a{color:var(--muted);margin-right:12px}
+
+/* ---------- 藍牙管理介面樣式 ---------- */
+.bt-item{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;transition:box-shadow .15s}
+.bt-item:hover{box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.bt-item-info{display:flex;flex-direction:column;gap:3px;min-width:180px}
+.bt-item-info strong{font-size:14px;color:var(--fg);display:inline-flex;align-items:center;gap:6px}
+.bt-item-info span{font-size:12px;color:var(--muted);font-family:monospace}
+.bt-item-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.toggle-btn{font-size:12px;padding:5px 10px;border-radius:8px;border:1px solid var(--set-line);background:var(--card);cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.toggle-btn.active{background:var(--op-soft);color:var(--op);border-color:var(--op);font-weight:700}
+.spinner{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
 @media (max-width:480px){main{padding:14px 16px 56px}.card{padding:16px}.topbar .pill.sys{display:none}}
 </style>
 </head>
@@ -126,95 +141,158 @@ details[open] summary::after{content:"收起 ▴"}
 <main>
   <p class="devlinks" id="devLinks" hidden><a href="/dbg01">Code Review</a><a href="/docs">API Docs</a><a href="/arena">LLM Arena</a></p>
 
-  <div class="grid">
-    <!-- ================= 操作 ================= -->
-    <section class="col op">
-      <span class="tag op">操作</span>
+  <!-- ================= 主畫面：聽記 ================= -->
+  <div id="viewMain">
+    <div class="grid">
+      <!-- ================= 操作 ================= -->
+      <section class="col op">
+        <span class="tag op">操作</span>
+        <div class="card op">
+          <div class="row">
+            <h2>錄一段會議</h2>
+            <span class="spacer"></span>
+            <span class="chip" id="btChip" style="cursor:pointer;" title="點擊切換至耳麥管理頁面"><span class="dot"></span><span id="btText">耳麥：檢查中</span></span>
+          </div>
+          <div class="recwrap">
+            <button class="recbtn" id="recBtn" aria-label="開始錄音"><span id="recLabel">開始錄音</span><small id="recSub"></small></button>
+            <div class="row">
+              <label for="dur">這次錄</label>
+              <select id="dur">
+                <option value="60">1 分鐘</option>
+                <option value="90" selected>1 分 30 秒（演示）</option>
+                <option value="120">2 分鐘</option>
+                <option value="180">3 分鐘</option>
+              </select>
+            </div>
+            <p class="hint" id="hint">戴上耳麥，按下紅色按鈕開始說。時間到自動停，盒子接著整理成紀要。</p>
+          </div>
+          <div class="progress" id="progress" hidden>
+            <div class="row"><span class="label">進度</span><b id="pTitle">—</b><span class="spacer"></span><span id="pEta"></span></div>
+            <div class="bar"><i id="pBar"></i></div>
+            <span id="pSteps" style="font-size:13px"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 設定 ================= -->
+      <section class="col set">
+        <span class="tag set">設定</span>
+        <div class="card set">
+          <div class="row">
+            <div style="flex:1 1 220px;min-width:0">
+              <h2>手機怎麼連</h2>
+              <div>連 Wi-Fi「<b id="ssid">raspi543_AI</b>」→ 開「<b id="host">localnote.local</b>」。不用裝 App。</div>
+            </div>
+            <img class="qr" id="qr" alt="Wi-Fi QR Code" src="" hidden>
+            <button class="btn ghost" id="netSwitch">切回家用 Wi-Fi</button>
+          </div>
+        </div>
+        <div class="card set">
+          <div class="row">
+            <div style="flex:1 1 150px"><h2>耳麥</h2><div id="btDetail">—</div></div>
+            <div class="row">
+              <button class="btn ghost" id="btnOpenBtMgr" style="border-color:var(--op);color:var(--op);font-weight:700">🔍 找耳麥 / 管理 ↗</button>
+              <button class="btn ghost" id="btnConnectDefault">連線常用耳麥</button>
+              <button class="btn ghost danger" id="btnQuickDisconnect">中斷</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 輸出 ================= -->
+      <section class="col out">
+        <span class="tag out">輸出</span>
+        <div class="card out">
+          <div class="row">
+            <h2>會議紀要</h2>
+            <span class="chip out">盒子生成，未上傳</span>
+            <span class="spacer"></span>
+            <button class="btn" id="regenBtn" disabled>重新整理</button>
+            <button class="btn primary" id="copyBtn" disabled>複製紀要</button>
+          </div>
+          <div class="minutes" id="minutes"><div class="empty">還沒有紀要。錄一段會議，約一分鐘後這裡會出現摘要、待辦和決議。</div></div>
+          <details id="transcriptBox" hidden>
+            <summary>完整逐字稿</summary>
+            <div class="transcript" id="transcript"></div>
+          </details>
+        </div>
+
+        <div class="card out minor">
+          <details>
+            <summary>翻成英文、念給我聽 <span class="chip minor" style="margin-left:10px">加分項</span></summary>
+            <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
+              <div class="row">
+                <button class="btn" id="toEnBtn" disabled>紀要翻成英文</button>
+                <button class="btn" id="toZhBtn" disabled>英文翻成中文</button>
+                <button class="btn" id="ttsBtn" disabled>在耳麥念出來</button>
+              </div>
+              <div class="en" id="enBox">—</div>
+            </div>
+          </details>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ================= 藍牙管理子頁面 ================= -->
+  <div id="viewBt" hidden>
+    <div class="row" style="margin-bottom:14px;justify-content:space-between">
+      <button class="btn primary" id="btnBackToMain" style="padding:10px 18px;font-size:14px;display:inline-flex;align-items:center;gap:6px">
+        <span>← 返回 LocalNote 聽記盒</span>
+      </button>
+      <div class="row">
+        <span class="tag set" style="font-size:13px">藍牙音訊設備中心 (Bluetooth Hub)</span>
+        <button class="btn ghost" id="btnRefreshBtHub">🔄 刷新狀態</button>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:18px">
+      <!-- 目前連線耳麥卡片 -->
+      <div class="card" style="border-left:6px solid var(--op)">
+        <div class="row" style="gap:14px">
+          <span style="font-size:28px">🎧</span>
+          <div style="flex:1 1 200px;min-width:0">
+            <div class="row" style="gap:8px">
+              <h2 id="hubCurName" style="font-size:18px;margin:0">檢查中...</h2>
+              <span class="chip off" id="hubCurBadge"><span class="dot"></span><span id="hubCurStatus">未連線</span></span>
+              <span class="chip out" id="hubBatteryPill" hidden>🔋 <span id="hubBatteryVal">--%</span></span>
+            </div>
+            <div id="hubCurMac" style="font-size:12px;color:var(--muted);font-family:monospace;margin-top:2px">MAC: --:--:--:--:--:--</div>
+          </div>
+          <div class="row">
+            <button class="btn ghost danger" id="hubBtnDisconnect" disabled>中斷連線</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 周圍耳麥搜尋卡片 -->
       <div class="card op">
         <div class="row">
-          <h2>錄一段會議</h2>
+          <div>
+            <h2 style="font-size:16px;margin:0">🔍 周圍耳麥搜尋 (Scan Nearby Headsets)</h2>
+            <div style="font-size:13px;color:var(--muted);margin-top:2px">請確保欲配對的耳麥已開機並處於配對狀態 (紅藍燈閃爍或長按配對鍵)</div>
+          </div>
           <span class="spacer"></span>
-          <span class="chip" id="btChip"><span class="dot"></span><span id="btText">耳麥：檢查中</span></span>
+          <button class="btn primary" id="hubBtnScan">🔍 開始掃描 (8秒)</button>
         </div>
-        <div class="recwrap">
-          <button class="recbtn" id="recBtn" aria-label="開始錄音"><span id="recLabel">開始錄音</span><small id="recSub"></small></button>
-          <div class="row">
-            <label for="dur">這次錄</label>
-            <select id="dur">
-              <option value="60">1 分鐘</option>
-              <option value="90" selected>1 分 30 秒（演示）</option>
-              <option value="120">2 分鐘</option>
-              <option value="180">3 分鐘</option>
-            </select>
-          </div>
-          <p class="hint" id="hint">戴上耳麥，按下紅色按鈕開始說。時間到自動停，盒子接著整理成紀要。</p>
-        </div>
-        <div class="progress" id="progress" hidden>
-          <div class="row"><span class="label">進度</span><b id="pTitle">—</b><span class="spacer"></span><span id="pEta"></span></div>
-          <div class="bar"><i id="pBar"></i></div>
-          <span id="pSteps" style="font-size:13px"></span>
+        <div id="hubScanContainer" style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+          <div class="empty" id="hubScanEmpty">點擊上方「開始掃描」搜尋周圍的藍牙耳麥</div>
         </div>
       </div>
 
-    </section>
-
-    <!-- ================= 設定 ================= -->
-    <section class="col set">
-      <span class="tag set">設定</span>
-      <div class="card set">
+      <!-- 已信任耳麥清單卡片 -->
+      <div class="card">
         <div class="row">
-          <div style="flex:1 1 220px;min-width:0">
-            <h2>手機怎麼連</h2>
-            <div>連 Wi-Fi「<b id="ssid">raspi543_AI</b>」→ 開「<b id="host">localnote.local</b>」。不用裝 App。</div>
-          </div>
-          <img class="qr" id="qr" alt="Wi-Fi QR Code" src="" hidden>
-          <button class="btn ghost" id="netSwitch">切回家用 Wi-Fi</button>
-        </div>
-      </div>
-      <div class="card set">
-        <div class="row">
-          <div style="flex:1 1 160px"><h2>耳麥</h2><div id="btDetail">—</div></div>
-          <div class="row">
-            <button class="btn ghost" data-bt="scan">找耳麥</button>
-            <button class="btn ghost" data-bt="connect">連線常用耳麥</button>
-            <button class="btn ghost danger" data-bt="disconnect">中斷</button>
+          <div>
+            <h2 style="font-size:16px;margin:0">⭐ 已信任耳麥清單 (Trusted Headsets)</h2>
+            <div style="font-size:13px;color:var(--muted);margin-top:2px">點擊即可快速切換連線，並可設定開機自動連線與預設耳麥</div>
           </div>
         </div>
-      </div>
-    </section>
-
-    <!-- ================= 輸出 ================= -->
-    <section class="col out">
-      <span class="tag out">輸出</span>
-      <div class="card out">
-        <div class="row">
-          <h2>會議紀要</h2>
-          <span class="chip out">盒子生成，未上傳</span>
-          <span class="spacer"></span>
-          <button class="btn" id="regenBtn" disabled>重新整理</button>
-          <button class="btn primary" id="copyBtn" disabled>複製紀要</button>
+        <div id="hubTrustedContainer" style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+          <div class="empty" id="hubTrustedEmpty">載入設備清單中...</div>
         </div>
-        <div class="minutes" id="minutes"><div class="empty">還沒有紀要。錄一段會議，約一分鐘後這裡會出現摘要、待辦和決議。</div></div>
-        <details id="transcriptBox" hidden>
-          <summary>完整逐字稿</summary>
-          <div class="transcript" id="transcript"></div>
-        </details>
       </div>
-
-      <div class="card out minor">
-        <details>
-          <summary>翻成英文、念給我聽 <span class="chip minor" style="margin-left:10px">加分項</span></summary>
-          <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
-            <div class="row">
-              <button class="btn" id="toEnBtn" disabled>紀要翻成英文</button>
-              <button class="btn" id="toZhBtn" disabled>英文翻成中文</button>
-              <button class="btn" id="ttsBtn" disabled>在耳麥念出來</button>
-            </div>
-            <div class="en" id="enBox">—</div>
-          </div>
-        </details>
-      </div>
-    </section>
+    </div>
   </div>
 </main>
 
@@ -222,26 +300,14 @@ details[open] summary::after{content:"收起 ▴"}
 
 <script>
 /* ============================================================
-   後端介面約定（改這裡即可對接現有 FastAPI）
+   後端介面約定
    所有請求同源，不走外網。
-   ------------------------------------------------------------
-   GET  /api/system          -> {offline:true, cpu:6, temp:44.5, mode:"ap"|"sta", ssid:"raspi543_AI", host:"localnote.local", wifi_qr:"/static/wifi.png"}
-   GET  /api/bt              -> {connected:true, name:"RichChipAN"}
-   POST /api/bt/{scan|connect|disconnect} -> {ok:true, msg:"..."}
-   POST /api/record {seconds:90} -> {job:"abc123"}
-   GET  /api/status          -> {state:"idle"|"recording"|"processing"|"done"|"error",
-                                 phase:"record"|"transcribe"|"summarize", progress:0-100,
-                                 elapsed:37, total:90, eta:50, job:"abc123", msg:"..."}
-   GET  /api/result          -> {job:"abc123", title:"客戶會議", started_at:"2026-10-07T10:50:00", duration:90,
-                                 summary:["..."], todos:[{item:"",owner:"",due:""}], decisions:["..."],
-                                 transcript:"...", markdown:"# 客戶會議 ..."}
-   POST /api/regenerate      -> {job:"abc123"}            只重跑 LLM，不重錄
-   POST /api/translate {text, to:"en"|"zh"} -> {text:"..."}
-   POST /api/tts {text}      -> {ok:true}                 在耳麥播放
-   POST /api/net/switch {mode:"sta"} -> {ok:true}
    ============================================================ */
 const API = {
-  system: '/api/system', bt: '/api/bt', record: '/api/record', status: '/api/status',
+  system: '/api/system', bt: '/api/bt', btStatus: '/api/bt/status', btScan: '/api/bt/scan',
+  btPair: '/api/bt/pair', btConnect: '/api/bt/connect', btDisconnect: '/api/bt/disconnect',
+  btAuto: '/api/bt/trusted/auto_connect',
+  record: '/api/record', status: '/api/status',
   result: '/api/result', regenerate: '/api/regenerate', translate: '/api/translate',
   tts: '/api/tts', netSwitch: '/api/net/switch'
 };
@@ -252,12 +318,18 @@ if (q.get('dev') === '1') document.getElementById('devLinks').hidden = false;
 
 const $ = id => document.getElementById(id);
 const el = {
+  viewMain: $('viewMain'), viewBt: $('viewBt'),
   netPill: $('netPill'), netText: $('netText'), sysPill: $('sysPill'), btChip: $('btChip'), btText: $('btText'), btDetail: $('btDetail'),
   recBtn: $('recBtn'), recLabel: $('recLabel'), recSub: $('recSub'), dur: $('dur'), hint: $('hint'),
   progress: $('progress'), pTitle: $('pTitle'), pEta: $('pEta'), pBar: $('pBar'), pSteps: $('pSteps'),
   minutes: $('minutes'), transcriptBox: $('transcriptBox'), transcript: $('transcript'),
   regenBtn: $('regenBtn'), copyBtn: $('copyBtn'), toEnBtn: $('toEnBtn'), toZhBtn: $('toZhBtn'), ttsBtn: $('ttsBtn'), enBox: $('enBox'),
-  ssid: $('ssid'), host: $('host'), qr: $('qr'), netSwitch: $('netSwitch'), toast: $('toast')
+  ssid: $('ssid'), host: $('host'), qr: $('qr'), netSwitch: $('netSwitch'), toast: $('toast'),
+  btnOpenBtMgr: $('btnOpenBtMgr'), btnConnectDefault: $('btnConnectDefault'), btnQuickDisconnect: $('btnQuickDisconnect'),
+  btnBackToMain: $('btnBackToMain'), btnRefreshBtHub: $('btnRefreshBtHub'),
+  hubCurName: $('hubCurName'), hubCurMac: $('hubCurMac'), hubCurBadge: $('hubCurBadge'), hubCurStatus: $('hubCurStatus'),
+  hubBatteryPill: $('hubBatteryPill'), hubBatteryVal: $('hubBatteryVal'), hubBtnDisconnect: $('hubBtnDisconnect'),
+  hubBtnScan: $('hubBtnScan'), hubScanContainer: $('hubScanContainer'), hubTrustedContainer: $('hubTrustedContainer')
 };
 
 let state = 'idle', result = null, pollTimer = null, lastJob = null;
@@ -273,6 +345,35 @@ function toast(msg, ms = 1800) { el.toast.textContent = msg; el.toast.classList.
 function fmt(s) { s = Math.max(0, Math.round(s)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
+/* ---------- 視圖切換 (SPA Router) ---------- */
+function openBtView() {
+  el.viewMain.hidden = true;
+  el.viewBt.hidden = false;
+  window.location.hash = 'bt';
+  refreshBtHub();
+}
+function closeBtView() {
+  el.viewBt.hidden = true;
+  el.viewMain.hidden = false;
+  if (window.location.hash === '#bt') {
+    history.pushState('', document.title, window.location.pathname + window.location.search);
+  }
+  refreshBt();
+}
+
+el.btnOpenBtMgr.addEventListener('click', openBtView);
+el.btChip.addEventListener('click', openBtView);
+el.btnBackToMain.addEventListener('click', closeBtView);
+el.btnRefreshBtHub.addEventListener('click', refreshBtHub);
+
+window.addEventListener('hashchange', () => {
+  if (window.location.hash === '#bt') openBtView();
+  else if (!el.viewBt.hidden) closeBtView();
+});
+if (window.location.hash === '#bt' || window.location.pathname === '/bluetooth' || window.location.pathname === '/bt') {
+  openBtView();
+}
+
 /* ---------- 頂部狀態 ---------- */
 async function refreshSystem() {
   try {
@@ -287,15 +388,180 @@ async function refreshSystem() {
     el.netSwitch.dataset.to = s.mode === 'ap' ? 'sta' : 'ap';
   } catch (e) { el.netText.textContent = '連不上盒子'; }
 }
+
 async function refreshBt() {
   try {
     const b = await api(API.bt);
     el.btChip.classList.toggle('off', !b.connected);
     el.btText.textContent = b.connected ? `耳麥 ${b.name || ''} 已連線` : '耳麥未連線';
-    el.btDetail.textContent = b.connected ? `${b.name || ''} · 已連線` : '未連線。按「連線常用耳麥」。';
+    el.btDetail.textContent = b.connected ? `${b.name || ''} · 已連線` : '未連線。按「找耳麥 / 管理」。';
     el.recBtn.disabled = !b.connected && state === 'idle';
   } catch (e) { el.btText.textContent = '耳麥狀態未知'; }
 }
+
+/* ---------- 藍牙裝置管理中心 (Bluetooth Hub) ---------- */
+async function refreshBtHub() {
+  try {
+    const b = await api(API.btStatus);
+    const conn = !!b.connected;
+    el.hubCurName.textContent = b.connected_name || (conn ? '未知設備' : '未連線耳麥');
+    el.hubCurMac.textContent = 'MAC: ' + (b.connected_mac || '--:--:--:--:--:--');
+    el.hubCurBadge.className = 'chip ' + (conn ? '' : 'off');
+    el.hubCurStatus.textContent = conn ? 'CONNECTED' : 'DISCONNECTED';
+    el.hubBtnDisconnect.disabled = !conn;
+
+    if (conn && b.battery_level != null) {
+      el.hubBatteryPill.hidden = false;
+      el.hubBatteryVal.textContent = b.battery_level + '%';
+    } else {
+      el.hubBatteryPill.hidden = true;
+    }
+
+    renderTrustedDevices(b.trusted_devices || []);
+  } catch (e) {
+    toast('讀取藍牙詳細狀態失敗');
+  }
+}
+
+function renderTrustedDevices(list) {
+  if (!list || list.length === 0) {
+    el.hubTrustedContainer.innerHTML = '<div class="empty">尚未儲存任何已配對耳麥，請在上方搜尋周圍設備進行配對。</div>';
+    return;
+  }
+  el.hubTrustedContainer.innerHTML = list.map(dev => {
+    const isConn = dev.connected;
+    const isDef = dev.is_default;
+    const autoConn = dev.auto_connect;
+    return `
+      <div class="bt-item">
+        <div class="bt-item-info">
+          <strong>${esc(dev.name || '耳麥')} ${isDef ? '<span class="tag set" style="font-size:10px">⭐ 預設</span>' : ''}</strong>
+          <span>${esc(dev.mac)}</span>
+        </div>
+        <div class="bt-item-actions">
+          <span class="chip ${isConn ? '' : 'off'}" style="font-size:12px"><span class="dot"></span>${isConn ? '已連線' : '離線'}</span>
+          <button class="btn sm ${isConn ? 'ghost' : 'primary'}" data-action="connect" data-mac="${esc(dev.mac)}" ${isConn ? 'disabled' : ''}>
+            ${isConn ? '連線中' : '連線'}
+          </button>
+          <button class="btn sm ghost" data-action="default" data-mac="${esc(dev.mac)}" ${isDef ? 'disabled' : ''}>
+            ${isDef ? '已設預設' : '設為預設'}
+          </button>
+          <button class="toggle-btn ${autoConn ? 'active' : ''}" data-action="toggle-auto" data-mac="${esc(dev.mac)}" data-curr="${autoConn}">
+            ${autoConn ? '✓ 自動連線: 開' : '✕ 自動連線: 關'}
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // 綁定項目操作按鈕
+  el.hubTrustedContainer.querySelectorAll('[data-action]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const act = btn.dataset.action;
+      const mac = btn.dataset.mac;
+      btn.disabled = true;
+      try {
+        if (act === 'connect') {
+          toast(`正在連線 ${mac}...`);
+          const r = await api(API.btConnect, { target: mac });
+          toast(r.msg || r.message || '連線成功');
+        } else if (act === 'default') {
+          await api(API.btAuto, { mac: mac, auto_connect: true, set_default: true });
+          toast(`已將 ${mac} 設為預設耳麥`);
+        } else if (act === 'toggle-auto') {
+          const nextVal = btn.dataset.curr !== 'true';
+          await api(API.btAuto, { mac: mac, auto_connect: nextVal, set_default: false });
+          toast(`已更新 ${mac} 自動連線設定`);
+        }
+        await refreshBtHub();
+      } catch (err) {
+        toast('操作失敗：' + err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+// 掃描周圍耳麥
+el.hubBtnScan.addEventListener('click', async () => {
+  const btn = el.hubBtnScan;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> 正在搜尋周圍耳麥 (8秒)...';
+  el.hubScanContainer.innerHTML = '<div class="empty">正在掃描周圍藍牙設備，請確保耳麥處於配對狀態...</div>';
+  try {
+    const r = await api(API.btScan, {});
+    const devs = r.devices || [];
+    if (devs.length === 0) {
+      el.hubScanContainer.innerHTML = '<div class="empty">未找到可配對的耳麥。請確認耳麥處於紅藍燈配對狀態後重試。</div>';
+    } else {
+      el.hubScanContainer.innerHTML = devs.map(d => `
+        <div class="bt-item">
+          <div class="bt-item-info">
+            <strong>🎧 ${esc(d.name || '未知藍牙設備')}</strong>
+            <span>${esc(d.mac)} ${d.rssi ? `(訊號: ${d.rssi} dBm)` : ''}</span>
+          </div>
+          <div class="bt-item-actions">
+            <button class="btn sm primary" data-pair="${esc(d.mac)}">🔗 配對並連線</button>
+          </div>
+        </div>
+      `).join('');
+
+      el.hubScanContainer.querySelectorAll('[data-pair]').forEach(pBtn => {
+        pBtn.addEventListener('click', async () => {
+          const targetMac = pBtn.dataset.pair;
+          pBtn.disabled = true;
+          pBtn.innerHTML = '<span class="spinner"></span> 配對中...';
+          try {
+            toast(`正在配對 ${targetMac}...`);
+            await api(API.btPair, { target: targetMac });
+            toast(`配對成功，正在建立音訊連線...`);
+            await api(API.btConnect, { target: targetMac });
+            toast(`🎉 已成功連線至 ${targetMac}`);
+            await refreshBtHub();
+          } catch (pErr) {
+            toast('配對連線失敗：' + pErr.message);
+          } finally {
+            pBtn.disabled = false;
+            pBtn.textContent = '🔗 配對並連線';
+          }
+        });
+      });
+    }
+  } catch (err) {
+    el.hubScanContainer.innerHTML = `<div class="empty" style="color:var(--rec)">掃描失敗：${esc(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '🔍 開始掃描 (8秒)';
+  }
+});
+
+// 中斷連線按鈕
+async function handleBtDisconnect() {
+  try {
+    toast('正在中斷耳麥連線...');
+    const r = await api(API.btDisconnect, {});
+    toast(r.msg || r.message || '已中斷連線');
+    await refreshBtHub();
+    await refreshBt();
+  } catch (err) {
+    toast('中斷失敗：' + err.message);
+  }
+}
+el.hubBtnDisconnect.addEventListener('click', handleBtDisconnect);
+el.btnQuickDisconnect.addEventListener('click', handleBtDisconnect);
+
+// 連線常用/預設耳麥
+el.btnConnectDefault.addEventListener('click', async () => {
+  try {
+    toast('正在連線常用耳麥...');
+    const r = await api(API.btConnect, {});
+    toast(r.msg || r.message || '已連線');
+    await refreshBt();
+  } catch (err) {
+    toast('連線失敗：' + err.message);
+  }
+});
 
 /* ---------- 錄音與進度 ---------- */
 function setState(s) {
@@ -395,10 +661,7 @@ el.toEnBtn.addEventListener('click', async () => { el.enBox.textContent = '翻�
 el.toZhBtn.addEventListener('click', async () => { const src = el.enBox.textContent; el.enBox.textContent = '翻譯中…'; try { const r = await api(API.translate, { text: src, to: 'zh' }); el.enBox.textContent = r.text; } catch (e) { el.enBox.textContent = '翻譯失敗：' + e.message; } });
 el.ttsBtn.addEventListener('click', async () => { try { await api(API.tts, { text: el.enBox.textContent }); toast('正在耳麥播放'); } catch (e) { toast('播放失敗：' + e.message); } });
 
-/* ---------- 設定 ---------- */
-document.querySelectorAll('[data-bt]').forEach(b => b.addEventListener('click', async () => {
-  b.disabled = true; try { const r = await api(API.bt + '/' + b.dataset.bt, {}); toast(r.msg || '已執行'); await refreshBt(); } catch (e) { toast('失敗：' + e.message); } b.disabled = false;
-}));
+/* ---------- 網路切換 ---------- */
 el.netSwitch.addEventListener('click', async () => {
   const to = el.netSwitch.dataset.to || 'sta';
   if (!el.netSwitch.dataset.armed) { el.netSwitch.dataset.armed = '1'; el.netSwitch.textContent = '再按一次確認切換'; setTimeout(() => { delete el.netSwitch.dataset.armed; refreshSystem(); }, 4000); return; }
@@ -416,7 +679,26 @@ function mock(path, body) {
   const now = Date.now();
   if (path === API.system) return { offline: true, cpu: M.state === 'processing' ? 97 : 6, temp: M.state === 'processing' ? 52 : 44, mode: 'ap', ssid: 'raspi543_AI', host: 'localnote.local' };
   if (path === API.bt) return { connected: true, name: 'RichChipAN' };
-  if (path.startsWith(API.bt + '/')) return { ok: true, msg: '已執行（預覽）' };
+  if (path === API.btStatus) return {
+    connected: true, connected_name: 'RichChipAN', connected_mac: 'E8:07:BF:22:A1:99',
+    battery_level: 80, signal_level_pct: 95,
+    trusted_devices: [
+      { mac: 'E8:07:BF:22:A1:99', name: 'RichChipAN (當前耳麥)', connected: true, is_default: true, auto_connect: true },
+      { mac: '00:1B:66:88:99:AA', name: 'Sony WH-1000XM4', connected: false, is_default: false, auto_connect: true },
+      { mac: '44:5C:E9:12:34:56', name: 'AirPods Pro 2', connected: false, is_default: false, auto_connect: false }
+    ]
+  };
+  if (path === API.btScan) return {
+    ok: true, count: 2, msg: '找到 2 個周圍設備',
+    devices: [
+      { mac: 'A4:C1:38:99:88:77', name: 'Bose QuietComfort 45', rssi: -58 },
+      { mac: 'B8:D5:0B:44:33:22', name: 'Jabra Evolve2 65', rssi: -72 }
+    ]
+  };
+  if (path === API.btPair) return { ok: true, msg: '已成功配對並信任設備' };
+  if (path === API.btConnect) return { ok: true, msg: '🎧 已成功連線至耳麥' };
+  if (path === API.btDisconnect) return { ok: true, msg: '已中斷連線' };
+  if (path === API.btAuto) return { ok: true, msg: '已更新自動連線設定' };
   if (path === API.record) { M = { state: 'recording', t0: now, total: Math.min(body.seconds, 8), job: M.job + 1 }; return { job: 'j' + M.job }; }
   if (path === API.regenerate) { M.state = 'processing'; M.t0 = now; M.job++; return { job: 'j' + M.job }; }
   if (path === API.status) {

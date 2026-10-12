@@ -70,12 +70,26 @@ stateDiagram-v2
 ## 4. 實作檢查清單 (Implementation Checklist)
 
 - [x] **Phase 1-A: 撰寫架構規格與驗證避坑條件 (SPEC.md)**
-- [ ] **Phase 1-B: 實作會議錄音與紀要管理引擎 (`code_dispatcher/meeting_minutes.py`)**
-  - 非同步狀態機與背景作業管理。
-  - 後端非阻塞離線偵測守護行程 (Background Offline Ping Watchdog)。
-  - 提示詞工程 (Prompt Engineering) 與 Markdown 結構化解析器。
-- [ ] **Phase 1-C: 在 `code_dispatcher/main.py` 整合並註冊 10 個標準 API 端點**
-  - 重用 `voice_pipeline.py`、`bluetooth_manager.py` 與 `hotspot_controller.py`。
-  - 全面相容既有 `/api/voice/...` 與 `/dbg01` 路由。
-- [ ] **Phase 1-D: 靜態 Wi-Fi QR Code 產生與路由掛載 (`static/wifi_ap.png`)**
-- [ ] **Phase 1-E: 單元測試與 API 模擬驗證 (`test_meeting_minutes.py`)**
+- [x] **Phase 1-B: 實作會議錄音與紀要管理引擎 (`code_dispatcher/meeting_minutes.py`)**
+- [x] **Phase 1-C: 在 `code_dispatcher/main.py` 整合並註冊 10 個標準 API 端點**
+- [x] **Phase 1-D: 靜態 Wi-Fi QR Code 產生與路由掛載 (`static/wifi.png`)**
+- [x] **Phase 1-E: 單元測試與 API 模擬驗證 (`test_meeting_minutes.py`, `test_api_endpoints.py`)**
+- [x] **Phase 1-F: 實體機部署驗收與雙遠端推送 (Dual Git Push)**
+
+---
+
+## 5. 規格文件 (Task 32): 獨立藍牙管理頁面 (Bluetooth Device Manager UI View)
+
+### 5.1 需求背景
+使用者在 LocalNote 首頁點擊「找耳麥」按鈕時，需平滑切換至專屬的藍牙耳麥管理介面，具備以下能力：
+1. **周圍耳麥搜尋 (Scan Nearby Devices):** 呼叫 `/api/bt/scan`，條列可配對之藍牙音訊設備與 RSSI/名稱。
+2. **一鍵配對與連線 (Pair & Connect):** 支援 `/api/bt/pair` 與 `/api/bt/connect`，自動信任設備並切換 PipeWire 音訊輸出 (Audio Sink)。
+3. **信任設備管理 (Trusted Headsets Hub):** 讀取 `/api/bt/status` 的 `trusted_devices` 清單，支援切換自動連線 (Auto-Connect)、設為預設耳麥 (Set Default) 與中斷連線 (Disconnect)。
+4. **無縫返回 (Back to Notes):** 頂部提供導航按鈕，隨時一鍵返回會議聽記主畫面。
+
+### 5.2 實作檢查清單
+- [ ] **Task 32-A: 在 `ui_client.html` 構建 SPA 視圖切換器 (Main View vs Bluetooth View)**
+- [ ] **Task 32-B: 整合豐富的藍牙操作 API (Scan, Pair, Connect, Disconnect, Auto-connect, Set Default)**
+- [ ] **Task 32-C: 在 `main.py` 支援 `/bluetooth` 與 `/bt` 路由直達**
+- [ ] **Task 32-D: 實體機部署與驗收驗證**
+
