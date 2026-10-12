@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LocalNote 聽記盒</title>
+<meta name="theme-color" content="#0f766e">
+<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiTG9jYWxOb3RlIiwic2hvcnRfbmFtZSI6IkxvY2FsTm90ZSIsInN0YXJ0X3VybCI6Ii8iLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsImJhY2tncm91bmRfY29sb3IiOiIjZjNmNmY4IiwidGhlbWVfY29sb3IiOiIjMGY3NjZlIn0=">
+<style>
+/* ============================================================
+   LocalNote Demo UI · 工程版
+   - 純靜態單檔案，放進 FastAPI 的 static/ 目錄即可
+   - 不依賴任何外網資源（盒子離線）
+   - 後端介面見底部 <script> 的 API 常量，改成你們的路徑即可
+   - 網址加 ?mock=1 可脫離後端預覽；加 ?dev=1 顯示開發工具連結
+   ============================================================ */
+:root{
+  --bg:#f3f6f8; --card:#ffffff; --fg:#1f2933; --muted:#627d98; --line:#e3e9ee;
+  --op:#0f766e; --op-soft:#e6f1ef; --out:#1e3a5f; --out-soft:#e8eef7; --set:#4a5d70; --set-bg:#f8fafb; --set-line:#cdd6df;
+  --rec:#d9534f; --rec-soft:#fbe9e8; --busy:#d99a1e; --busy-soft:#fbf4e6; --busy-fg:#8a6d1c; --ok:#0f766e;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",system-ui,sans-serif;font-size:15px;line-height:1.6;-webkit-text-size-adjust:100%}
+button,select{font:inherit}
+button{cursor:pointer}
+button:focus-visible,select:focus-visible{outline:2px solid var(--op);outline-offset:2px}
+[hidden]{display:none!important}
+
+.topbar{background:var(--card);border-bottom:1px solid var(--line);padding:12px 20px;padding-top:calc(12px + env(safe-area-inset-top,0px));display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.logo{width:36px;height:36px;border-radius:10px;background:var(--op);color:#fff;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.brand{display:flex;flex-direction:column;line-height:1.25;min-width:0}
+.brand b{font-size:18px}
+.brand span{font-size:12px;color:var(--muted)}
+.spacer{flex-grow:1}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:7px 13px;border-radius:999px;font-size:13px;white-space:nowrap}
+.pill.net{background:var(--op-soft);color:var(--op);font-weight:700}
+.pill.net.online{background:#fdf1e6;color:#9a5b00}
+.pill.sys{background:var(--bg);color:var(--set)}
+.dot{width:9px;height:9px;border-radius:50%;background:currentColor;flex:none}
+
+main{max-width:1200px;margin:0 auto;padding:18px 20px 56px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);grid-template-areas:"op out" "set out";gap:22px;align-items:start}
+.col{min-width:0;display:flex;flex-direction:column;gap:14px}
+.col.op{grid-area:op}.col.out{grid-area:out}.col.set{grid-area:set}
+@media (max-width:700px){.grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"op" "out" "set"}}
+.tag{display:inline-block;font-size:12px;font-weight:700;padding:2px 10px;border-radius:6px;width:max-content}
+.tag.op{background:var(--op);color:#fff}
+.tag.out{background:var(--out);color:#fff}
+.tag.set{background:var(--line);color:var(--set)}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;display:flex;flex-direction:column;gap:14px}
+.card.op{border:2px solid var(--op);box-shadow:0 2px 8px rgba(15,118,110,.10)}
+.card.out{border-left:6px solid var(--out)}
+.card.out.minor{border-left-color:#9db3cf}
+.card.set{background:var(--set-bg);border:1px dashed var(--set-line);padding:14px 18px;color:var(--set);font-size:14px}
+.card h2{margin:0;font-size:17px}
+.card.set h2{font-size:15px;color:var(--set)}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding:4px 10px;border-radius:999px;background:var(--op-soft);color:var(--op)}
+.chip.off{background:var(--rec-soft);color:var(--rec)}
+.chip.out{background:var(--out-soft);color:var(--out)}
+.chip.minor{background:#eef2f7;color:var(--set)}
+
+.btn{border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:9px 14px;border-radius:10px;font-size:13px;min-height:40px}
+.btn.primary{background:var(--out);color:#fff;border-color:var(--out);font-weight:700}
+.btn.ghost{background:var(--card);color:var(--set);border-color:var(--set-line);font-size:12px}
+.btn.danger{color:#b33a36}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+.recwrap{display:flex;flex-direction:column;align-items:center;gap:14px;padding:4px 0}
+.recbtn{width:132px;height:132px;border-radius:50%;background:var(--rec);border:8px solid var(--rec-soft);color:#fff;font-size:17px;font-weight:700;box-shadow:0 6px 18px rgba(217,83,79,.28);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;transition:transform .1s}
+.recbtn:active{transform:scale(.97)}
+.recbtn small{font-size:12px;font-weight:400;opacity:.9}
+.recbtn.recording{background:#1f2933;border-color:#cfd6dd;box-shadow:none;animation:pulse 1.2s infinite}
+.recbtn.busy{background:#9aa9b8;border-color:#e3e9ee;box-shadow:none}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(217,83,79,.35)}50%{box-shadow:0 0 0 14px rgba(217,83,79,0)}}
+@media (prefers-reduced-motion:reduce){.recbtn.recording{animation:none}}
+.hint{color:var(--muted);font-size:13px;text-align:center;max-width:36ch}
+select{background:var(--card);border:1px solid var(--set-line);border-radius:10px;padding:8px 12px;min-height:40px}
+
+.progress{background:var(--busy-soft);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;color:var(--busy-fg)}
+.progress b{color:var(--fg)}
+.progress .label{font-size:11px;font-weight:700;letter-spacing:.06em}
+.bar{height:8px;background:#f0e2c2;border-radius:4px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--busy);border-radius:4px;transition:width .4s}
+.progress.rec{background:var(--rec-soft);color:#8a2a27}.progress.rec .bar{background:#f3cfcd}.progress.rec .bar i{background:var(--rec)}
+.progress.ok{background:var(--op-soft);color:#1f5e57}.progress.ok .bar{background:#cfe3df}.progress.ok .bar i{background:var(--op)}
+.progress.err{background:#fde8e7;color:#8a2a27}
+
+.minutes{display:flex;flex-direction:column;gap:12px;padding:2px}
+.minutes h3{margin:0;font-size:18px}
+.minutes .meta{font-size:13px;color:var(--muted)}
+.minutes h4{margin:0;font-size:13px;color:var(--out)}
+.minutes ul{margin:0;padding-left:18px}
+.minutes table{border-collapse:collapse;width:100%;font-size:14px;background:var(--set-bg);border-radius:10px;overflow:hidden}
+.minutes th{font-size:12px;color:var(--muted);font-weight:500;text-align:left;padding:8px 12px}
+.minutes td{padding:6px 12px;border-top:1px solid var(--line)}
+.empty{color:var(--muted);font-size:14px;padding:18px 0;text-align:center}
+details{border-top:1px solid var(--line);padding-top:10px}
+summary{cursor:pointer;color:var(--muted);font-size:13px;list-style:none;display:flex;align-items:center}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"展開 ▾";margin-left:auto}
+details[open] summary::after{content:"收起 ▴"}
+.transcript{white-space:pre-wrap;font-size:14px;color:var(--fg);margin-top:10px;max-height:360px;overflow:auto;line-height:1.7}
+.card.minor details{border-top:0;padding-top:0}
+.card.minor summary{color:var(--fg);font-weight:700;font-size:15px}
+.en{white-space:pre-wrap;font-size:14px;background:var(--set-bg);border-radius:10px;padding:12px;min-height:48px}
+.qr{width:56px;height:56px;border-radius:8px;border:1px solid var(--line);background:#fff;object-fit:contain;flex:none}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#1f2933;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.show{opacity:1}
+.devlinks{font-size:12px;color:var(--muted)}
+.devlinks a{color:var(--muted);margin-right:12px}
+@media (max-width:480px){main{padding:14px 16px 56px}.card{padding:16px}.topbar .pill.sys{display:none}}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <span class="logo">LN</span>
+  <div class="brand"><b>LocalNote 聽記盒</b><span>會議錄音，紀要在盒子裡生成</span></div>
+  <span class="spacer"></span>
+  <span class="pill net" id="netPill"><span class="dot"></span><span id="netText">檢查連線狀態…</span></span>
+  <span class="pill sys" id="sysPill">盒子：—</span>
+</header>
+
+<main>
+  <p class="devlinks" id="devLinks" hidden><a href="/dbg01">Code Review</a><a href="/docs">API Docs</a><a href="/arena">LLM Arena</a></p>
+
+  <div class="grid">
+    <!-- ================= 操作 ================= -->
+    <section class="col op">
+      <span class="tag op">操作</span>
+      <div class="card op">
+        <div class="row">
+          <h2>錄一段會議</h2>
+          <span class="spacer"></span>
+          <span class="chip" id="btChip"><span class="dot"></span><span id="btText">耳麥：檢查中</span></span>
+        </div>
+        <div class="recwrap">
+          <button class="recbtn" id="recBtn" aria-label="開始錄音"><span id="recLabel">開始錄音</span><small id="recSub"></small></button>
+          <div class="row">
+            <label for="dur">這次錄</label>
+            <select id="dur">
+              <option value="60">1 分鐘</option>
+              <option value="90" selected>1 分 30 秒（演示）</option>
+              <option value="120">2 分鐘</option>
+              <option value="180">3 分鐘</option>
+            </select>
+          </div>
+          <p class="hint" id="hint">戴上耳麥，按下紅色按鈕開始說。時間到自動停，盒子接著整理成紀要。</p>
+        </div>
+        <div class="progress" id="progress" hidden>
+          <div class="row"><span class="label">進度</span><b id="pTitle">—</b><span class="spacer"></span><span id="pEta"></span></div>
+          <div class="bar"><i id="pBar"></i></div>
+          <span id="pSteps" style="font-size:13px"></span>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ================= 設定 ================= -->
+    <section class="col set">
+      <span class="tag set">設定</span>
+      <div class="card set">
+        <div class="row">
+          <div style="flex:1 1 220px;min-width:0">
+            <h2>手機怎麼連</h2>
+            <div>連 Wi-Fi「<b id="ssid">raspi543_AI</b>」→ 開「<b id="host">localnote.local</b>」。不用裝 App。</div>
+          </div>
+          <img class="qr" id="qr" alt="Wi-Fi QR Code" src="" hidden>
+          <button class="btn ghost" id="netSwitch">切回家用 Wi-Fi</button>
+        </div>
+      </div>
+      <div class="card set">
+        <div class="row">
+          <div style="flex:1 1 160px"><h2>耳麥</h2><div id="btDetail">—</div></div>
+          <div class="row">
+            <button class="btn ghost" data-bt="scan">找耳麥</button>
+            <button class="btn ghost" data-bt="connect">連線常用耳麥</button>
+            <button class="btn ghost danger" data-bt="disconnect">中斷</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 輸出 ================= -->
+    <section class="col out">
+      <span class="tag out">輸出</span>
+      <div class="card out">
+        <div class="row">
+          <h2>會議紀要</h2>
+          <span class="chip out">盒子生成，未上傳</span>
+          <span class="spacer"></span>
+          <button class="btn" id="regenBtn" disabled>重新整理</button>
+          <button class="btn primary" id="copyBtn" disabled>複製紀要</button>
+        </div>
+        <div class="minutes" id="minutes"><div class="empty">還沒有紀要。錄一段會議，約一分鐘後這裡會出現摘要、待辦和決議。</div></div>
+        <details id="transcriptBox" hidden>
+          <summary>完整逐字稿</summary>
+          <div class="transcript" id="transcript"></div>
+        </details>
+      </div>
+
+      <div class="card out minor">
+        <details>
+          <summary>翻成英文、念給我聽 <span class="chip minor" style="margin-left:10px">加分項</span></summary>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
+            <div class="row">
+              <button class="btn" id="toEnBtn" disabled>紀要翻成英文</button>
+              <button class="btn" id="toZhBtn" disabled>英文翻成中文</button>
+              <button class="btn" id="ttsBtn" disabled>在耳麥念出來</button>
+            </div>
+            <div class="en" id="enBox">—</div>
+          </div>
+        </details>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ============================================================
+   後端介面約定（改這裡即可對接現有 FastAPI）
+   所有請求同源，不走外網。
+   ------------------------------------------------------------
+   GET  /api/system          -> {offline:true, cpu:6, temp:44.5, mode:"ap"|"sta", ssid:"raspi543_AI", host:"localnote.local", wifi_qr:"/static/wifi.png"}
+   GET  /api/bt              -> {connected:true, name:"RichChipAN"}
+   POST /api/bt/{scan|connect|disconnect} -> {ok:true, msg:"..."}
+   POST /api/record {seconds:90} -> {job:"abc123"}
+   GET  /api/status          -> {state:"idle"|"recording"|"processing"|"done"|"error",
+                                 phase:"record"|"transcribe"|"summarize", progress:0-100,
+                                 elapsed:37, total:90, eta:50, job:"abc123", msg:"..."}
+   GET  /api/result          -> {job:"abc123", title:"客戶會議", started_at:"2026-10-07T10:50:00", duration:90,
+                                 summary:["..."], todos:[{item:"",owner:"",due:""}], decisions:["..."],
+                                 transcript:"...", markdown:"# 客戶會議 ..."}
+   POST /api/regenerate      -> {job:"abc123"}            只重跑 LLM，不重錄
+   POST /api/translate {text, to:"en"|"zh"} -> {text:"..."}
+   POST /api/tts {text}      -> {ok:true}                 在耳麥播放
+   POST /api/net/switch {mode:"sta"} -> {ok:true}
+   ============================================================ */
+const API = {
+  system: '/api/system', bt: '/api/bt', record: '/api/record', status: '/api/status',
+  result: '/api/result', regenerate: '/api/regenerate', translate: '/api/translate',
+  tts: '/api/tts', netSwitch: '/api/net/switch'
+};
+const POLL_MS = 1500;
+const q = new URLSearchParams(location.search);
+const MOCK = q.get('mock') === '1';
+if (q.get('dev') === '1') document.getElementById('devLinks').hidden = false;
+
+const $ = id => document.getElementById(id);
+const el = {
+  netPill: $('netPill'), netText: $('netText'), sysPill: $('sysPill'), btChip: $('btChip'), btText: $('btText'), btDetail: $('btDetail'),
+  recBtn: $('recBtn'), recLabel: $('recLabel'), recSub: $('recSub'), dur: $('dur'), hint: $('hint'),
+  progress: $('progress'), pTitle: $('pTitle'), pEta: $('pEta'), pBar: $('pBar'), pSteps: $('pSteps'),
+  minutes: $('minutes'), transcriptBox: $('transcriptBox'), transcript: $('transcript'),
+  regenBtn: $('regenBtn'), copyBtn: $('copyBtn'), toEnBtn: $('toEnBtn'), toZhBtn: $('toZhBtn'), ttsBtn: $('ttsBtn'), enBox: $('enBox'),
+  ssid: $('ssid'), host: $('host'), qr: $('qr'), netSwitch: $('netSwitch'), toast: $('toast')
+};
+
+let state = 'idle', result = null, pollTimer = null, lastJob = null;
+
+/* ---------- 工具 ---------- */
+async function api(path, body) {
+  if (MOCK) return mock(path, body);
+  const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  if (!r.ok) throw new Error(path + ' ' + r.status);
+  return r.json();
+}
+function toast(msg, ms = 1800) { el.toast.textContent = msg; el.toast.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.toast.classList.remove('show'), ms); }
+function fmt(s) { s = Math.max(0, Math.round(s)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+/* ---------- 頂部狀態 ---------- */
+async function refreshSystem() {
+  try {
+    const s = await api(API.system);
+    el.netPill.classList.toggle('online', !s.offline);
+    el.netText.textContent = s.offline ? '離線運作 · 資料不出盒子' : '維護模式 · 有外網';
+    el.sysPill.textContent = `盒子：${state === 'processing' ? '整理中' : state === 'recording' ? '錄音中' : '待命'} · 負載 ${Math.round(s.cpu)}% · ${Math.round(s.temp)}°C`;
+    if (s.ssid) el.ssid.textContent = s.ssid;
+    if (s.host) el.host.textContent = s.host;
+    if (s.wifi_qr) { el.qr.src = s.wifi_qr; el.qr.hidden = false; }
+    el.netSwitch.textContent = s.mode === 'ap' ? '切回家用 Wi-Fi' : '切到演示熱點';
+    el.netSwitch.dataset.to = s.mode === 'ap' ? 'sta' : 'ap';
+  } catch (e) { el.netText.textContent = '連不上盒子'; }
+}
+async function refreshBt() {
+  try {
+    const b = await api(API.bt);
+    el.btChip.classList.toggle('off', !b.connected);
+    el.btText.textContent = b.connected ? `耳麥 ${b.name || ''} 已連線` : '耳麥未連線';
+    el.btDetail.textContent = b.connected ? `${b.name || ''} · 已連線` : '未連線。按「連線常用耳麥」。';
+    el.recBtn.disabled = !b.connected && state === 'idle';
+  } catch (e) { el.btText.textContent = '耳麥狀態未知'; }
+}
+
+/* ---------- 錄音與進度 ---------- */
+function setState(s) {
+  state = s;
+  el.recBtn.classList.toggle('recording', s === 'recording');
+  el.recBtn.classList.toggle('busy', s === 'processing');
+  el.recBtn.disabled = s !== 'idle' && s !== 'done' && s !== 'error';
+  el.dur.disabled = s === 'recording' || s === 'processing';
+  if (s === 'idle' || s === 'done' || s === 'error') { el.recLabel.textContent = '開始錄音'; el.recSub.textContent = ''; }
+  if (s === 'recording') el.recLabel.textContent = '錄音中';
+  if (s === 'processing') { el.recLabel.textContent = '整理中'; el.recSub.textContent = '請稍等'; }
+  el.regenBtn.disabled = !(result && (s === 'done' || s === 'idle' || s === 'error'));
+  refreshSystem();
+}
+function renderProgress(st) {
+  const p = el.progress;
+  if (st.state === 'idle') { p.hidden = true; return; }
+  p.hidden = false; p.className = 'progress';
+  if (st.state === 'recording') {
+    p.classList.add('rec');
+    el.pTitle.textContent = '錄音中';
+    el.pEta.textContent = `${fmt(st.elapsed)} / ${fmt(st.total)}`;
+    el.pBar.style.width = Math.min(100, 100 * st.elapsed / Math.max(1, st.total)) + '%';
+    el.pSteps.textContent = '時間到會自動停';
+    el.recSub.textContent = fmt(Math.max(0, st.total - st.elapsed));
+  } else if (st.state === 'processing') {
+    el.pTitle.textContent = '盒子正在整理紀要';
+    el.pEta.textContent = st.eta != null ? `還要約 ${Math.round(st.eta)} 秒` : '';
+    el.pBar.style.width = (st.progress ?? 0) + '%';
+    const done = (k) => (['record', 'transcribe', 'summarize'].indexOf(st.phase) > ['record', 'transcribe', 'summarize'].indexOf(k)) ? ' ✓' : (st.phase === k ? '…' : '');
+    el.pSteps.textContent = `錄音完成 ✓ → 聽寫${done('transcribe')} → 整理紀要${done('summarize')}`;
+  } else if (st.state === 'done') {
+    p.classList.add('ok'); el.pTitle.textContent = '紀要已完成'; el.pEta.textContent = ''; el.pBar.style.width = '100%'; el.pSteps.textContent = '看右邊';
+    setTimeout(() => { if (state === 'done') p.hidden = true; }, 6000);
+  } else if (st.state === 'error') {
+    p.classList.add('err'); el.pTitle.textContent = '出錯了'; el.pEta.textContent = ''; el.pBar.style.width = '0%'; el.pSteps.textContent = st.msg || '再按一次開始錄音';
+  }
+}
+async function poll() {
+  try {
+    const st = await api(API.status);
+    renderProgress(st);
+    if (st.state !== state) setState(st.state);
+    if (st.state === 'done' && st.job && st.job !== lastJob) { lastJob = st.job; await loadResult(); }
+    if (st.state === 'recording' || st.state === 'processing') pollTimer = setTimeout(poll, POLL_MS);
+    else pollTimer = setTimeout(poll, POLL_MS * 3);
+  } catch (e) { pollTimer = setTimeout(poll, POLL_MS * 2); }
+}
+el.recBtn.addEventListener('click', async () => {
+  if (state === 'recording' || state === 'processing') return;
+  try {
+    el.recBtn.disabled = true;
+    await api(API.record, { seconds: +el.dur.value });
+    setState('recording'); toast('開始錄音');
+    clearTimeout(pollTimer); poll();
+  } catch (e) { toast('無法開始錄音：' + e.message); setState('idle'); }
+});
+el.regenBtn.addEventListener('click', async () => {
+  try { await api(API.regenerate, {}); setState('processing'); toast('重新整理中'); clearTimeout(pollTimer); poll(); }
+  catch (e) { toast('無法重新整理：' + e.message); }
+});
+
+/* ---------- 紀要 ---------- */
+async function loadResult() {
+  try {
+    result = await api(API.result);
+    renderMinutes(result);
+    el.copyBtn.disabled = !result.markdown;
+    el.regenBtn.disabled = false; el.toEnBtn.disabled = false; el.toZhBtn.disabled = false;
+  } catch (e) { toast('讀取紀要失敗'); }
+}
+function renderMinutes(r) {
+  if (!r || (!r.summary && !r.todos)) { el.minutes.innerHTML = '<div class="empty">還沒有紀要。</div>'; return; }
+  const when = r.started_at ? new Date(r.started_at) : null;
+  const meta = [when ? `${when.getMonth() + 1} 月 ${when.getDate()} 日 ${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}` : '', r.duration ? fmt(r.duration).replace(/^(\d+):(\d+)$/, (m, a, b) => `${+a} 分 ${+b} 秒`) : ''].filter(Boolean).join(' · ');
+  el.minutes.innerHTML = `
+    <div><h3>${esc(r.title || '會議')}</h3><div class="meta">${esc(meta)}</div></div>
+    <div><h4>摘要</h4><ul>${(r.summary || []).map(s => `<li>${esc(s)}</li>`).join('') || '<li>—</li>'}</ul></div>
+    <div><h4>待辦</h4><table><thead><tr><th>事項</th><th>負責人</th><th>時間</th></tr></thead><tbody>
+      ${(r.todos || []).map(t => `<tr><td>${esc(t.item)}</td><td>${esc(t.owner || '待定')}</td><td>${esc(t.due || '待定')}</td></tr>`).join('') || '<tr><td colspan="3">—</td></tr>'}
+    </tbody></table></div>
+    <div><h4>決議</h4><ul>${(r.decisions || []).map(s => `<li>${esc(s)}</li>`).join('') || '<li>—</li>'}</ul></div>`;
+  el.transcriptBox.hidden = !r.transcript;
+  el.transcript.textContent = r.transcript || '';
+}
+el.copyBtn.addEventListener('click', async () => {
+  const text = result?.markdown || '';
+  try { await navigator.clipboard.writeText(text); toast('紀要已複製'); }
+  catch (e) {
+    const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); toast('紀要已複製'); } catch (_) { toast('請長按選取複製'); } ta.remove();
+  }
+});
+
+/* ---------- 加分項 ---------- */
+el.toEnBtn.addEventListener('click', async () => { el.enBox.textContent = '翻譯中…'; try { const r = await api(API.translate, { text: result?.markdown || '', to: 'en' }); el.enBox.textContent = r.text; el.ttsBtn.disabled = false; } catch (e) { el.enBox.textContent = '翻譯失敗：' + e.message; } });
+el.toZhBtn.addEventListener('click', async () => { const src = el.enBox.textContent; el.enBox.textContent = '翻譯中…'; try { const r = await api(API.translate, { text: src, to: 'zh' }); el.enBox.textContent = r.text; } catch (e) { el.enBox.textContent = '翻譯失敗：' + e.message; } });
+el.ttsBtn.addEventListener('click', async () => { try { await api(API.tts, { text: el.enBox.textContent }); toast('正在耳麥播放'); } catch (e) { toast('播放失敗：' + e.message); } });
+
+/* ---------- 設定 ---------- */
+document.querySelectorAll('[data-bt]').forEach(b => b.addEventListener('click', async () => {
+  b.disabled = true; try { const r = await api(API.bt + '/' + b.dataset.bt, {}); toast(r.msg || '已執行'); await refreshBt(); } catch (e) { toast('失敗：' + e.message); } b.disabled = false;
+}));
+el.netSwitch.addEventListener('click', async () => {
+  const to = el.netSwitch.dataset.to || 'sta';
+  if (!el.netSwitch.dataset.armed) { el.netSwitch.dataset.armed = '1'; el.netSwitch.textContent = '再按一次確認切換'; setTimeout(() => { delete el.netSwitch.dataset.armed; refreshSystem(); }, 4000); return; }
+  try { await api(API.netSwitch, { mode: to }); toast('網路切換中，頁面可能短暫斷線'); } catch (e) { toast('切換失敗：' + e.message); }
+});
+
+/* ---------- 啟動 ---------- */
+setState('idle');
+refreshSystem(); refreshBt(); poll();
+setInterval(refreshSystem, 2000); setInterval(refreshBt, 5000);
+
+/* ---------- 假後端（?mock=1 預覽用） ---------- */
+let M = { state: 'idle', t0: 0, total: 90, job: 0 };
+function mock(path, body) {
+  const now = Date.now();
+  if (path === API.system) return { offline: true, cpu: M.state === 'processing' ? 97 : 6, temp: M.state === 'processing' ? 52 : 44, mode: 'ap', ssid: 'raspi543_AI', host: 'localnote.local' };
+  if (path === API.bt) return { connected: true, name: 'RichChipAN' };
+  if (path.startsWith(API.bt + '/')) return { ok: true, msg: '已執行（預覽）' };
+  if (path === API.record) { M = { state: 'recording', t0: now, total: Math.min(body.seconds, 8), job: M.job + 1 }; return { job: 'j' + M.job }; }
+  if (path === API.regenerate) { M.state = 'processing'; M.t0 = now; M.job++; return { job: 'j' + M.job }; }
+  if (path === API.status) {
+    const e = (now - M.t0) / 1000;
+    if (M.state === 'recording') { if (e >= M.total) { M.state = 'processing'; M.t0 = now; } else return { state: 'recording', elapsed: e, total: M.total }; }
+    if (M.state === 'processing') { const e2 = (now - M.t0) / 1000; if (e2 >= 6) M.state = 'done'; else return { state: 'processing', phase: e2 < 3 ? 'transcribe' : 'summarize', progress: Math.round(e2 / 6 * 100), eta: Math.round(6 - e2), job: 'j' + M.job }; }
+    return { state: M.state, job: 'j' + M.job };
+  }
+  if (path === API.result) return { job: 'j' + M.job, title: '客戶會議', started_at: new Date().toISOString(), duration: 90, summary: ['客戶要 200 台樣機，11 月前交貨', '對單價有異議，要求降 8%', '同意先簽 50 台試單'], todos: [{ item: '發修訂報價', owner: '張三', due: '週五' }, { item: '確認樣機產能', owner: '李四', due: '下週一' }], decisions: ['先簽 50 台試單，價格按新報價'], transcript: '[00:00] 發言人1：我們這邊希望 11 月前能拿到 200 台樣機……\n[00:21] 發言人2：單價還是偏高，能不能降 8%……', markdown: '# 客戶會議 · 10-07 10:50 · 1 分 30 秒\n\n## 摘要\n- 客戶要 200 台樣機，11 月前交貨\n- 對單價有異議，要求降 8%\n- 同意先簽 50 台試單\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 發修訂報價 | 張三 | 週五 |\n| 確認樣機產能 | 李四 | 下週一 |\n\n## 決議\n先簽 50 台試單，價格按新報價' };
+  if (path === API.translate) return { text: body.to === 'en' ? '# Client meeting\n\n## Summary\n- Client wants 200 sample units before November\n- Objects to unit price, asks for 8% off\n- Agrees to a 50-unit trial order first' : '（中文翻譯預覽）' };
+  if (path === API.tts) return { ok: true };
+  if (path === API.netSwitch) return { ok: true };
+  return {};
+}
+</script>
+</body>
+</html>

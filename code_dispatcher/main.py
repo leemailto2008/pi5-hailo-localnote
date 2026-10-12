@@ -15,9 +15,32 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import requests
-from redis import Redis
-from rq import Queue
-from rq.job import Job
+
+try:
+    from redis import Redis
+    from rq import Queue
+    from rq.job import Job
+except ImportError:
+    class DummyRedis:
+        def ping(self):
+            return False
+
+    class DummyRegistry:
+        count = 0
+
+    class DummyQueue:
+        def enqueue(self, *args, **kwargs):
+            raise RuntimeError("Redis/RQ is not installed on this environment.")
+        def __len__(self):
+            return 0
+        started_job_registry = DummyRegistry()
+        finished_job_registry = DummyRegistry()
+        failed_job_registry = DummyRegistry()
+
+    Redis = lambda **kw: DummyRedis()
+    Queue = lambda *args, **kw: DummyQueue()
+    Job = None
+
 
 # Ensure PipeWire / PulseAudio session is accessible for systemd service
 os.environ.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
@@ -83,11 +106,21 @@ async def startup_event():
     except Exception as e:
         print(f"[Startup] Ollama preload notice: {e}")
 
+    try:
+        from meeting_minutes import minutes_manager
+        asyncio.create_task(minutes_manager.offline_detector.start())
+        print("[Startup] OfflineDetector background watchdog started.")
+    except Exception as e:
+        print(f"[Startup] OfflineDetector startup notice: {e}")
+
 redis_conn = Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
 task_queue = Queue(QUEUE_NAME, connection=redis_conn)
 
+HTML_CLIENT_UI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui_client.html")
 HTML_UI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui.html")
 HTML_DBG01_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui_dbg01.html")
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+os.makedirs(STATIC_DIR, exist_ok=True)
 
 
 class CodeTaskRequest(BaseModel):
@@ -105,21 +138,34 @@ class CodeTaskRequest(BaseModel):
 
 @app.get("/", response_class=HTMLResponse, tags=["Web UI"])
 def get_web_ui():
-    """Serve the Bluetooth Device Management & Voice Application Studio (Default on Port 80)."""
+    """Serve the client-facing LocalNote Meeting Minutes Dashboard."""
+    if os.path.exists(HTML_CLIENT_UI_PATH):
+        with open(HTML_CLIENT_UI_PATH, "r", encoding="utf-8") as f:
+            return f.read()
     if os.path.exists(HTML_UI_PATH):
         with open(HTML_UI_PATH, "r", encoding="utf-8") as f:
             return f.read()
-    return "<h1>Pi 5 Edge Gateway</h1><p>ui.html not found.</p>"
+    return "<h1>LocalNote 聽記盒</h1><p>ui_client.html not found.</p>"
 
 
 @app.get("/dbg01", response_class=HTMLResponse, tags=["Web UI"])
 @app.get("/dgb01", response_class=HTMLResponse, include_in_schema=False)
 def get_dbg01_ui():
-    """Serve the original Code Review & LLM Arena interface at /dbg01."""
+    """Serve the Bluetooth Gateway & Voice Application Studio at /dbg01."""
+    if os.path.exists(HTML_UI_PATH):
+        with open(HTML_UI_PATH, "r", encoding="utf-8") as f:
+            return f.read()
+    return "<h1>Pi 5 Studio (DBG01)</h1><p>ui.html not found.</p>"
+
+
+@app.get("/arena", response_class=HTMLResponse, tags=["Web UI"])
+def get_arena_ui():
+    """Serve the original Code Review & LLM Arena interface at /arena."""
     if os.path.exists(HTML_DBG01_PATH):
         with open(HTML_DBG01_PATH, "r", encoding="utf-8") as f:
             return f.read()
     return "<h1>Pi 5 LLM Arena (DBG01)</h1><p>ui_dbg01.html not found.</p>"
+
 
 
 
@@ -539,6 +585,8 @@ def scan_bt_devices(timeout_sec: int = 8) -> Dict[str, Any]:
         devices = scan_devices(timeout_sec=timeout_sec)
         return {
             "status": "success",
+            "ok": True,
+            "msg": f"找到 {len(devices)} 個可用藍牙音訊設備",
             "count": len(devices),
             "devices": devices
         }
@@ -628,7 +676,12 @@ def connect_bt_device(req: Optional[BTConnectRequest] = None) -> Dict[str, Any]:
 
         if not ok:
             raise HTTPException(status_code=400, detail=msg)
-        return {"status": "success", "message": msg}
+        return {
+            "status": "success",
+            "ok": ok,
+            "msg": msg,
+            "message": msg
+        }
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
@@ -644,7 +697,12 @@ def disconnect_bt_device() -> Dict[str, Any]:
         # Invalidate cache
         global _last_bt_status_time
         _last_bt_status_time = 0.0
-        return {"status": "success" if ok else "failed", "message": msg}
+        return {
+            "status": "success" if ok else "failed",
+            "ok": ok,
+            "msg": msg,
+            "message": msg
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"中斷連線失敗: {str(e)}")
 
@@ -982,5 +1040,133 @@ async def text_to_speech_endpoint(req: VoiceTTSRequest) -> Dict[str, Any]:
 
 from fastapi.staticfiles import StaticFiles
 app.mount("/audio", StaticFiles(directory=AUDIO_CACHE_DIR), name="audio")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+# -------------------------------------------------------------
+# Task 31: LocalNote Demo UI Adapter Endpoints
+# -------------------------------------------------------------
+
+class DemoRecordRequest(BaseModel):
+    seconds: int = Field(default=90, ge=10, le=300, description="錄音秒數")
+
+
+class DemoTranslateRequest(BaseModel):
+    text: str = Field(..., description="待翻譯文字")
+    to: str = Field(default="en", description="目標語言 'en' 或 'zh'")
+
+
+class DemoTTSRequest(BaseModel):
+    text: str = Field(..., description="待朗讀文字")
+
+
+class DemoNetSwitchRequest(BaseModel):
+    mode: str = Field(..., description="'ap' 切換為獨立熱點或 'sta' 切回家用 Wi-Fi")
+
+
+@app.get("/api/system", tags=["Demo UI"])
+def get_demo_system() -> Dict[str, Any]:
+    """Retrieve simplified system status for LocalNote client dashboard."""
+    from meeting_minutes import minutes_manager
+    qr_path = os.path.join(STATIC_DIR, "wifi.png")
+    return {
+        "offline": minutes_manager.offline_detector.is_offline,
+        "cpu": minutes_manager.get_cpu_load(),
+        "temp": minutes_manager.get_temperature(),
+        "mode": minutes_manager.get_network_mode(),
+        "ssid": "raspi543_AI",
+        "host": "localnote.local",
+        "wifi_qr": "/static/wifi.png" if os.path.exists(qr_path) else None
+    }
+
+
+@app.get("/api/bt", tags=["Demo UI"])
+def get_demo_bt() -> Dict[str, Any]:
+    """Simplified Bluetooth status without polling overhead."""
+    st = get_bt_status()
+    return {
+        "connected": bool(st.get("connected", False)),
+        "name": st.get("connected_name") or ""
+    }
+
+
+@app.post("/api/record", tags=["Demo UI"])
+async def post_demo_record(req: DemoRecordRequest) -> Dict[str, Any]:
+    """Start fixed-duration recording and pipeline job."""
+    from meeting_minutes import minutes_manager
+    try:
+        job_id = await minutes_manager.start_record(req.seconds)
+        return {"job": job_id}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/status", tags=["Demo UI"])
+def get_demo_status() -> Dict[str, Any]:
+    """Poll pipeline progress, ETA, and current stage."""
+    from meeting_minutes import minutes_manager
+    return minutes_manager.status.model_dump()
+
+
+@app.get("/api/result", tags=["Demo UI"])
+def get_demo_result() -> Dict[str, Any]:
+    """Fetch meeting minutes result with structured summary, todos, decisions and markdown."""
+    from meeting_minutes import minutes_manager
+    if not minutes_manager.result:
+        return {
+            "job": "",
+            "title": "會議紀要",
+            "started_at": datetime.now().isoformat(),
+            "duration": 0,
+            "summary": [],
+            "todos": [],
+            "decisions": [],
+            "transcript": "",
+            "markdown": ""
+        }
+    return minutes_manager.result.model_dump()
+
+
+@app.post("/api/regenerate", tags=["Demo UI"])
+async def post_demo_regenerate() -> Dict[str, Any]:
+    """Regenerate meeting summary from transcript without recording again."""
+    from meeting_minutes import minutes_manager
+    try:
+        job_id = await minutes_manager.regenerate()
+        return {"job": job_id}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/translate", tags=["Demo UI"])
+async def post_demo_translate(req: DemoTranslateRequest) -> Dict[str, Any]:
+    """Translate text between Traditional Chinese and English for Demo UI."""
+    direction = "zh2en" if req.to.lower() == "en" else "en2zh"
+    v_req = VoiceTranslateRequest(text=req.text, direction=direction)
+    res = await translate_text(v_req)
+    return {"text": res.get("translated_text", "")}
+
+
+@app.post("/api/tts", tags=["Demo UI"])
+async def post_demo_tts(req: DemoTTSRequest) -> Dict[str, Any]:
+    """Synthesize text and play directly on Bluetooth headset."""
+    voice = "en-US-AriaNeural" if any(ord(c) < 128 and c.isalpha() for c in req.text[:20]) else "zh-TW-HsiaoChenNeural"
+    v_req = VoiceTTSRequest(text=req.text, voice=voice, play_on_speaker=True)
+    res = await text_to_speech_endpoint(v_req)
+    return {"ok": res.get("status") == "success"}
+
+
+@app.post("/api/net/switch", tags=["Demo UI"])
+def post_demo_net_switch(req: DemoNetSwitchRequest) -> Dict[str, Any]:
+    """Switch between standalone AP mode and home Wi-Fi."""
+    try:
+        from hotspot_controller import switch_to_ap, switch_to_sta
+        if req.mode.lower() == "ap":
+            switch_to_ap(timeout_sec=180)
+        else:
+            switch_to_sta()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"網路切換失敗: {str(e)}")
 
 

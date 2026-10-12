@@ -1,104 +1,81 @@
-# 規格文件 (SPEC.md): Task 05 - 記憶體環形緩衝區與零磁碟 I/O (In-Memory Ring Buffer & Zero-Disk I/O)
+# 規格文件 (SPEC.md): Task 31 - LocalNote 聽記盒 Demo 版 API 適配層與狀態機規格
+# (Meeting Minutes Engine & Demo UI Backend Adapter)
 
-> **版本 (Version):** 1.0.0  
-> **模組路徑 (Module Path):** `code_dispatcher/voice_memory.py`, `code_dispatcher/voice_pipeline.py`, `code_dispatcher/voice_streaming.py`, `code_dispatcher/main.py`  
-> **建立日期 (Date):** 2026-10-08  
+> **版本 (Version):** 1.1.0  
+> **模組路徑 (Module Path):** `code_dispatcher/meeting_minutes.py`, `code_dispatcher/main.py`  
+> **建立日期 (Date):** 2026-10-12  
 > **架構師 (Architect):** Senior Staff Software Engineer  
 
 ---
 
-## 1. 背景與現狀問題 (Background & Problem Statement)
+## 1. 背景與目標 (Background & Objectives)
 
-目前系統錄音與語音管線在處理音訊時，大量依賴實體快閃儲存 (MicroSD / eMMC / NVMe)：
-1. **實體磁碟過度寫入與耗損 (Flash Storage Wear)：**
-   - 每次錄音生成 `master.ogg`、ffmpeg 轉出 `master.mp3`、切出 `chunk_000.ogg`，全寫入 `/home/pi/code_dispatcher/audio_cache`。
-   - `voice_pipeline.py` 在執行 STT 前，又透過 ffmpeg 將音訊轉存為暫存實體檔案 `temp_whisper_xxx.wav`，辨識完再手動刪除。
-   - 頻繁的建立與刪除造成快閃記憶體區塊磨損 (Write Amplification)，長期運行極易引發檔案系統壞軌。
-2. **I/O 延遲開銷 (I/O Latency Overhead)：**
-   - 磁碟寫入與同步 (fsync) 在 MicroSD 上產生 200~400ms 的無謂等待。
+為滿足「LocalNote 聽記盒」面向客戶與投資人的展示需求，後端需提供一套符合前端 `LocalNote-工程版-index.html` 規格的極簡、高效且符合硬體零爭搶規範的 API 接口層。
 
----
-
-## 2. 目標與驗收標準 (Objectives & Acceptance Criteria)
-
-### 2.1 核心目標
-1. **純記憶體 RAM-Disk 快取 (`/dev/shm/audio_cache`)：**
-   - 將音訊暫存目錄掛載/重定向至 Linux 原生 POSIX 共享記憶體 `tmpfs` (`/dev/shm/audio_cache`)。
-   - 所有即時音訊檔讀寫 100% 在 RAM 中完成，**實體磁碟寫入量降為 0**。
-2. **純記憶體音訊串流解碼 (Zero-Disk In-Memory PCM Decoding)：**
-   - 徹底移除 `temp_whisper_xxx.wav` 實體暫存檔機制。
-   - 透過 ffmpeg 管道 (`pipe:1`) 直接將音訊解碼為 16kHz s16le PCM 位元組流至記憶體中，轉為 `np.float32` 陣列直接餵入 `WhisperModel.transcribe()`。
-3. **容量感知環形緩衝區 (Capacity-Aware Ring Buffer)：**
-   - 實作 FIFO 環形配額管理 (`AudioMemoryRingBuffer`)，上限設為 64MB 或最近 15 筆音訊。超過閥值時自動淘汰最舊音訊，嚴防 RAM 洩漏。
-4. **驗收標準：**
-   - 語音轉錄流程全線無任何暫存 `.wav` 檔案落地。
-   - 音訊轉換階段延遲縮減 >150ms。
+### 核心原則：
+1. **零爭搶 (Zero-Contention SCO Guard):** 錄音進行中嚴禁推論與高頻 HCI 指令，保障 7.5ms SCO 音訊傳輸不掉幀。
+2. **非阻塞離線探測 (Non-blocking Offline Probing):** 後端背景排程非同步 ping 外網，快取離線狀態，避免輪詢 `/api/system` 造成延遲卡頓。
+3. **非同步狀態機 (Async State Machine):** 管理 `idle -> recording -> processing (transcribe -> summarize) -> done / error` 生命週期。
+4. **結構化紀要解析與降級保護 (Structured Minutes Parser & Graceful Degradation):** 將本地 LLM (`qwen2.5:3b-opt`) 生成的 Markdown 紀要精確拆解為 `summary[]`, `todos[]`, `decisions[]`，同時提供完整 Markdown 文本。
 
 ---
 
-## 3. 系統架構設計 (System Architecture)
+## 2. API 介面規格 (API Interface Specifications)
+
+| 方法 | 路徑 | 請求主體 (Payload) | 回傳格式 (Response) | 說明 |
+|---|---|---|---|---|
+| `GET` | `/api/system` | — | `{offline, cpu, temp, mode, ssid, host, wifi_qr}` | 每 2 秒輪詢；讀取記憶體快取 |
+| `GET` | `/api/bt` | — | `{connected, name}` | 每 5 秒輪詢；錄音時讀取快取 |
+| `POST` | `/api/bt/{action}` | — | `{ok, msg}` | 支援 `scan`, `connect`, `disconnect` |
+| `POST` | `/api/record` | `{seconds: int}` | `{job: str}` | 啟動非同步錄音與後續處理任務 |
+| `GET` | `/api/status` | — | `{state, phase, progress, elapsed, total, eta, job, msg}` | 狀態輪詢（1.5s/次） |
+| `GET` | `/api/result` | — | `{job, title, started_at, duration, summary[], todos[], decisions[], transcript, markdown}` | 取得最終或階段性產出 |
+| `POST` | `/api/regenerate` | — | `{job: str}` | 僅重新執行 LLM 紀要生成，不重錄 |
+| `POST` | `/api/translate` | `{text: str, to: "en"\|"zh"}` | `{text: str}` | 紀要雙向翻譯 |
+| `POST` | `/api/tts` | `{text: str}` | `{ok: bool}` | 耳麥語音朗讀合成 |
+| `POST` | `/api/net/switch` | `{mode: "ap"\|"sta"}` | `{ok: bool}` | 熱點/家用 Wi-Fi 雙向原子切換 |
+
+---
+
+## 3. 狀態機與處理流水線設計 (State Machine Pipeline)
 
 ```mermaid
-graph TD
-    subgraph 🎙️ 語音收音與切片 (In-Memory POSIX RAM-Disk)
-        MIC["藍牙耳麥輸入"] --> FFMPEG["ffmpeg (pulse)"]
-        FFMPEG --> RAMFS["/dev/shm/audio_cache (tmpfs in RAM)"]
-        RAMFS --> M_OGG["master.ogg (RAM)"]
-        RAMFS --> CHUNKS["chunk_*.ogg (RAM)"]
-        RAMFS --> RING["AudioMemoryRingBuffer (Max 64MB FIFO Eviction)"]
-    end
-
-    subgraph ⚡ 零磁碟 STT 串流解碼 (Zero-Disk In-Memory PCM)
-        CHUNKS --> PIPE["ffmpeg pipe:1 (stdout)"]
-        PIPE --> PCM["raw s16le PCM bytes (In-Memory)"]
-        PCM --> NUMPY["np.float32 (16kHz Mono Array)"]
-        NUMPY --> WHISPER["faster-whisper (Direct Array Inference)"]
-    end
-
-    subgraph 🌐 靜態音訊回放 (Web Player Serving)
-        M_OGG --> MP3["master.mp3 (RAM)"]
-        MP3 --> FASTAPI["FastAPI /audio mount (/dev/shm/audio_cache)"]
-        FASTAPI --> BROWSER["📱 瀏覽器直接試聽 (極速微秒級加載)"]
-    end
+stateDiagram-v2
+    [*] --> idle: 系統就緒
+    idle --> recording: POST /api/record (時長 60~180s)
+    
+    state recording {
+        [*] --> MicRecording: ffmpeg 收音至 /dev/shm (CPU 獨占)
+    }
+    
+    recording --> processing: 錄音完成
+    
+    state processing {
+        [*] --> transcribe: 釋放 4 核心 faster-whisper (int8)
+        transcribe --> summarize: Ollama qwen2.5:3b-opt 生成繁體中文紀要
+        summarize --> [*]: Regex 抽取結構化待辦/摘要
+    }
+    
+    processing --> done: 寫入結果並通知前端
+    done --> processing: POST /api/regenerate (僅重跑 summarize)
+    done --> recording: 再次按開始錄音
+    
+    recording --> error: 麥克風異常或中斷
+    processing --> error: 模型超時或異常
+    error --> idle: 使用者重試
 ```
 
 ---
 
-## 4. 詳細技術規格 (Technical Specifications)
+## 4. 實作檢查清單 (Implementation Checklist)
 
-### 4.1 Linux POSIX 共享記憶體架構
-- 基礎路徑：優先採用 `/dev/shm/audio_cache`。若在非 Linux 系統環境則平滑回退至本機快取目錄。
-- 權限管理：`0755`，確保 FastAPI (Uvicorn) 具備完整讀寫與子目錄建立權限。
-
-### 4.2 零磁碟 PCM 轉換演算法 (In-Memory PCM Streaming)
-```python
-cmd = [
-    "ffmpeg", "-y", "-i", input_audio,
-    "-f", "s16le", "-ac", "1", "-ar", "16000",
-    "-"
-]
-proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-raw_pcm, _ = proc.communicate()
-audio_np = np.frombuffer(raw_pcm, dtype=np.int16).astype(np.float32) / 32768.0
-# 直接傳入 WhisperModel.transcribe(audio_np)
-```
-
-### 4.3 環形緩衝區淘汰策略 (Ring Buffer FIFO Eviction)
-- 監控總快取目錄容量。
-- 當容量超過 `MAX_RAMFS_BYTES = 64 * 1024 * 1024` (64MB) 或目錄數超過 `MAX_SESSIONS = 15` 時，依最後修改時間 (mtime) 刪除最舊的 session 目錄。
-
----
-
-## 5. 實作檢查清單 (Implementation Checklist)
-
-- [ ] **Phase 1: 記憶體環形緩衝區模組實裝 (`code_dispatcher/voice_memory.py`)**
-  - 實作 `init_memory_cache()`、`evict_ring_buffer()`。
-  - 封裝 `audio_to_pcm_array()` 零磁碟記憶體轉換函式。
-- [ ] **Phase 2: 語音管線零磁碟改造 (`code_dispatcher/voice_pipeline.py`)**
-  - 改造 `speech_to_text()`：徹底移除實體 `wav_path` 寫入/刪除邏輯，全面接入 `audio_to_pcm_array()`。
-- [ ] **Phase 3: 串流與 API 目錄重定向至 RAMFS (`code_dispatcher/main.py`, `voice_streaming.py`)**
-  - 將 `AUDIO_CACHE_DIR` 導向 `/dev/shm/audio_cache`。
-  - 在每次 session 完成時觸發環形緩衝區配額維護。
-- [ ] **Phase 4: 本機實測與部署驗證**
-  - 檢查 `/dev/shm/audio_cache` 運作與 `lsof` / `df -h /dev/shm` 佔用。
-  - 驗證無任何檔案寫入 MicroSD 實體磁區。
+- [x] **Phase 1-A: 撰寫架構規格與驗證避坑條件 (SPEC.md)**
+- [ ] **Phase 1-B: 實作會議錄音與紀要管理引擎 (`code_dispatcher/meeting_minutes.py`)**
+  - 非同步狀態機與背景作業管理。
+  - 後端非阻塞離線偵測守護行程 (Background Offline Ping Watchdog)。
+  - 提示詞工程 (Prompt Engineering) 與 Markdown 結構化解析器。
+- [ ] **Phase 1-C: 在 `code_dispatcher/main.py` 整合並註冊 10 個標準 API 端點**
+  - 重用 `voice_pipeline.py`、`bluetooth_manager.py` 與 `hotspot_controller.py`。
+  - 全面相容既有 `/api/voice/...` 與 `/dbg01` 路由。
+- [ ] **Phase 1-D: 靜態 Wi-Fi QR Code 產生與路由掛載 (`static/wifi_ap.png`)**
+- [ ] **Phase 1-E: 單元測試與 API 模擬驗證 (`test_meeting_minutes.py`)**
