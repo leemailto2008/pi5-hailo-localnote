@@ -447,6 +447,7 @@ if (window.location.hash === '#bt' || window.location.pathname === '/bluetooth' 
 /* ---------- 頂部狀態 ---------- */
 async function refreshSystem() {
   try {
+    const s = await api(API.system);
     const isNarrow = window.innerWidth <= 600;
     el.netPill.classList.toggle('online', !s.offline);
     if (isNarrow) {
