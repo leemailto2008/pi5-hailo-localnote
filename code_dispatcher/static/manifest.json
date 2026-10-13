@@ -1,0 +1,25 @@
+{
+  "name": "LocalNote 聽記盒",
+  "short_name": "LocalNote",
+  "description": "樹莓派 5 邊緣雙語口譯、語音筆記與離線會議紀要系統",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f3f6f8",
+  "theme_color": "#0f766e",
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

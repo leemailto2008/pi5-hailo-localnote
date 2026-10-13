@@ -18,7 +18,7 @@ from datetime import datetime
 logger = logging.getLogger("pi5-dispatcher")
 
 from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, Response, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import requests
@@ -206,9 +206,32 @@ def get_bluetooth_ui():
     return get_web_ui()
 
 
+# -------------------------------------------------------------
+# Task 10: Progressive Web App (PWA) Manifest & Service Worker
+# -------------------------------------------------------------
+@app.get("/manifest.json", include_in_schema=False)
+def get_pwa_manifest():
+    """Serve PWA Web App Manifest."""
+    manifest_path = os.path.join(STATIC_DIR, "manifest.json")
+    if os.path.exists(manifest_path):
+        return FileResponse(manifest_path, media_type="application/manifest+json")
+    return Response(content="{}", media_type="application/manifest+json")
 
 
-
+@app.get("/sw.js", include_in_schema=False)
+@app.get("/service-worker.js", include_in_schema=False)
+def get_pwa_service_worker():
+    """Serve PWA Service Worker with root scope permissions and no-cache policy."""
+    sw_path = os.path.join(STATIC_DIR, "sw.js")
+    headers = {
+        "Service-Worker-Allowed": "/",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
+    }
+    if os.path.exists(sw_path):
+        return FileResponse(sw_path, media_type="application/javascript", headers=headers)
+    return Response(content="// Service worker not found", media_type="application/javascript", headers=headers)
 class TaskEnqueueResponse(BaseModel):
     task_id: str
     status: str

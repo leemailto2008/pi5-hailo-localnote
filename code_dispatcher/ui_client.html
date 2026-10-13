@@ -8,7 +8,13 @@
 <meta http-equiv="Expires" content="0">
 <title>LocalNote 聽記盒</title>
 <meta name="theme-color" content="#0f766e">
-<link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiTG9jYWxOb3RlIiwic2hvcnRfbmFtZSI6IkxvY2FsTm90ZSIsInN0YXJ0X3VybCI6Ii8iLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsImJhY2tncm91bmRfY29sb3IiOiIjZjNmNmY4IiwidGhlbWVfY29sb3IiOiIjMGY3NjZlIn0=">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LocalNote">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
 <style>
 /* ============================================================
    LocalNote Demo UI · 工程版 (含藍牙音訊設備管理中心)
@@ -1205,6 +1211,19 @@ function scheduleWsReconnect() {
 /* ---------- 啟動 ---------- */
 setState('idle');
 initWebSocket();
+
+/* ---------- Task 10: 註冊 Service Worker (PWA 離線支援) ---------- */
+if ('serviceWorker' in navigator && !window.location.search.includes('mock=1')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      .then(reg => {
+        console.log('[PWA] Service Worker registered with scope:', reg.scope);
+      })
+      .catch(err => {
+        console.warn('[PWA] Service Worker registration failed:', err);
+      });
+  });
+}
 
 /* ---------- 假後端（?mock=1 預覽用） ---------- */
 let M = {

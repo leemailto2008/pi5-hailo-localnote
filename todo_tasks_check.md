@@ -10,9 +10,9 @@
 ## 📊 整體進度統計 (Overall Progress)
 
 - **總規劃任務 (Total Tasks):** 30 項
-- **已完整實裝並驗收上線 (Fully Completed):** **8 項** (27%)
+- **已完整實裝並驗收上線 (Fully Completed):** **9 項** (30%)
 - **部分實裝具備核心模組 (Partially Completed):** **3 項** (10%)
-- **待後續迭代實作 (Backlog / To-Do):** **19 項** (63%)
+- **待後續迭代實作 (Backlog / To-Do):** **18 項** (60%)
 - **額外完成關鍵專案增強 (Extra System Enhancements):** **4 項** (藍牙 Hub SPA、Captive Portal 攔截、窄螢幕響應式佈局、PipeWire 精準拓撲解析)
 
 ---
@@ -56,8 +56,13 @@
   - **實作模組:** `code_dispatcher/voice_pipeline.py`, `code_dispatcher/meeting_minutes.py`, `code_dispatcher/ws_manager.py`, `code_dispatcher/ui_client.html`, `code_dispatcher/static/index.html`
   - **成效與狀態:** 在 ffmpeg 錄音管線配置雙路輸出（母帶 libopus + 原始 PCM s16le stdout pipe），每 50ms 提取 RMS、Peak、dBFS 與 8 頻段 FFT 頻譜。透過 WebSocket 即時推播，前端動態繪製霓虹漸層 VU 電平條、Peak Hold 標記與 8 頻段跳動柱狀頻譜，並以即時徽章提示收音狀態（收音良好 🟢 / 音量微弱 🟡 / 未收到聲音 🔴），徹底解決盲錄痛點。
 
-- [ ] **Task 10: 漸進式 Web 應用程式離線快取 (Progressive Web App, PWA & Service Worker)**
-  - **狀態:** 待辦。目前具備基本 HTML/CSS 快取，尚未編寫 Service Worker Cache-First 離線快取機制。
+- [x] **Task 10: 漸進式 Web 應用程式離線快取 (Progressive Web App, PWA & Service Worker)** ✅ *(已實裝)*
+  - **實作模組:** `code_dispatcher/static/manifest.json`, `code_dispatcher/static/sw.js`, `code_dispatcher/static/icon-192.png`, `code_dispatcher/static/icon-512.png`, `code_dispatcher/main.py`, `code_dispatcher/ui_client.html`, `code_dispatcher/static/index.html`
+  - **成效與狀態:** 
+    1. 實裝標準 PWA Web App Manifest 與 192x192 / 512x512 高解析度獨立應用圖示，支援 iOS / Android「加到主畫面 (Add to Home Screen)」為獨立全螢幕 App (standalone)。
+    2. 實裝 Service Worker Cache-First 快取架構 (`localnote-v1.0.0`)：預先快取核心 HTML、CSS 與 WebManifest；非 API 靜態請求若命中快取立即 0 延遲返回並背景更新 (Stale-While-Revalidate)，斷網或熱點斷線時依舊能秒開介面。
+    3. 實裝嚴格動態請求排除機制：精準排除 `/api/`、`/audio/`、`/ws/` 等動態遙測與即時串流端點，防止遙測狀態與音訊被快取污染。
+    4. 後端 FastAPI 掛載 `/sw.js`、`/service-worker.js` 與 `/manifest.json`，並配置 `Service-Worker-Allowed: /` 與 `Cache-Control: no-cache` 標頭，徹底解決 Service Worker Scope 與版本更迭問題。
 
 - [ ] **Task 11: 異步工作佇列與取消權杖 (Job Queue & Cancellation Token)**
   - **狀態:** 待辦。目前後端為單任務狀態機，尚未實作多任務工作佇列與中斷取消權杖。

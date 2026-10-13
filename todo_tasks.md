@@ -59,7 +59,7 @@
   - **改良方案：** 錄音進行時從 PipeWire 提取即時均方根 (RMS Amplitude) 音量，以 50ms 週期推播至前端繪製動態跳動音量條。
   - **效益：** 錄音視覺回饋即時，大幅降低無效錄音與重錄成本。
 
-- [ ] **Task 10: 漸進式 Web 應用程式離線快取 (Progressive Web App, PWA & Service Worker)**
+- [x] **Task 10: 漸進式 Web 應用程式離線快取 (Progressive Web App, PWA & Service Worker)**
   - **現狀問題：** 離線熱點模式下首次載入靜態資源時若快取失效可能導致頁面不完整。
   - **改良方案：** 實作標準 PWA Manifest 與 Service Worker Cache-First 策略，將 CSS、圖示與 JS 100% 本地快取，並支援加入手機主畫面。
   - **效益：** 手機端如原生 App 般瞬間開啟，離網環境穩定度達 100%。
