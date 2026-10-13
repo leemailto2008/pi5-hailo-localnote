@@ -159,10 +159,21 @@ def speech_to_text(audio_path: str) -> Optional[str]:
         return None
 
     try:
-        # Pre-check: In-memory silence check (RMS amplitude < 0.003 is sub-audible silence)
-        rms = float(np.sqrt(np.mean(audio_np**2)))
-        if rms < 0.003:
-            print(f"[VoicePipeline] In-Memory Audio is silence (RMS={rms:.4f}), skipping Whisper.")
+        # Pre-check: In-memory silence check
+        # 避免長錄音（如 60s）因中間有靜音導致整軌平均 RMS 被拉低至 0.0025 被粗暴誤殺
+        # 檢測全局峰值與各 1 秒視窗的最大 RMS：若有任何語音活動 (峰值 >= 0.03 或 局部 RMS >= 0.002)，交由 Whisper 辨識
+        peak = float(np.max(np.abs(audio_np)))
+        win_size = 16000
+        has_voice_activity = peak >= 0.03
+        if not has_voice_activity and len(audio_np) >= win_size:
+            for i in range(0, len(audio_np) - win_size, win_size):
+                if float(np.sqrt(np.mean(audio_np[i:i+win_size]**2))) >= 0.002:
+                    has_voice_activity = True
+                    break
+
+        if not has_voice_activity:
+            rms = float(np.sqrt(np.mean(audio_np**2)))
+            print(f"[VoicePipeline] In-Memory Audio is absolute silence (Peak={peak:.4f}, RMS={rms:.4f}), skipping Whisper.")
             return None
 
         with _whisper_lock:
@@ -323,9 +334,9 @@ def text_to_speech(text: str, output_ogg_path: str, voice: str = DEFAULT_TTS_VOI
 
 async def ensure_bluetooth_recording_ready() -> str:
     """
-    Ensure active Bluetooth headset is ready in high-quality mSBC wideband speech mode (16kHz),
-    and bound as PipeWire default Audio/Source.
-    Never redundantly re-trigger set-profile if already active to avoid SCO packet disruption.
+    Ensure active Bluetooth headset is ready in mSBC mode and return exact PulseAudio source name.
+    Uses non-blocking pw-dump to parse PipeWire topology accurately.
+    Never interrupts an already active headset source.
     """
     # 自動將藍牙與 PipeWire 關鍵音訊服務提升至實時優先級 (-18) 並綁定 CPU 0,1，杜絕 UART 封包丟失
     try:
@@ -341,75 +352,71 @@ async def ensure_bluetooth_recording_ready() -> str:
 
     target_source = "default"
     try:
+        import json
         proc = await asyncio.create_subprocess_exec(
-            "wpctl", "status",
+            "pw-dump",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL
         )
         stdout, _ = await proc.communicate()
-        status_text = stdout.decode("utf-8", errors="ignore")
+        nodes = json.loads(stdout.decode("utf-8", errors="ignore"))
 
-        dev_id = None
-        source_id = None
-        source_name = None
+        bt_source_node = None
+        bt_source_id = None
+        bt_device_id = None
 
-        for line in status_text.splitlines():
-            # Discover BlueZ device
-            if "[bluez5]" in line:
-                parts = line.strip().split(".")
-                if len(parts) >= 2:
-                    clean_id = "".join(c for c in parts[0] if c.isdigit())
-                    if clean_id:
-                        dev_id = clean_id
+        for n in nodes:
+            props = n.get("info", {}).get("props", {})
+            media_class = props.get("media.class", "")
+            node_name = props.get("node.name", "")
 
-            # Discover BlueZ Audio Source
-            if "bluez_input" in line:
-                clean_src_id = "".join(c for c in line.split(".")[0] if c.isdigit())
-                if clean_src_id:
-                    source_id = clean_src_id
+            # 尋找藍牙音訊輸入節點 (如 bluez_input.A0_D1_2A_42_12_34.0)
+            if media_class == "Audio/Source" and "bluez_input" in node_name:
+                bt_source_node = node_name
+                bt_source_id = n.get("id")
 
-                raw_name = line.split("[")[0].replace("*", "").replace("│", "").replace("├", "").replace("└", "").strip()
-                if "." in raw_name:
-                    source_name = raw_name.split(".", 1)[1].strip()
+            # 尋找藍牙設備
+            if props.get("device.api") == "bluez5" and n.get("type") == "PipeWire:Interface:Device":
+                bt_device_id = n.get("id")
 
-        # 1. Inspect current profile to avoid redundant disruptive renegotiation
-        if dev_id:
-            chk_proc = await asyncio.create_subprocess_exec(
-                "pw-cli", "info", dev_id,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL
+        # 1. 若藍牙 Source 節點已存在，說明 SCO 語音通道已經就緒，絕對不要重複 set-profile 打斷它！
+        if bt_source_node and bt_source_id:
+            set_def = await asyncio.create_subprocess_exec(
+                "wpctl", "set-default", str(bt_source_id),
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
             )
-            chk_out, _ = await chk_proc.communicate()
-            dev_info = chk_out.decode("utf-8", errors="ignore")
+            await set_def.communicate()
+            return bt_source_node
 
-            # Only switch profile if NOT already in wideband headset mode
-            if 'bluez5.profile = "headset-head-unit"' not in dev_info:
-                # 196865 is mSBC (16kHz Wideband Speech), vastly superior to 196864 (CVSD 8kHz)
-                set_proc = await asyncio.create_subprocess_exec(
-                    "wpctl", "set-profile", dev_id, "196865",
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL
-                )
-                await set_proc.communicate()
-                await asyncio.sleep(0.5)
-
-        # 2. Bind default PipeWire source
-        if source_id:
-            def_proc = await asyncio.create_subprocess_exec(
-                "wpctl", "set-default", source_id,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL
+        # 2. 若藍牙 Source 不存在但藍牙設備存在，切換 profile 為 headset-head-unit (196865)
+        if bt_device_id:
+            set_prof = await asyncio.create_subprocess_exec(
+                "wpctl", "set-profile", str(bt_device_id), "196865",
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
             )
-            await def_proc.communicate()
+            await set_prof.communicate()
+            await asyncio.sleep(0.8)
 
-        if source_name:
-            target_source = source_name
+            # 重新獲取 source 節點
+            proc2 = await asyncio.create_subprocess_exec(
+                "pw-dump", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+            )
+            stdout2, _ = await proc2.communicate()
+            nodes2 = json.loads(stdout2.decode("utf-8", errors="ignore"))
+            for n in nodes2:
+                props = n.get("info", {}).get("props", {})
+                if props.get("media.class") == "Audio/Source" and "bluez_input" in props.get("node.name", ""):
+                    bt_source_node = props.get("node.name")
+                    await (await asyncio.create_subprocess_exec(
+                        "wpctl", "set-default", str(n.get("id")),
+                        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                    )).communicate()
+                    return bt_source_node
 
-        await asyncio.sleep(0.1)
-        return target_source
     except Exception as e:
         print(f"[VoicePipeline] Bluetooth readiness resolution error: {e}")
-        return "default"
+
+    return target_source
 
 
 async def record_audio_from_mic(duration_sec: int, output_path: str) -> bool:
@@ -425,7 +432,7 @@ async def record_audio_from_mic(duration_sec: int, output_path: str) -> bool:
         "-f", "pulse",
         "-i", source_node,
         "-t", str(duration_sec),
-        "-af", "aresample=16000:async=1,highpass=f=80",
+        "-af", "aresample=16000:async=1,highpass=f=80,lowpass=f=7600",
         "-c:a", "libopus",
         "-b:a", "64k",
         output_path
@@ -448,7 +455,7 @@ async def record_audio_from_mic(duration_sec: int, output_path: str) -> bool:
                 "-f", "pulse",
                 "-i", "default",
                 "-t", str(duration_sec),
-                "-af", "aresample=16000:async=1,highpass=f=80",
+                "-af", "aresample=16000:async=1,highpass=f=80,lowpass=f=7600",
                 "-c:a", "libopus",
                 "-b:a", "64k",
                 output_path
