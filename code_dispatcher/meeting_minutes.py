@@ -193,6 +193,14 @@ class MeetingJobManager:
         self._last_cpu_total: int = 0
         self._cpu_cache: float = 0.0
 
+    def notify_status_update(self):
+        """Notify WebSocket subscribers of status update."""
+        try:
+            from ws_manager import ws_manager
+            asyncio.create_task(ws_manager.broadcast("status", self.status.model_dump()))
+        except Exception:
+            pass
+
     def get_cpu_load(self) -> float:
         """Calculate CPU percentage from /proc/stat non-blockingly."""
         now = time.time()
@@ -260,6 +268,7 @@ class MeetingJobManager:
             msg="正在進行耳麥錄音..."
         )
         self._current_task = asyncio.create_task(self._pipeline_worker(job_id, duration_sec))
+        self.notify_status_update()
         return job_id
 
     async def _pipeline_worker(self, job_id: str, duration_sec: int):
@@ -278,6 +287,7 @@ class MeetingJobManager:
                 self.status.elapsed = round(elapsed, 1)
                 self.status.progress = min(100, int((elapsed / duration_sec) * 100))
                 self.status.eta = max(0.0, float(duration_sec - elapsed))
+                self.notify_status_update()
                 await asyncio.sleep(0.5)
 
             record_ok = await record_task
@@ -290,6 +300,7 @@ class MeetingJobManager:
             self.status.progress = 35
             self.status.eta = 45.0
             self.status.msg = "錄音完成，正在進行語音聽寫..."
+            self.notify_status_update()
 
             # Execute faster-whisper in worker thread (full 4 threads, zero-contention)
             transcript = await asyncio.to_thread(speech_to_text, raw_ogg)
@@ -311,6 +322,7 @@ class MeetingJobManager:
             self.status.progress = 75
             self.status.eta = 20.0
             self.status.msg = "聽寫完成，正在提煉會議紀要..."
+            self.notify_status_update()
 
             raw_markdown = await self._generate_summary_llm(transcript)
             parsed = parse_markdown_minutes(raw_markdown)
@@ -339,13 +351,16 @@ class MeetingJobManager:
             self.status.progress = 100
             self.status.eta = 0.0
             self.status.msg = "會議紀要已生成完畢。"
+            self.notify_status_update()
 
         except asyncio.CancelledError:
             self.status.state = "error"
             self.status.msg = "錄音與處理任務已被取消。"
+            self.notify_status_update()
         except Exception as e:
             self.status.state = "error"
             self.status.msg = f"處理失敗: {str(e)}"
+            self.notify_status_update()
 
     async def regenerate(self) -> str:
         """Regenerate meeting summary from existing transcript without recording again."""

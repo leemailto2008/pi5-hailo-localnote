@@ -10,9 +10,9 @@
 ## 📊 整體進度統計 (Overall Progress)
 
 - **總規劃任務 (Total Tasks):** 30 項
-- **已完整實裝並驗收上線 (Fully Completed):** **6 項** (20%)
+- **已完整實裝並驗收上線 (Fully Completed):** **7 項** (23%)
 - **部分實裝具備核心模組 (Partially Completed):** **3 項** (10%)
-- **待後續迭代實作 (Backlog / To-Do):** **21 項** (70%)
+- **待後續迭代實作 (Backlog / To-Do):** **20 項** (67%)
 - **額外完成關鍵專案增強 (Extra System Enhancements):** **4 項** (藍牙 Hub SPA、Captive Portal 攔截、窄螢幕響應式佈局、PipeWire 精準拓撲解析)
 
 ---
@@ -48,8 +48,9 @@
 
 ## 二、 通訊協定與前後端架構 (Protocols & Frontend/Backend Architecture)
 
-- [ ] **Task 08: WebSocket 雙向即時狀態推播 (Real-Time WebSocket Push)**
-  - **狀態:** 待辦。目前狀態更新依賴前端 HTTP 短輪詢 (Polling 1.5s/4.5s) + SSE 串流。
+- [x] **Task 08: WebSocket 雙向即時狀態推播 (Real-Time WebSocket Push)** ✅ *(已實裝)*
+  - **實作模組:** `code_dispatcher/ws_manager.py`, `code_dispatcher/main.py`, `code_dispatcher/ui_client.html`, `code_dispatcher/static/index.html`
+  - **成效與狀態:** 建立 `/ws/status` 雙向 WebSocket 端點與連線管理器。錄音管線狀態機 (`meeting_minutes.py`) 流轉時主動廣播最新進度 (<50ms 延遲)；背景協程以 1.5s 週期廣播系統指標與藍牙狀態。前端連線成功時立即關閉高頻 HTTP 輪詢，終結 journalctl 日誌洗版；斷線時自動無縫降級回 HTTP 輪詢並實施指數退避重連。
 
 - [ ] **Task 09: 即時音量頻譜採樣 (Live VU Meter & Spectrum Visualizer)**
   - **狀態:** 待辦。尚未在錄音時推播 PipeWire 即時 RMS 跳動音量條。

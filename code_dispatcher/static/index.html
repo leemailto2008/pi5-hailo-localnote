@@ -415,17 +415,28 @@ function openBtView() {
   el.viewMain.hidden = true;
   el.viewBt.hidden = false;
   window.location.hash = 'bt';
-  refreshBtHub();
-  startBtHubHeartbeat();
+  if (wsConnected) {
+    sendWsMessage({ action: 'subscribe_bt_hub', enable: true });
+    refreshBtHub(true);
+  } else {
+    refreshBtHub();
+    startBtHubHeartbeat();
+  }
 }
 function closeBtView() {
-  stopBtHubHeartbeat();
+  if (wsConnected) {
+    sendWsMessage({ action: 'subscribe_bt_hub', enable: false });
+  } else {
+    stopBtHubHeartbeat();
+  }
   el.viewBt.hidden = true;
   el.viewMain.hidden = false;
   if (window.location.hash === '#bt') {
     history.pushState('', document.title, window.location.pathname + window.location.search);
   }
-  refreshBt();
+  if (!wsConnected) {
+    refreshBt();
+  }
 }
 
 window.openBtView = openBtView;
@@ -445,34 +456,51 @@ if (window.location.hash === '#bt' || window.location.pathname === '/bluetooth' 
 }
 
 /* ---------- 頂部狀態 ---------- */
+let lastSystemData = null;
+
+function updateSystemUI(s) {
+  if (!s) return;
+  lastSystemData = s;
+  const isNarrow = window.innerWidth <= 600;
+  el.netPill.classList.toggle('online', !s.offline);
+  if (isNarrow) {
+    el.netText.textContent = s.offline ? '離線模式' : '維護 · 有外網';
+    el.sysPill.textContent = `⚡ ${Math.round(s.cpu)}% · ${Math.round(s.temp)}°C`;
+  } else {
+    el.netText.textContent = s.offline ? '離線運作 · 資料不出盒子' : '維護模式 · 有外網';
+    el.sysPill.textContent = `盒子：${state === 'processing' ? '整理中' : state === 'recording' ? '錄音中' : '待命'} · 負載 ${Math.round(s.cpu)}% · ${Math.round(s.temp)}°C`;
+  }
+  if (s.ssid) el.ssid.textContent = s.ssid;
+  if (s.host) el.host.textContent = s.host;
+  if (s.wifi_qr) { el.qr.src = s.wifi_qr; el.qr.hidden = false; }
+  el.netSwitch.textContent = s.mode === 'ap' ? '切回家用 Wi-Fi' : '切到演示熱點';
+  el.netSwitch.dataset.to = s.mode === 'ap' ? 'sta' : 'ap';
+}
+
 async function refreshSystem() {
   try {
     const s = await api(API.system);
-    const isNarrow = window.innerWidth <= 600;
-    el.netPill.classList.toggle('online', !s.offline);
-    if (isNarrow) {
-      el.netText.textContent = s.offline ? '離線模式' : '維護 · 有外網';
-      el.sysPill.textContent = `⚡ ${Math.round(s.cpu)}% · ${Math.round(s.temp)}°C`;
-    } else {
-      el.netText.textContent = s.offline ? '離線運作 · 資料不出盒子' : '維護模式 · 有外網';
-      el.sysPill.textContent = `盒子：${state === 'processing' ? '整理中' : state === 'recording' ? '錄音中' : '待命'} · 負載 ${Math.round(s.cpu)}% · ${Math.round(s.temp)}°C`;
-    }
-    if (s.ssid) el.ssid.textContent = s.ssid;
-    if (s.host) el.host.textContent = s.host;
-    if (s.wifi_qr) { el.qr.src = s.wifi_qr; el.qr.hidden = false; }
-    el.netSwitch.textContent = s.mode === 'ap' ? '切回家用 Wi-Fi' : '切到演示熱點';
-    el.netSwitch.dataset.to = s.mode === 'ap' ? 'sta' : 'ap';
-  } catch (e) { el.netText.textContent = '連不上盒子'; }
+    updateSystemUI(s);
+  } catch (e) {
+    if (!wsConnected) el.netText.textContent = '連不上盒子';
+  }
+}
+
+function updateBtUI(b) {
+  if (!b) return;
+  el.btChip.classList.toggle('off', !b.connected);
+  el.btText.textContent = b.connected ? `耳麥 ${b.name || ''} 已連線` : '耳麥未連線';
+  el.btDetail.textContent = b.connected ? `${b.name || ''} · 已連線` : '未連線。按「找耳麥 / 管理」。';
+  el.recBtn.disabled = !b.connected && state === 'idle';
 }
 
 async function refreshBt() {
   try {
     const b = await api(API.bt);
-    el.btChip.classList.toggle('off', !b.connected);
-    el.btText.textContent = b.connected ? `耳麥 ${b.name || ''} 已連線` : '耳麥未連線';
-    el.btDetail.textContent = b.connected ? `${b.name || ''} · 已連線` : '未連線。按「找耳麥 / 管理」。';
-    el.recBtn.disabled = !b.connected && state === 'idle';
-  } catch (e) { el.btText.textContent = '耳麥狀態未知'; }
+    updateBtUI(b);
+  } catch (e) {
+    if (!wsConnected) el.btText.textContent = '耳麥狀態未知';
+  }
 }
 
 /* ---------- 藍牙裝置管理中心 (Bluetooth Hub) ---------- */
@@ -483,52 +511,57 @@ function getRssiQualityText(rssi) {
   return '微弱';
 }
 
+function updateBtHubUI(b) {
+  if (!b) return;
+  const conn = !!b.connected;
+  el.hubCurName.textContent = b.connected_name || (conn ? '未知設備' : '未連線耳麥');
+  el.hubCurMac.textContent = 'MAC: ' + (b.connected_mac || '--:--:--:--:--:--');
+  el.hubCurBadge.className = 'chip ' + (conn ? '' : 'off');
+  el.hubCurStatus.textContent = conn ? 'CONNECTED' : 'DISCONNECTED';
+  el.hubBtnDisconnect.disabled = !conn;
+
+  // 電量顯示
+  if (conn) {
+    if (b.battery_level != null) {
+      el.hubBatteryPill.className = 'chip ' + (b.battery_level <= 20 ? 'err' : (b.battery_level <= 50 ? 'minor' : 'out'));
+      el.hubBatteryVal.textContent = b.battery_level + '%';
+    } else {
+      el.hubBatteryPill.className = 'chip off';
+      el.hubBatteryVal.textContent = '電量未回報';
+    }
+  } else {
+    el.hubBatteryPill.className = 'chip off';
+    el.hubBatteryVal.textContent = '未連線';
+  }
+
+  // 訊號強度顯示
+  if (conn) {
+    el.hubSignalPill.className = 'chip';
+    if (b.rssi != null && b.rssi !== 0) {
+      const q = getRssiQualityText(b.rssi);
+      el.hubSignalVal.textContent = `${b.rssi} dBm (${q})`;
+    } else if (b.signal_level_pct) {
+      el.hubSignalVal.textContent = `訊號良好 (${b.signal_level_pct}%)`;
+    } else {
+      el.hubSignalVal.textContent = '已連線 (正常)';
+    }
+  } else {
+    el.hubSignalPill.className = 'chip off';
+    el.hubSignalVal.textContent = '離線';
+  }
+
+  // 只有資料發生變動時才重新渲染 DOM，避免打斷使用者點擊
+  const currentJson = JSON.stringify(b.trusted_devices || []);
+  if (currentJson !== lastBtHubStateJson) {
+    lastBtHubStateJson = currentJson;
+    renderTrustedDevices(b.trusted_devices || []);
+  }
+}
+
 async function refreshBtHub(silent = false) {
   try {
     const b = await api(API.btStatus);
-    const conn = !!b.connected;
-    el.hubCurName.textContent = b.connected_name || (conn ? '未知設備' : '未連線耳麥');
-    el.hubCurMac.textContent = 'MAC: ' + (b.connected_mac || '--:--:--:--:--:--');
-    el.hubCurBadge.className = 'chip ' + (conn ? '' : 'off');
-    el.hubCurStatus.textContent = conn ? 'CONNECTED' : 'DISCONNECTED';
-    el.hubBtnDisconnect.disabled = !conn;
-
-    // 電量顯示
-    if (conn) {
-      if (b.battery_level != null) {
-        el.hubBatteryPill.className = 'chip ' + (b.battery_level <= 20 ? 'err' : (b.battery_level <= 50 ? 'minor' : 'out'));
-        el.hubBatteryVal.textContent = b.battery_level + '%';
-      } else {
-        el.hubBatteryPill.className = 'chip off';
-        el.hubBatteryVal.textContent = '電量未回報';
-      }
-    } else {
-      el.hubBatteryPill.className = 'chip off';
-      el.hubBatteryVal.textContent = '未連線';
-    }
-
-    // 訊號強度顯示
-    if (conn) {
-      el.hubSignalPill.className = 'chip';
-      if (b.rssi != null && b.rssi !== 0) {
-        const q = getRssiQualityText(b.rssi);
-        el.hubSignalVal.textContent = `${b.rssi} dBm (${q})`;
-      } else if (b.signal_level_pct) {
-        el.hubSignalVal.textContent = `訊號良好 (${b.signal_level_pct}%)`;
-      } else {
-        el.hubSignalVal.textContent = '已連線 (正常)';
-      }
-    } else {
-      el.hubSignalPill.className = 'chip off';
-      el.hubSignalVal.textContent = '離線';
-    }
-
-    // 只有資料發生變動時才重新渲染 DOM，避免打斷使用者點擊
-    const currentJson = JSON.stringify(b.trusted_devices || []);
-    if (currentJson !== lastBtHubStateJson) {
-      lastBtHubStateJson = currentJson;
-      renderTrustedDevices(b.trusted_devices || []);
-    }
+    updateBtHubUI(b);
   } catch (e) {
     if (!silent) toast('讀取藍牙詳細狀態失敗');
   }
@@ -723,7 +756,8 @@ function setState(s) {
   if (s === 'recording') el.recLabel.textContent = '錄音中';
   if (s === 'processing') { el.recLabel.textContent = '整理中'; el.recSub.textContent = '請稍等'; }
   el.regenBtn.disabled = !(result && (s === 'done' || s === 'idle' || s === 'error'));
-  refreshSystem();
+  if (lastSystemData) updateSystemUI(lastSystemData);
+  else refreshSystem();
 }
 function scrollToMinutes() {
   const target = document.getElementById('secMinutes') || el.minutes;
@@ -744,10 +778,10 @@ function renderProgress(st) {
   if (st.state === 'recording') {
     p.hidden = false; p.className = 'progress rec';
     el.pTitle.textContent = '錄音中';
-    el.pEta.textContent = `${fmt(st.elapsed)} / ${fmt(st.total)}`;
-    el.pBar.style.width = Math.min(100, 100 * st.elapsed / Math.max(1, st.total)) + '%';
+    el.pEta.textContent = `${fmt(st.elapsed || 0)} / ${fmt(st.total || 90)}`;
+    el.pBar.style.width = Math.min(100, 100 * (st.elapsed || 0) / Math.max(1, (st.total || 90))) + '%';
     el.pSteps.textContent = '時間到會自動停';
-    el.recSub.textContent = fmt(Math.max(0, st.total - st.elapsed));
+    el.recSub.textContent = fmt(Math.max(0, (st.total || 90) - (st.elapsed || 0)));
     handledDoneJob = null;
     clearTimeout(doneHideTimer);
   } else if (st.state === 'processing') {
@@ -786,28 +820,62 @@ function renderProgress(st) {
     handledDoneJob = null;
   }
 }
+
+async function handleStatusUpdate(st) {
+  if (!st) return;
+  renderProgress(st);
+  if (st.state !== state) setState(st.state);
+  if (st.state === 'done' && st.job && st.job !== lastJob) {
+    lastJob = st.job;
+    await loadResult();
+  }
+}
+
 async function poll() {
   try {
     const st = await api(API.status);
-    renderProgress(st);
-    if (st.state !== state) setState(st.state);
-    if (st.state === 'done' && st.job && st.job !== lastJob) { lastJob = st.job; await loadResult(); }
-    if (st.state === 'recording' || st.state === 'processing') pollTimer = setTimeout(poll, POLL_MS);
-    else pollTimer = setTimeout(poll, POLL_MS * 3);
-  } catch (e) { pollTimer = setTimeout(poll, POLL_MS * 2); }
+    await handleStatusUpdate(st);
+    if (!wsConnected) {
+      if (st.state === 'recording' || st.state === 'processing') pollTimer = setTimeout(poll, POLL_MS);
+      else pollTimer = setTimeout(poll, POLL_MS * 3);
+    }
+  } catch (e) {
+    if (!wsConnected) pollTimer = setTimeout(poll, POLL_MS * 2);
+  }
 }
+
 el.recBtn.addEventListener('click', async () => {
   if (state === 'recording' || state === 'processing') return;
   try {
     el.recBtn.disabled = true;
-    await api(API.record, { seconds: +el.dur.value });
-    setState('recording'); toast('開始錄音');
-    clearTimeout(pollTimer); poll();
-  } catch (e) { toast('無法開始錄音：' + e.message); setState('idle'); }
+    const durSec = +el.dur.value;
+    setState('recording');
+    renderProgress({ state: 'recording', elapsed: 0, total: durSec });
+    toast('開始錄音');
+    await api(API.record, { seconds: durSec });
+    if (!wsConnected) {
+      clearTimeout(pollTimer);
+      poll();
+    }
+  } catch (e) {
+    toast('無法開始錄音：' + e.message);
+    setState('idle');
+  }
 });
+
 el.regenBtn.addEventListener('click', async () => {
-  try { await api(API.regenerate, {}); setState('processing'); toast('重新整理中'); clearTimeout(pollTimer); poll(); }
-  catch (e) { toast('無法重新整理：' + e.message); }
+  try {
+    setState('processing');
+    renderProgress({ state: 'processing', phase: 'summarize', progress: 5, eta: 5 });
+    toast('重新整理中');
+    await api(API.regenerate, {});
+    if (!wsConnected) {
+      clearTimeout(pollTimer);
+      poll();
+    }
+  } catch (e) {
+    toast('無法重新整理：' + e.message);
+  }
 });
 
 /* ---------- 紀要 ---------- */
@@ -934,10 +1002,117 @@ el.netSwitch.addEventListener('click', async () => {
   try { await api(API.netSwitch, { mode: to }); toast('網路切換中，頁面可能短暫斷線'); } catch (e) { toast('切換失敗：' + e.message); }
 });
 
+/* ---------- WebSocket 即時雙向推播 ---------- */
+let ws = null;
+let wsConnected = false;
+let wsReconnectDelay = 1000;
+let wsReconnectTimer = null;
+let httpSystemInterval = null;
+let httpBtInterval = null;
+
+function sendWsMessage(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
+  }
+}
+
+function stopHttpFallbackPolling() {
+  if (httpSystemInterval) { clearInterval(httpSystemInterval); httpSystemInterval = null; }
+  if (httpBtInterval) { clearInterval(httpBtInterval); httpBtInterval = null; }
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+  stopBtHubHeartbeat();
+  console.log('[WS] WebSocket 連線正常，已關閉高頻 HTTP 輪詢');
+}
+
+function startHttpFallbackPolling() {
+  if (!httpSystemInterval) {
+    refreshSystem();
+    httpSystemInterval = setInterval(refreshSystem, 2000);
+  }
+  if (!httpBtInterval) {
+    refreshBt();
+    httpBtInterval = setInterval(refreshBt, 5000);
+  }
+  if (!pollTimer) {
+    poll();
+  }
+  if (!el.viewBt.hidden) {
+    startBtHubHeartbeat();
+  }
+  console.log('[WS] 降級模式：已啟用 HTTP 備援輪詢');
+}
+
+function initWebSocket() {
+  if (window.location.search.includes('mock=1')) {
+    startHttpFallbackPolling();
+    return;
+  }
+
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${proto}//${window.location.host}/ws/status`;
+
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch (err) {
+    console.warn('[WS] 初始化失敗:', err);
+    startHttpFallbackPolling();
+    scheduleWsReconnect();
+    return;
+  }
+
+  ws.onopen = () => {
+    console.log('[WS] Connected to status stream:', wsUrl);
+    wsConnected = true;
+    wsReconnectDelay = 1000;
+    stopHttpFallbackPolling();
+
+    if (!el.viewBt.hidden) {
+      sendWsMessage({ action: 'subscribe_bt_hub', enable: true });
+    }
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'status') {
+        handleStatusUpdate(msg.data);
+      } else if (msg.type === 'system') {
+        updateSystemUI(msg.data);
+      } else if (msg.type === 'bt') {
+        updateBtUI(msg.data);
+      } else if (msg.type === 'bt_hub') {
+        updateBtHubUI(msg.data);
+      }
+    } catch (err) {
+      console.warn('[WS] 解析訊息錯誤:', err);
+    }
+  };
+
+  ws.onerror = (err) => {
+    console.warn('[WS] 連線異常:', err);
+  };
+
+  ws.onclose = () => {
+    console.warn('[WS] 連線關閉，降級至 HTTP 輪詢');
+    wsConnected = false;
+    ws = null;
+    startHttpFallbackPolling();
+    scheduleWsReconnect();
+  };
+}
+
+function scheduleWsReconnect() {
+  if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+  wsReconnectTimer = setTimeout(() => {
+    console.log(`[WS] 嘗試重連 (${wsReconnectDelay}ms)...`);
+    wsReconnectDelay = Math.min(wsReconnectDelay * 1.5, 10000);
+    initWebSocket();
+  }, wsReconnectDelay);
+}
+
 /* ---------- 啟動 ---------- */
 setState('idle');
-refreshSystem(); refreshBt(); poll();
-setInterval(refreshSystem, 2000); setInterval(refreshBt, 5000);
+initWebSocket();
 
 /* ---------- 假後端（?mock=1 預覽用） ---------- */
 let M = {

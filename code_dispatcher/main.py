@@ -11,12 +11,13 @@ import logging
 import re
 import time
 import json
+import asyncio
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 logger = logging.getLogger("pi5-dispatcher")
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -118,6 +119,12 @@ async def startup_event():
         print("[Startup] OfflineDetector background watchdog started.")
     except Exception as e:
         print(f"[Startup] OfflineDetector startup notice: {e}")
+
+    try:
+        asyncio.create_task(ws_telemetry_loop())
+        print("[Startup] WebSocket telemetry background broadcaster started.")
+    except Exception as e:
+        print(f"[Startup] WebSocket telemetry task error: {e}")
 
 redis_conn = Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
 task_queue = Queue(QUEUE_NAME, connection=redis_conn)
@@ -1311,5 +1318,102 @@ def post_demo_net_switch(req: DemoNetSwitchRequest) -> Dict[str, Any]:
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"網路切換失敗: {str(e)}")
+
+
+# -------------------------------------------------------------
+# Task 08: WebSocket Real-Time Status & Telemetry Push
+# -------------------------------------------------------------
+async def ws_telemetry_loop():
+    """Periodic telemetry broadcaster replacing high-frequency HTTP polling."""
+    from ws_manager import ws_manager
+    from meeting_minutes import minutes_manager
+    qr_path = os.path.join(STATIC_DIR, "wifi.png")
+
+    while True:
+        try:
+            await asyncio.sleep(1.5)
+            if not ws_manager.active_connections:
+                continue
+
+            # 1. 廣播系統硬體指標 (System Telemetry)
+            sys_data = {
+                "offline": minutes_manager.offline_detector.is_offline,
+                "cpu": minutes_manager.get_cpu_load(),
+                "temp": minutes_manager.get_temperature(),
+                "mode": minutes_manager.get_network_mode(),
+                "ssid": "raspi543_AI",
+                "host": "localnote.local",
+                "wifi_qr": "/static/wifi.png" if os.path.exists(qr_path) else None
+            }
+            await ws_manager.broadcast("system", sys_data)
+
+            # 2. 廣播藍牙基本狀態 (Bluetooth Status)
+            st = get_bt_status()
+            await ws_manager.broadcast("bt", {
+                "connected": bool(st.get("connected", False)),
+                "name": st.get("connected_name") or ""
+            })
+
+            # 3. 廣播藍牙詳細 Hub 狀態 (若有客戶端開啟了藍牙中心)
+            await ws_manager.broadcast("bt_hub", st, topic="bt_hub")
+
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            await asyncio.sleep(2.0)
+
+
+@app.websocket("/ws/status")
+async def websocket_status_endpoint(websocket: WebSocket):
+    """Bidirectional WebSocket endpoint for zero-latency status push."""
+    from ws_manager import ws_manager
+    from meeting_minutes import minutes_manager
+    qr_path = os.path.join(STATIC_DIR, "wifi.png")
+
+    await ws_manager.connect(websocket)
+    try:
+        # 連線建立瞬間，立即回傳一筆當前全量狀態快照 (Immediate initial snapshot)
+        sys_data = {
+            "offline": minutes_manager.offline_detector.is_offline,
+            "cpu": minutes_manager.get_cpu_load(),
+            "temp": minutes_manager.get_temperature(),
+            "mode": minutes_manager.get_network_mode(),
+            "ssid": "raspi543_AI",
+            "host": "localnote.local",
+            "wifi_qr": "/static/wifi.png" if os.path.exists(qr_path) else None
+        }
+        await ws_manager.send_personal(websocket, "system", sys_data)
+        await ws_manager.send_personal(websocket, "status", minutes_manager.status.model_dump())
+        bt_data = get_bt_status()
+        await ws_manager.send_personal(websocket, "bt", {
+            "connected": bool(bt_data.get("connected", False)),
+            "name": bt_data.get("connected_name") or ""
+        })
+
+        while True:
+            text = await websocket.receive_text()
+            try:
+                cmd = json.loads(text)
+                act = cmd.get("action")
+                if act == "ping":
+                    await websocket.send_text(json.dumps({"type": "pong", "ts": int(time.time())}))
+                elif act == "refresh":
+                    await ws_manager.send_personal(websocket, "system", sys_data)
+                    await ws_manager.send_personal(websocket, "status", minutes_manager.status.model_dump())
+                    await ws_manager.send_personal(websocket, "bt", {
+                        "connected": bool(bt_data.get("connected", False)),
+                        "name": bt_data.get("connected_name") or ""
+                    })
+                elif act == "subscribe_bt_hub":
+                    ws_manager.subscribe(websocket, "bt_hub", enable=bool(cmd.get("enable", True)))
+            except Exception:
+                pass
+
+    except WebSocketDisconnect:
+        await ws_manager.disconnect(websocket)
+    except Exception as e:
+        logger.warning(f"[WS] Exception in client session: {e}")
+        await ws_manager.disconnect(websocket)
+
 
 

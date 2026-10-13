@@ -49,7 +49,7 @@
 
 ## 二、 通訊協定與前後端架構 (Protocols & Frontend/Backend Architecture)
 
-- [ ] **Task 08: WebSocket 雙向即時狀態推播 (Real-Time WebSocket Push)**
+- [x] **Task 08: WebSocket 雙向即時狀態推播 (Real-Time WebSocket Push)**
   - **現狀問題：** Web 介面依賴定時 HTTP 輪詢 (Polling) 來取得藍牙狀態、電量與管線進度，消耗網路與 CPU。
   - **改良方案：** 建立 WebSocket 雙向通道。藍牙耳麥連線/斷線、電量變化、STT 階段完成時由後端主動推播。
   - **效益：** 狀態更新 0 延遲，消除輪詢造成的無謂資源開銷。
