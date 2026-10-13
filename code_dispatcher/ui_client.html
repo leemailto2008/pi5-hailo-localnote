@@ -1117,8 +1117,14 @@ function initWaveSurfer() {
       const icon = document.getElementById('wavePlayIcon');
       if (icon) icon.textContent = '▶ 播放';
     });
+    wavesurfer.on('loading', (percent) => {
+      const elTime = document.getElementById('waveTimeDisplay');
+      if (elTime) elTime.textContent = `解碼中 ${percent}%`;
+    });
     wavesurfer.on('ready', () => {
       updateWaveTime();
+      const btn = document.getElementById('btnWavePlayPause');
+      if (btn) btn.disabled = false;
       if (wsRegions && typeof wsRegions.enableDragSelection === 'function') {
         wsRegions.enableDragSelection({
           color: 'rgba(15, 118, 110, 0.22)'
@@ -1140,6 +1146,11 @@ function updateWaveTime() {
 
 function toggleWavePlay() {
   if (!wavesurfer) return;
+  const dur = wavesurfer.getDuration();
+  if (!dur || dur <= 0) {
+    toast('音訊母帶載入解碼中，請稍候 1~2 秒...');
+    return;
+  }
   wavesurfer.playPause();
 }
 
@@ -1218,6 +1229,10 @@ async function loadAudioWaveform(jobId) {
       initWaveSurfer();
       if (wavesurfer && activeAudioUrl !== res.audio_url) {
         activeAudioUrl = res.audio_url;
+        const elTime = document.getElementById('waveTimeDisplay');
+        if (elTime) elTime.textContent = '載入解碼中...';
+        const btn = document.getElementById('btnWavePlayPause');
+        if (btn) btn.disabled = true;
         wavesurfer.load(res.audio_url);
         if (wsRegions && typeof wsRegions.clearRegions === 'function') {
           wsRegions.clearRegions();

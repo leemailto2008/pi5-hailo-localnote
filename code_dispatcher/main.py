@@ -1307,9 +1307,14 @@ def get_latest_audio() -> Dict[str, Any]:
     """Retrieve the URL of the most recent meeting audio file for Wavesurfer.js."""
     from meeting_minutes import minutes_manager, AUDIO_CACHE_DIR
     target_ogg = None
-    if minutes_manager.result and minutes_manager.result.job:
+    if minutes_manager.status and minutes_manager.status.job:
+        cand = os.path.join(AUDIO_CACHE_DIR, f"{minutes_manager.status.job}.ogg")
+        if os.path.exists(cand) and os.path.getsize(cand) > 0:
+            target_ogg = f"{minutes_manager.status.job}.ogg"
+
+    if not target_ogg and minutes_manager.result and minutes_manager.result.job:
         cand = os.path.join(AUDIO_CACHE_DIR, f"{minutes_manager.result.job}.ogg")
-        if os.path.exists(cand):
+        if os.path.exists(cand) and os.path.getsize(cand) > 0:
             target_ogg = f"{minutes_manager.result.job}.ogg"
 
     if not target_ogg:
