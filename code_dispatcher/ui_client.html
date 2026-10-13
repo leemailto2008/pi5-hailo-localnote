@@ -931,14 +931,19 @@ function renderProgress(st) {
     clearTimeout(doneHideTimer);
   } else if (st.state === 'processing') {
     updateVuMeter({ active: false });
-    p.hidden = false; p.className = 'progress';
-    el.pTitle.textContent = '盒子正在整理紀要';
-    el.pEta.textContent = st.eta != null ? `還要約 ${Math.round(st.eta)} 秒` : '';
-    el.pBar.style.width = (st.progress ?? 0) + '%';
+    p.hidden = false; p.className = 'progress busy';
+    el.pTitle.textContent = (st.phase === 'transcribe') ? 'AI 正在進行語音聽寫 ⚡' : 'AI 正在提煉會議紀要 📝';
+    el.pEta.textContent = st.eta != null ? `剩餘約 ${Math.max(1, Math.round(st.eta))} 秒` : '';
+    el.pBar.style.width = Math.max(15, Math.min(96, st.progress ?? 35)) + '%';
     const done = (k) => (['record', 'transcribe', 'summarize'].indexOf(st.phase) > ['record', 'transcribe', 'summarize'].indexOf(k)) ? ' ✓' : (st.phase === k ? '…' : '');
-    el.pSteps.textContent = `錄音完成 ✓ → 聽寫${done('transcribe')} → 整理紀要${done('summarize')}`;
+    el.pSteps.textContent = st.msg || `錄音完成 ✓ → 聽寫${done('transcribe')} → 整理紀要${done('summarize')}`;
     handledDoneJob = null;
     clearTimeout(doneHideTimer);
+    // 錄音結束進入處理中時，波形圖 0 延遲立即嘗試載入母帶
+    const waveCard = document.getElementById('waveformCard');
+    if (!wavesurfer || (waveCard && waveCard.hidden)) {
+      loadAudioWaveform(st.job);
+    }
   } else if (st.state === 'done') {
     updateVuMeter({ active: false });
     const currentJobKey = st.job || 'done';
@@ -1421,6 +1426,8 @@ function initWebSocket() {
       const msg = JSON.parse(event.data);
       if (msg.type === 'status') {
         handleStatusUpdate(msg.data);
+      } else if (msg.type === 'audio_ready') {
+        loadAudioWaveform(msg.data?.job_id);
       } else if (msg.type === 'system') {
         updateSystemUI(msg.data);
       } else if (msg.type === 'bt') {

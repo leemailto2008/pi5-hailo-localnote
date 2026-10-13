@@ -213,20 +213,16 @@ def speech_to_text(
                 print("[VoicePipeline] Whisper model unavailable.")
                 return None
 
-            domain_prompt = (
-                "以下為台灣繁體中文語音對話，常見詞彙包括：樹莓派、Raspberry Pi、語音助理、"
-                "就緒、記憶體、向量庫、模型部署、人工智慧、繁體中文、Python、代碼、狀態查詢、藍牙耳機、測試。"
-            )
-
             valid_segments = []
             try:
                 # Fast single-pass transcription with beam_size=1 on In-Memory PCM array (Zero-Disk)
+                # 使用精簡繁體中文提示詞，杜絕長 prompt 導致長錄音 cross-attention 鎖死與 0 segment 靜音抑制
                 segments, info = model.transcribe(
                     audio_np,
                     beam_size=1,
                     best_of=1,
                     language="zh",
-                    initial_prompt=domain_prompt,
+                    initial_prompt="繁體中文",
                     condition_on_previous_text=False,
                     vad_filter=True,
                     vad_parameters=dict(threshold=0.25, min_silence_duration_ms=250)

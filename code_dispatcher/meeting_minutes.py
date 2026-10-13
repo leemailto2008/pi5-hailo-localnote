@@ -397,23 +397,55 @@ class MeetingJobManager:
                     return
                 raise RuntimeError("麥克風收音失敗，請確認藍牙耳麥已開機並保持連線。")
 
+            # 錄音完成立即向前端廣播音檔就緒事件，波形圖 0 延遲秒開試聽！
+            try:
+                from ws_manager import ws_manager
+                await ws_manager.broadcast("audio_ready", {
+                    "job_id": job_id,
+                    "audio_url": f"/audio/{job_id}.ogg",
+                    "duration": duration_sec
+                })
+            except Exception:
+                pass
+
             # --- PHASE 2: Transcribe (Whisper STT) ---
             if self._cancellation_token.is_set():
                 return
 
             self.status.state = "processing"
             self.status.phase = "transcribe"
-            self.status.progress = 35
-            self.status.eta = 45.0
-            self.status.msg = "錄音完成，正在進行語音聽寫..."
+            self.status.progress = 30
+            # 根據錄音秒數動態計算預估聽寫耗時 (樹莓派 5 faster-whisper RTF 約 0.25)
+            est_stt_sec = max(10.0, float(duration_sec) * 0.26)
+            self.status.eta = est_stt_sec
+            self.status.msg = f"🎧 錄音已就緒！AI 正在進行語音聽寫（預計需 {int(est_stt_sec)} 秒）..."
             self.notify_status_update()
 
-            # Execute faster-whisper in worker thread (full 4 threads, zero-contention)
-            transcript = await asyncio.to_thread(
-                speech_to_text,
-                raw_ogg,
-                self._thread_cancellation_token
-            )
+            # 動態心跳協程：在 STT 背景執行期間持續平滑推進進度條與倒數秒數，杜絕假死現象
+            stt_done_event = asyncio.Event()
+
+            async def _stt_ticker():
+                stt_start = time.time()
+                while not stt_done_event.is_set() and not self._cancellation_token.is_set():
+                    await asyncio.sleep(0.8)
+                    elapsed_stt = time.time() - stt_start
+                    rem_eta = max(1.0, est_stt_sec - elapsed_stt)
+                    pct = min(72, int(30 + (elapsed_stt / est_stt_sec) * 42))
+                    self.status.progress = pct
+                    self.status.eta = round(rem_eta, 1)
+                    self.status.msg = f"🎧 錄音完成！AI 正在聽寫語音（已耗時 {int(elapsed_stt)} 秒，剩餘約 {int(rem_eta)} 秒）..."
+                    self.notify_status_update()
+
+            ticker_task = asyncio.create_task(_stt_ticker())
+            try:
+                transcript = await asyncio.to_thread(
+                    speech_to_text,
+                    raw_ogg,
+                    self._thread_cancellation_token
+                )
+            finally:
+                stt_done_event.set()
+                ticker_task.cancel()
 
             if self._cancellation_token.is_set():
                 print("[MeetingMinutes] Transcribe aborted by cancellation token.")
@@ -438,11 +470,30 @@ class MeetingJobManager:
 
             self.status.phase = "summarize"
             self.status.progress = 75
-            self.status.eta = 20.0
-            self.status.msg = "聽寫完成，正在提煉會議紀要..."
+            self.status.eta = 15.0
+            self.status.msg = "聽寫完成，正在提煉會議紀要與待辦事項..."
             self.notify_status_update()
 
-            raw_markdown = await self._generate_summary_llm(transcript)
+            llm_done_event = asyncio.Event()
+
+            async def _llm_ticker():
+                llm_start = time.time()
+                while not llm_done_event.is_set() and not self._cancellation_token.is_set():
+                    await asyncio.sleep(0.8)
+                    elapsed_llm = time.time() - llm_start
+                    pct = min(96, int(75 + (elapsed_llm / 15.0) * 21))
+                    rem_eta = max(1.0, 15.0 - elapsed_llm)
+                    self.status.progress = pct
+                    self.status.eta = round(rem_eta, 1)
+                    self.status.msg = f"聽寫完成！正在提煉會議紀要（已耗時 {int(elapsed_llm)} 秒）..."
+                    self.notify_status_update()
+
+            llm_ticker_task = asyncio.create_task(_llm_ticker())
+            try:
+                raw_markdown = await self._generate_summary_llm(transcript)
+            finally:
+                llm_done_event.set()
+                llm_ticker_task.cancel()
             if self._cancellation_token.is_set():
                 return
 
