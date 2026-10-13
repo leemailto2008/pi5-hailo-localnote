@@ -1330,11 +1330,20 @@ def get_latest_audio() -> Dict[str, Any]:
             pass
 
     if target_ogg:
+        peaks = []
+        try:
+            from two_layer_audio import extract_waveform_peaks
+            full_path = os.path.join(AUDIO_CACHE_DIR, target_ogg)
+            peaks = extract_waveform_peaks(full_path, num_peaks=200)
+        except Exception:
+            pass
+
         return {
             "status": "success",
             "audio_url": f"/audio/{target_ogg}",
             "filename": target_ogg,
-            "duration": minutes_manager.result.duration if minutes_manager.result else 0
+            "duration": minutes_manager.result.duration if minutes_manager.result else 0,
+            "peaks": peaks
         }
     return {"status": "none", "audio_url": None, "message": "尚未有錄音檔"}
 

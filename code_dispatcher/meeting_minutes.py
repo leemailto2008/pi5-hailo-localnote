@@ -400,10 +400,13 @@ class MeetingJobManager:
             # 錄音完成立即向前端廣播音檔就緒事件，波形圖 0 延遲秒開試聽！
             try:
                 from ws_manager import ws_manager
+                from two_layer_audio import extract_waveform_peaks
+                peaks = extract_waveform_peaks(raw_ogg, num_peaks=200)
                 await ws_manager.broadcast("audio_ready", {
                     "job_id": job_id,
                     "audio_url": f"/audio/{job_id}.ogg",
-                    "duration": duration_sec
+                    "duration": duration_sec,
+                    "peaks": peaks
                 })
             except Exception:
                 pass

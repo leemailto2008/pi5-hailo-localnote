@@ -1220,20 +1220,34 @@ function closeRegionTranscript() {
   if (box) box.style.display = 'none';
 }
 
-async function loadAudioWaveform(jobId) {
+async function loadAudioWaveform(jobId, precomputedPeaks, directAudioUrl) {
   try {
-    const res = await api(API.latestAudio);
-    if (res.status === 'success' && res.audio_url) {
+    let targetUrl = directAudioUrl;
+    let peaks = precomputedPeaks;
+    if (!targetUrl) {
+      const res = await api(API.latestAudio);
+      if (res.status === 'success' && res.audio_url) {
+        targetUrl = res.audio_url;
+        peaks = peaks || res.peaks;
+      }
+    }
+    if (targetUrl) {
       const waveCard = document.getElementById('waveformCard');
       if (waveCard) waveCard.hidden = false;
       initWaveSurfer();
-      if (wavesurfer && activeAudioUrl !== res.audio_url) {
-        activeAudioUrl = res.audio_url;
+      if (wavesurfer && (activeAudioUrl !== targetUrl || !wavesurfer.getDuration())) {
+        activeAudioUrl = targetUrl;
         const elTime = document.getElementById('waveTimeDisplay');
-        if (elTime) elTime.textContent = '載入解碼中...';
+        if (elTime && (!peaks || peaks.length === 0)) elTime.textContent = '載入解碼中...';
         const btn = document.getElementById('btnWavePlayPause');
-        if (btn) btn.disabled = true;
-        wavesurfer.load(res.audio_url);
+        if (btn && (!peaks || peaks.length === 0)) btn.disabled = true;
+
+        if (peaks && peaks.length > 0) {
+          wavesurfer.load(targetUrl, [peaks]);
+        } else {
+          wavesurfer.load(targetUrl);
+        }
+
         if (wsRegions && typeof wsRegions.clearRegions === 'function') {
           wsRegions.clearRegions();
         }
@@ -1442,7 +1456,7 @@ function initWebSocket() {
       if (msg.type === 'status') {
         handleStatusUpdate(msg.data);
       } else if (msg.type === 'audio_ready') {
-        loadAudioWaveform(msg.data?.job_id);
+        loadAudioWaveform(msg.data?.job_id, msg.data?.peaks, msg.data?.audio_url);
       } else if (msg.type === 'system') {
         updateSystemUI(msg.data);
       } else if (msg.type === 'bt') {

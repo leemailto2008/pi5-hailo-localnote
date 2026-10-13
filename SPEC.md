@@ -1,115 +1,75 @@
-# 規格文件 (SPEC.md): Task 31 - LocalNote 聽記盒 Demo 版 API 適配層與狀態機規格
-# (Meeting Minutes Engine & Demo UI Backend Adapter)
+# 規格文件 (SPEC.md): Task 32 - 雙層環形緩衝區與核心隔離分塊音訊管線
+# (Two-Layer Ring Buffer & Core-Isolated Chunking Voice Pipeline)
 
-> **版本 (Version):** 1.1.0  
-> **模組路徑 (Module Path):** `code_dispatcher/meeting_minutes.py`, `code_dispatcher/main.py`  
-> **建立日期 (Date):** 2026-10-12  
-> **架構師 (Architect):** Senior Staff Software Engineer  
-
----
-
-## 1. 背景與目標 (Background & Objectives)
-
-為滿足「LocalNote 聽記盒」面向客戶與投資人的展示需求，後端需提供一套符合前端 `LocalNote-工程版-index.html` 規格的極簡、高效且符合硬體零爭搶規範的 API 接口層。
-
-### 核心原則：
-1. **零爭搶 (Zero-Contention SCO Guard):** 錄音進行中嚴禁推論與高頻 HCI 指令，保障 7.5ms SCO 音訊傳輸不掉幀。
-2. **非阻塞離線探測 (Non-blocking Offline Probing):** 後端背景排程非同步 ping 外網，快取離線狀態，避免輪詢 `/api/system` 造成延遲卡頓。
-3. **非同步狀態機 (Async State Machine):** 管理 `idle -> recording -> processing (transcribe -> summarize) -> done / error` 生命週期。
-4. **結構化紀要解析與降級保護 (Structured Minutes Parser & Graceful Degradation):** 將本地 LLM (`qwen2.5:3b-opt`) 生成的 Markdown 紀要精確拆解為 `summary[]`, `todos[]`, `decisions[]`，同時提供完整 Markdown 文本。
+> **版本 (Version):** 1.2.0  
+> **模組路徑 (Module Path):** `code_dispatcher/two_layer_audio.py`, `code_dispatcher/voice_pipeline.py`, `code_dispatcher/meeting_minutes.py`  
+> **建立日期 (Date):** 2026-10-13  
+> **架構師 (Architect):** Senior Staff Software Engineer & System Architect  
 
 ---
 
-## 2. API 介面規格 (API Interface Specifications)
+## 1. 背景與硬體物理邊界 (Background & Hardware Constraints)
 
-| 方法 | 路徑 | 請求主體 (Payload) | 回傳格式 (Response) | 說明 |
-|---|---|---|---|---|
-| `GET` | `/api/system` | — | `{offline, cpu, temp, mode, ssid, host, wifi_qr}` | 每 2 秒輪詢；讀取記憶體快取 |
-| `GET` | `/api/bt` | — | `{connected, name}` | 每 5 秒輪詢；錄音時讀取快取 |
-| `POST` | `/api/bt/{action}` | — | `{ok, msg}` | 支援 `scan`, `connect`, `disconnect` |
-| `POST` | `/api/record` | `{seconds: int}` | `{job: str}` | 啟動非同步錄音與後續處理任務 |
-| `GET` | `/api/status` | — | `{state, phase, progress, elapsed, total, eta, job, msg}` | 狀態輪詢（1.5s/次） |
-| `GET` | `/api/result` | — | `{job, title, started_at, duration, summary[], todos[], decisions[], transcript, markdown}` | 取得最終或階段性產出 |
-| `POST` | `/api/regenerate` | — | `{job: str}` | 僅重新執行 LLM 紀要生成，不重錄 |
-| `POST` | `/api/translate` | `{text: str, to: "en"\|"zh"}` | `{text: str}` | 紀要雙向翻譯 |
-| `POST` | `/api/tts` | `{text: str}` | `{ok: bool}` | 耳麥語音朗讀合成 |
-| `POST` | `/api/net/switch` | `{mode: "ap"\|"sta"}` | `{ok: bool}` | 熱點/家用 Wi-Fi 雙向原子切換 |
+樹莓派 5 (BCM2712 SoC) 的藍牙晶片透過實體 UART 串列總線 (`/dev/ttyAMA0`) 通訊，其硬體接收暫存器 (Rx FIFO) 僅有 **32 個位元組**。藍牙語音 (mSBC 16kHz) 走 SCO 通道，每 7.5ms 即送入 60 Bytes。
+若背景執行 CPU 全核心張量乘法 (GEMM)，記憶體匯流排與快取爭搶將導致中斷延遲超過 3ms，觸發硬體 FIFO 溢位 (`decode failed: -3`)。
+
+為實現「邊錄邊切塊即時辨識」且「100% 不破壞硬體音訊流」，必須透過**雙層緩衝區 (Two-Layer Buffer)** 與 **CPU 核心硬隔離 (Core Affinity)** 徹底解耦。
 
 ---
 
-## 3. 狀態機與處理流水線設計 (State Machine Pipeline)
+## 2. 系統架構設計 (System Architecture)
 
-```mermaid
-stateDiagram-v2
-    [*] --> idle: 系統就緒
-    idle --> recording: POST /api/record (時長 60~180s)
-    
-    state recording {
-        [*] --> MicRecording: ffmpeg 收音至 /dev/shm (CPU 獨占)
-    }
-    
-    recording --> processing: 錄音完成
-    
-    state processing {
-        [*] --> transcribe: 釋放 4 核心 faster-whisper (int8)
-        transcribe --> summarize: Ollama qwen2.5:3b-opt 生成繁體中文紀要
-        summarize --> [*]: Regex 抽取結構化待辦/摘要
-    }
-    
-    processing --> done: 寫入結果並通知前端
-    done --> processing: POST /api/regenerate (僅重跑 summarize)
-    done --> recording: 再次按開始錄音
-    
-    recording --> error: 麥克風異常或中斷
-    processing --> error: 模型超時或異常
-    error --> idle: 使用者重試
+```
+[Bluetooth Mic (SCO 16kHz)]
+         │ (7.5ms frame)
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Layer 1: 硬體對接環形緩衝區 (Real-Time Hardware Ring Buffer)    │
+│  - 綁定 CPU 0 (taskset -c 0)                                │
+│  - 實時排程 SCHED_FIFO 優先級 80 (chrt -f 80)                 │
+│  - 寫入 Linux POSIX 記憶體磁碟 (/dev/shm/audio_cache)         │
+│  - 輸出: master.ogg (全軌母帶) + 環形 PCM Ring Buffer 佇列     │
+└─────────────────────────────────────────────────────────────┘
+         │
+         │ (每 10 秒或 VAD 靜音點切塊抽取)
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Layer 2: 分段分塊推論器 (Throttled Chunk Inference Engine)    │
+│  - 綁定 CPU 2,3 (taskset -c 2,3)                            │
+│  - 算力油門限制: cpu_threads=2 (保留 50% CPU 與匯流排餘裕)       │
+│  - 模型: faster-whisper (ARM NEON int8)                      │
+│  - 輸出: 逐塊即時轉錄文字，WebSocket 串流廣播至前端             │
+└─────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Layer 3: 零延遲波形圖預提取 (Pre-computed Peaks Visualizer)   │
+│  - 後端快速萃取 200 點峰值 JSON (Peaks Array, ~2KB)           │
+│  - 前端 wavesurfer.load(url, peaks) 0.01 秒免解碼瞬間繪製      │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 4. 實作檢查清單 (Implementation Checklist)
+## 3. 實作規範 (Implementation Specifications)
 
-- [x] **Phase 1-A: 撰寫架構規格與驗證避坑條件 (SPEC.md)**
-- [x] **Phase 1-B: 實作會議錄音與紀要管理引擎 (`code_dispatcher/meeting_minutes.py`)**
-- [x] **Phase 1-C: 在 `code_dispatcher/main.py` 整合並註冊 10 個標準 API 端點**
-- [x] **Phase 1-D: 靜態 Wi-Fi QR Code 產生與路由掛載 (`static/wifi.png`)**
-- [x] **Phase 1-E: 單元測試與 API 模擬驗證 (`test_meeting_minutes.py`, `test_api_endpoints.py`)**
-- [x] **Phase 1-F: 實體機部署驗收與雙遠端推送 (Dual Git Push)**
-
----
-
-## 5. 規格文件 (Task 32): 獨立藍牙管理頁面 (Bluetooth Device Manager UI View)
-
-### 5.1 需求背景
-使用者在 LocalNote 首頁點擊「找耳麥」按鈕時，需平滑切換至專屬的藍牙耳麥管理介面，具備以下能力：
-1. **周圍耳麥搜尋 (Scan Nearby Devices):** 呼叫 `/api/bt/scan`，條列可配對之藍牙音訊設備與 RSSI/名稱。
-2. **一鍵配對與連線 (Pair & Connect):** 支援 `/api/bt/pair` 與 `/api/bt/connect`，自動信任設備並切換 PipeWire 音訊輸出 (Audio Sink)。
-3. **信任設備管理 (Trusted Headsets Hub):** 讀取 `/api/bt/status` 的 `trusted_devices` 清單，支援切換自動連線 (Auto-Connect)、設為預設耳麥 (Set Default) 與中斷連線 (Disconnect)。
-4. **無縫返回 (Back to Notes):** 頂部提供導航按鈕，隨時一鍵返回會議聽記主畫面。
-
-### 5.2 實作檢查清單
-- [x] **Task 32-A: 在 `ui_client.html` 構建 SPA 視圖切換器 (Main View vs Bluetooth View)**
-- [x] **Task 32-B: 整合豐富的藍牙操作 API (Scan, Pair, Connect, Disconnect, Auto-connect, Set Default)**
-- [x] **Task 32-C: 在 `main.py` 支援 `/bluetooth` 與 `/bt` 路由直達**
-- [x] **Task 32-D: 實體機部署與驗收驗證**
+1. **`two_layer_audio.py` (核心模組)：**
+   - `TwoLayerAudioPipe` 類別：
+     - 管理 Layer 1 ffmpeg 捕捉行程，綁定 CPU 0 與 Linux RT 排程。
+     - 以 16000Hz 16-bit Mono PCM 格式寫入記憶體環形緩衝區。
+     - 定期萃取音訊塊 (Audio Chunks，預設 8~10 秒) 並送入非同步佇列。
+     - 提供 `extract_waveform_peaks(ogg_path)` 函式，快速產生正規化浮點峰值陣列。
+2. **`voice_pipeline.py` (推論調度調校)：**
+   - 在多工作業時提供安全模式推論器：`cpu_threads=2`，並透過 `os.sched_setaffinity` 鎖定在 CPU 2, 3。
+3. **`meeting_minutes.py` 與前端介面整合：**
+   - 錄音進行中，每產生一個 chunk 即時推播轉錄文字。
+   - 錄音結束時回傳 `peaks`，前端 Wavesurfer 0 延遲瞬開波形圖。
 
 ---
 
-## 6. 規格文件 (Task 33): 工程除錯工作台路由掛載 (`/dbg02`)
+## 4. 驗收標準 (Acceptance Criteria)
 
-### 6.1 需求背景
-為了方便開發與除錯 (Troubleshooting)，將包含系統溫度、RAM、STA/AP 網路熱點切換、Whisper STT 測試、手動翻譯/TTS 語音合成及完整 PipeWire 端點監控的工程版工作台部署於專屬路由 `/dbg02` (與防呆別名 `/dgb02`)。
-
-### 6.2 路由對照
-- `/`: LocalNote 聽記盒客戶端介面 (`ui_client.html`)
-- `/bluetooth`, `/bt`: LocalNote 藍牙音訊設備中心直達視圖
-- `/dbg02`, `/dgb02`: 全功能藍牙與語音工程工作台 (`ui.html`)
-- `/dbg01`, `/dgb01`, `/arena`: 原始程式碼審查與 LLM Arena 介面 (`ui_dbg01.html`)
-
-### 6.3 實作檢查清單
-- [x] **Task 33-A: 在 `code_dispatcher/main.py` 掛載 `/dbg02` 與 `/dgb02` 指向 `ui.html`**
-- [x] **Task 33-B: 在 `code_dispatcher/ui.html` 頂部導航列加入返回首頁與 Code Review 連結**
-- [x] **Task 33-C: 在 `code_dispatcher/ui_client.html` 的開發者工具列加入 `/dbg02` 入口**
-- [x] **Task 33-D: 單元測試與實機驗收部署**
-
-
+- [ ] 錄音進行中分塊推論時，`dmesg` 與 `journalctl` 0 筆 `decode failed: -3` 錯誤。
+- [ ] 3 分鐘長音訊能按 10 秒區間逐塊輸出即時文字。
+- [ ] 錄音結束時波形圖於 0.05 秒內渲染完畢，無需等待 Web Audio 解碼。
+- [ ] 程式碼符合 KISS 原則，嚴格處理例外狀況與 Process Lifecycle 釋放。
