@@ -1,6 +1,6 @@
 # 🚀 樹莓派 5 邊緣 AI 與語音網關改良藍圖 - 任務檢核與實裝進度表 (todo_tasks_check.md)
 
-> **版本 (Version):** 1.1.0  
+> **版本 (Version):** 1.2.0  
 > **系統架構 (System Architecture):** Raspberry Pi 5 (8GB RAM) | Debian 13 (Trixie) | PipeWire Bluetooth mSBC (16kHz) | faster-whisper | Ollama Qwen 3B | FastAPI  
 > **更新時間 (Last Updated):** 2026-10-13  
 > **遠端同步 (Git Remotes):** GitHub (`origin`) & GitLab (`gitlab`) 雙端同步  
@@ -10,9 +10,9 @@
 ## 📊 整體進度統計 (Overall Progress)
 
 - **總規劃任務 (Total Tasks):** 30 項
-- **已完整實裝並驗收上線 (Fully Completed):** **7 項** (23%)
+- **已完整實裝並驗收上線 (Fully Completed):** **8 項** (27%)
 - **部分實裝具備核心模組 (Partially Completed):** **3 項** (10%)
-- **待後續迭代實作 (Backlog / To-Do):** **20 項** (67%)
+- **待後續迭代實作 (Backlog / To-Do):** **19 項** (63%)
 - **額外完成關鍵專案增強 (Extra System Enhancements):** **4 項** (藍牙 Hub SPA、Captive Portal 攔截、窄螢幕響應式佈局、PipeWire 精準拓撲解析)
 
 ---
@@ -52,8 +52,9 @@
   - **實作模組:** `code_dispatcher/ws_manager.py`, `code_dispatcher/main.py`, `code_dispatcher/ui_client.html`, `code_dispatcher/static/index.html`
   - **成效與狀態:** 建立 `/ws/status` 雙向 WebSocket 端點與連線管理器。錄音管線狀態機 (`meeting_minutes.py`) 流轉時主動廣播最新進度 (<50ms 延遲)；背景協程以 1.5s 週期廣播系統指標與藍牙狀態。前端連線成功時立即關閉高頻 HTTP 輪詢，終結 journalctl 日誌洗版；斷線時自動無縫降級回 HTTP 輪詢並實施指數退避重連。
 
-- [ ] **Task 09: 即時音量頻譜採樣 (Live VU Meter & Spectrum Visualizer)**
-  - **狀態:** 待辦。尚未在錄音時推播 PipeWire 即時 RMS 跳動音量條。
+- [x] **Task 09: 即時音量頻譜採樣 (Live VU Meter & Spectrum Visualizer)** ✅ *(已實裝)*
+  - **實作模組:** `code_dispatcher/voice_pipeline.py`, `code_dispatcher/meeting_minutes.py`, `code_dispatcher/ws_manager.py`, `code_dispatcher/ui_client.html`, `code_dispatcher/static/index.html`
+  - **成效與狀態:** 在 ffmpeg 錄音管線配置雙路輸出（母帶 libopus + 原始 PCM s16le stdout pipe），每 50ms 提取 RMS、Peak、dBFS 與 8 頻段 FFT 頻譜。透過 WebSocket 即時推播，前端動態繪製霓虹漸層 VU 電平條、Peak Hold 標記與 8 頻段跳動柱狀頻譜，並以即時徽章提示收音狀態（收音良好 🟢 / 音量微弱 🟡 / 未收到聲音 🔴），徹底解決盲錄痛點。
 
 - [ ] **Task 10: 漸進式 Web 應用程式離線快取 (Progressive Web App, PWA & Service Worker)**
   - **狀態:** 待辦。目前具備基本 HTML/CSS 快取，尚未編寫 Service Worker Cache-First 離線快取機制。

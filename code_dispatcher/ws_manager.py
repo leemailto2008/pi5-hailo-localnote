@@ -25,7 +25,7 @@ class ConnectionManager:
         await websocket.accept()
         async with self._lock:
             self.active_connections.add(websocket)
-            self.subscriptions[websocket] = {"system", "status", "bt"}
+            self.subscriptions[websocket] = {"system", "status", "bt", "vu"}
         logger.info(f"[WS] Client connected. Active clients: {len(self.active_connections)}")
 
     async def disconnect(self, websocket: WebSocket):

@@ -279,7 +279,17 @@ class MeetingJobManager:
         try:
             # --- PHASE 1: Recording ---
             t0 = time.time()
-            record_task = asyncio.create_task(record_audio_from_mic(duration_sec, raw_ogg))
+
+            async def _on_vu(vu_data: Dict[str, Any]):
+                try:
+                    from ws_manager import ws_manager
+                    await ws_manager.broadcast("vu", vu_data)
+                except Exception:
+                    pass
+
+            record_task = asyncio.create_task(
+                record_audio_from_mic(duration_sec, raw_ogg, vu_callback=_on_vu)
+            )
 
             # Progress ticker during recording
             while not record_task.done():
@@ -291,6 +301,21 @@ class MeetingJobManager:
                 await asyncio.sleep(0.5)
 
             record_ok = await record_task
+
+            # Broadcast reset frame upon recording completion
+            try:
+                from ws_manager import ws_manager
+                await ws_manager.broadcast("vu", {
+                    "rms": 0.0,
+                    "peak": 0.0,
+                    "db": -60.0,
+                    "level_pct": 0,
+                    "status": "idle",
+                    "bands": [0] * 8,
+                    "active": False
+                })
+            except Exception:
+                pass
             if not record_ok or not os.path.exists(raw_ogg) or os.path.getsize(raw_ogg) == 0:
                 raise RuntimeError("麥克風收音失敗，請確認藍牙耳麥已開機並保持連線。")
 

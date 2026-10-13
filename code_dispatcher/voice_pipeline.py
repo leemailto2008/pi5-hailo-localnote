@@ -8,7 +8,7 @@ Bi-directional Voice Pipeline for Raspberry Pi 5:
 import os
 import asyncio
 import subprocess
-from typing import Optional
+from typing import Optional, Any, Callable, Dict
 import numpy as np
 
 from config import (
@@ -419,10 +419,11 @@ async def ensure_bluetooth_recording_ready() -> str:
     return target_source
 
 
-async def record_audio_from_mic(duration_sec: int, output_path: str) -> bool:
+async def record_audio_from_mic(duration_sec: int, output_path: str, vu_callback: Optional[Callable[[Dict[str, Any]], Any]] = None) -> bool:
     """
     Record audio from Bluetooth headset mic using ffmpeg with explicit hardware source routing.
     Uses clean 16kHz resampling with highpass filter to eliminate sub-bass rumble and avoid clipping.
+    If vu_callback is supplied, uses dual-output to stream raw 16kHz PCM to stdout for 50ms real-time VU and FFT spectrum metering.
     """
     source_node = await ensure_bluetooth_recording_ready()
 
@@ -437,13 +438,74 @@ async def record_audio_from_mic(duration_sec: int, output_path: str) -> bool:
         "-b:a", "64k",
         output_path
     ]
+
+    if vu_callback:
+        cmd += [
+            "-t", str(duration_sec),
+            "-f", "s16le",
+            "-ac", "1",
+            "-ar", "16000",
+            "-c:a", "pcm_s16le",
+            "pipe:1"
+        ]
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
-            stdout=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE if vu_callback else asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL
         )
-        await proc.communicate()
+
+        if vu_callback and proc.stdout:
+            chunk_bytes = 1600  # 50ms @ 16kHz mono (800 samples * 2 bytes)
+            band_slices = [
+                (4, 13),    # 80-250 Hz (Sub-bass & fundamental pitch)
+                (13, 25),   # 250-500 Hz (Low-mid vowels)
+                (25, 50),   # 500-1000 Hz (Mid resonance)
+                (50, 100),  # 1000-2000 Hz (High-mid clarity)
+                (100, 175), # 2000-3500 Hz (Consonants & presence)
+                (175, 250), # 3500-5000 Hz (Sibilance & fricatives)
+                (250, 325), # 5000-6500 Hz (High harmonics)
+                (325, 380)  # 6500-7600 Hz (Brilliance & air)
+            ]
+            try:
+                while True:
+                    chunk = await proc.stdout.read(chunk_bytes)
+                    if not chunk:
+                        break
+                    num_samples = len(chunk) // 2
+                    if num_samples >= 160:
+                        samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
+                        rms = float(np.sqrt(np.mean(samples ** 2)))
+                        peak = float(np.max(np.abs(samples)))
+                        db = float(20 * np.log10(max(1e-5, rms)))
+                        level_pct = min(100, int(rms * 280))
+
+                        # 8-band FFT spectrum
+                        fft_mag = np.abs(np.fft.rfft(samples))
+                        bands = []
+                        for s_start, s_end in band_slices:
+                            b_val = float(np.mean(fft_mag[s_start:s_end])) if s_end <= len(fft_mag) else 0.0
+                            bands.append(min(100, int(b_val * 65)))
+
+                        status_label = "active" if peak >= 0.03 else ("weak" if peak >= 0.01 else "silent")
+                        vu_payload = {
+                            "rms": round(rms, 4),
+                            "peak": round(peak, 4),
+                            "db": round(db, 1),
+                            "level_pct": level_pct,
+                            "status": status_label,
+                            "bands": bands,
+                            "active": True
+                        }
+                        if asyncio.iscoroutinefunction(vu_callback):
+                            await vu_callback(vu_payload)
+                        else:
+                            vu_callback(vu_payload)
+            except Exception as stream_err:
+                print(f"[VoicePipeline] VU streaming loop notice: {stream_err}")
+
+        await proc.wait()
         if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 500:
             return True
 

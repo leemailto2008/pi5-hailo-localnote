@@ -92,6 +92,22 @@ select{background:var(--card);border:1px solid var(--set-line);border-radius:10p
 .progress.ok{background:var(--op-soft);color:#1f5e57}.progress.ok .bar{background:#cfe3df}.progress.ok .bar i{background:var(--op)}
 .progress.err{background:#fde8e7;color:#8a2a27}
 
+/* ---------- Task 09: 即時音量與頻譜視覺化 ---------- */
+.vu-container{background:#0f172a;border-radius:12px;padding:12px 14px;margin-top:10px;color:#e2e8f0;border:1px solid #1e293b;box-shadow:0 2px 10px rgba(0,0,0,.12);transition:opacity .2s}
+.vu-header{display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:8px}
+.vu-title{font-weight:700;color:#94a3b8;display:inline-flex;align-items:center;gap:4px}
+.vu-status-badge{padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;transition:all .2s ease}
+.vu-active{background:rgba(16,185,129,.2);color:#34d399;border:1px solid #059669}
+.vu-weak{background:rgba(245,158,11,.2);color:#fbbf24;border:1px solid #d97706}
+.vu-silent{background:rgba(239,68,68,.2);color:#f87171;border:1px solid #dc2626}
+.vu-db-val{font-family:monospace;font-size:12px;color:#cbd5e1;font-weight:600}
+.vu-bar-track{position:relative;height:10px;background:#1e293b;border-radius:5px;overflow:hidden;margin-bottom:10px}
+.vu-bar-fill{height:100%;width:0%;border-radius:5px;background:linear-gradient(90deg,#10b981 0%,#34d399 50%,#f59e0b 75%,#ef4444 95%);transition:width .06s cubic-bezier(.1,.7,.1,1)}
+.vu-peak-indicator{position:absolute;top:0;bottom:0;width:3px;background:#fff;left:0%;transition:left .08s ease-out;box-shadow:0 0 5px #fff}
+.spectrum-visualizer{display:flex;align-items:flex-end;justify-content:space-between;height:34px;gap:5px;padding:3px 6px;background:rgba(15,23,42,.7);border-radius:6px}
+.spectrum-bar{flex:1;height:100%;display:flex;align-items:flex-end;background:rgba(51,65,85,.4);border-radius:3px;overflow:hidden}
+.spectrum-fill{width:100%;height:4%;border-radius:2px;background:linear-gradient(to top,#0f766e,#14b8a6,#38bdf8);transition:height .06s cubic-bezier(.1,.7,.1,1)}
+
 .minutes{display:flex;flex-direction:column;gap:12px;padding:2px}
 .minutes h3{margin:0;font-size:18px}
 .minutes .meta{font-size:13px;color:var(--muted)}
@@ -193,6 +209,30 @@ details[open] summary::after{content:"收起 ▴"}
             <div class="row"><span class="label">進度</span><b id="pTitle">—</b><span class="spacer"></span><span id="pEta"></span></div>
             <div class="bar"><i id="pBar"></i></div>
             <span id="pSteps" style="font-size:13px"></span>
+
+            <!-- Task 09: 即時音量頻譜採樣 (Live VU Meter & Spectrum Visualizer) -->
+            <div class="vu-container" id="vuContainer" hidden>
+              <div class="vu-header">
+                <span class="vu-title">🎤 耳麥收音</span>
+                <span class="vu-status-badge vu-silent" id="vuStatusBadge">靜音</span>
+                <span class="spacer"></span>
+                <span class="vu-db-val" id="vuDbVal">-60 dB</span>
+              </div>
+              <div class="vu-bar-track">
+                <div class="vu-bar-fill" id="vuBarFill"></div>
+                <div class="vu-peak-indicator" id="vuPeakIndicator"></div>
+              </div>
+              <div class="spectrum-visualizer" id="spectrumVisualizer">
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -354,11 +394,57 @@ const el = {
   hubCurName: $('hubCurName'), hubCurMac: $('hubCurMac'), hubCurBadge: $('hubCurBadge'), hubCurStatus: $('hubCurStatus'),
   hubBatteryPill: $('hubBatteryPill'), hubBatteryVal: $('hubBatteryVal'),
   hubSignalPill: $('hubSignalPill'), hubSignalVal: $('hubSignalVal'), hubBtnDisconnect: $('hubBtnDisconnect'),
-  hubBtnScan: $('hubBtnScan'), hubScanContainer: $('hubScanContainer'), hubTrustedContainer: $('hubTrustedContainer')
+  hubBtnScan: $('hubBtnScan'), hubScanContainer: $('hubScanContainer'), hubTrustedContainer: $('hubTrustedContainer'),
+  vuContainer: $('vuContainer'), vuStatusBadge: $('vuStatusBadge'), vuDbVal: $('vuDbVal'),
+  vuBarFill: $('vuBarFill'), vuPeakIndicator: $('vuPeakIndicator'),
+  spectrumFills: document.querySelectorAll('.spectrum-fill')
 };
 
 let state = 'idle', result = null, pollTimer = null, lastJob = null;
 let handledDoneJob = null, doneHideTimer = null;
+
+/* ---------- Task 09: 即時音量與頻譜視覺化更新 ---------- */
+function updateVuMeter(data) {
+  if (!el.vuContainer) return;
+  if (!data || !data.active) {
+    el.vuContainer.hidden = true;
+    if (el.vuBarFill) el.vuBarFill.style.width = '0%';
+    if (el.vuPeakIndicator) el.vuPeakIndicator.style.left = '0%';
+    if (el.spectrumFills) {
+      el.spectrumFills.forEach(f => f.style.height = '4%');
+    }
+    return;
+  }
+  el.vuContainer.hidden = false;
+  const pct = Math.min(100, Math.max(0, data.level_pct || 0));
+  const peakPct = Math.min(100, Math.max(0, (data.peak || 0) * 100));
+
+  if (el.vuBarFill) el.vuBarFill.style.width = pct + '%';
+  if (el.vuPeakIndicator) el.vuPeakIndicator.style.left = Math.max(pct, peakPct) + '%';
+  if (el.vuDbVal) el.vuDbVal.textContent = (data.db != null ? data.db + ' dB' : '--');
+
+  if (el.vuStatusBadge) {
+    if (data.status === 'active') {
+      el.vuStatusBadge.className = 'vu-status-badge vu-active';
+      el.vuStatusBadge.textContent = '收音良好 🟢';
+    } else if (data.status === 'weak') {
+      el.vuStatusBadge.className = 'vu-status-badge vu-weak';
+      el.vuStatusBadge.textContent = '音量微弱 🟡';
+    } else {
+      el.vuStatusBadge.className = 'vu-status-badge vu-silent';
+      el.vuStatusBadge.textContent = '未收到聲音 🔴';
+    }
+  }
+
+  // 更新 8 頻段跳動頻譜柱
+  if (data.bands && el.spectrumFills && el.spectrumFills.length) {
+    data.bands.forEach((bHeight, idx) => {
+      if (el.spectrumFills[idx]) {
+        el.spectrumFills[idx].style.height = Math.min(100, Math.max(4, bHeight)) + '%';
+      }
+    });
+  }
+}
 
 /* ---------- 工具 ---------- */
 async function api(path, body) {
@@ -773,6 +859,7 @@ function renderProgress(st) {
   if (st.state === 'idle') {
     p.hidden = true;
     handledDoneJob = null;
+    updateVuMeter({ active: false });
     return;
   }
   if (st.state === 'recording') {
@@ -785,6 +872,7 @@ function renderProgress(st) {
     handledDoneJob = null;
     clearTimeout(doneHideTimer);
   } else if (st.state === 'processing') {
+    updateVuMeter({ active: false });
     p.hidden = false; p.className = 'progress';
     el.pTitle.textContent = '盒子正在整理紀要';
     el.pEta.textContent = st.eta != null ? `還要約 ${Math.round(st.eta)} 秒` : '';
@@ -794,6 +882,7 @@ function renderProgress(st) {
     handledDoneJob = null;
     clearTimeout(doneHideTimer);
   } else if (st.state === 'done') {
+    updateVuMeter({ active: false });
     const currentJobKey = st.job || 'done';
     if (handledDoneJob !== currentJobKey) {
       handledDoneJob = currentJobKey;
@@ -812,6 +901,7 @@ function renderProgress(st) {
       doneHideTimer = setTimeout(() => { p.hidden = true; }, 7000);
     }
   } else if (st.state === 'error') {
+    updateVuMeter({ active: false });
     p.hidden = false; p.className = 'progress err';
     el.pTitle.textContent = '出錯了';
     el.pEta.textContent = '';
@@ -1082,6 +1172,8 @@ function initWebSocket() {
         updateBtUI(msg.data);
       } else if (msg.type === 'bt_hub') {
         updateBtHubUI(msg.data);
+      } else if (msg.type === 'vu') {
+        updateVuMeter(msg.data);
       }
     } catch (err) {
       console.warn('[WS] 解析訊息錯誤:', err);
