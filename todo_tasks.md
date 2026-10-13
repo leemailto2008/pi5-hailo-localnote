@@ -64,12 +64,12 @@
   - **改良方案：** 實作標準 PWA Manifest 與 Service Worker Cache-First 策略，將 CSS、圖示與 JS 100% 本地快取，並支援加入手機主畫面。
   - **效益：** 手機端如原生 App 般瞬間開啟，離網環境穩定度達 100%。
 
-- [ ] **Task 11: 異步工作佇列與取消權杖 (Job Queue & Cancellation Token)**
+- [x] **Task 11: 異步工作佇列與取消權杖 (Job Queue & Cancellation Token)**
   - **現狀問題：** 當使用者發起一次長時間轉錄後若想中斷或重新錄音，舊任務仍會佔滿 CPU 直至完成。
   - **改良方案：** 導入任務排程佇列 (In-process Task Queue) 與取消權杖 (Cancellation Token)，前端點擊取消時能瞬間終止背景推論。
   - **效益：** 避免無效運算霸佔 CPU，提升連續操作彈性。
 
-- [ ] **Task 12: 互動式音訊波形視覺化與剪輯 (Waveform Visualizer & Trimming - Wavesurfer.js)**
+- [x] **Task 12: 互動式音訊波形視覺化與剪輯 (Waveform Visualizer & Trimming - Wavesurfer.js)**
   - **現狀問題：** 錄音試聽僅能透過簡易 HTML5 audio 播放器，無法得知音訊段落分布。
   - **改良方案：** 整合 Wavesurfer.js，提供互動式音訊波形可視化，並允許使用者圈選特定秒數進行局部轉錄。
   - **效益：** 介面現代化，提升精準校對與試聽體驗。

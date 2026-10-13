@@ -132,7 +132,12 @@ import threading
 _whisper_lock = threading.Lock()
 
 
-def speech_to_text(audio_path: str) -> Optional[str]:
+def speech_to_text(
+    audio_path: str,
+    cancellation_event: Optional[Any] = None,
+    start_sec: Optional[float] = None,
+    end_sec: Optional[float] = None
+) -> Optional[str]:
     """
     Transcribe speech from an audio file to Traditional Chinese text.
     Optimized with 100% Zero-Disk I/O and RAM-based PCM streaming for Raspberry Pi 5:
@@ -140,6 +145,7 @@ def speech_to_text(audio_path: str) -> Optional[str]:
     - Zero temporary WAV files on physical storage (0 MicroSD wear).
     - Threading lock prevents CTranslate2 OpenMP deadlocks/spin-waits.
     - beam_size=1 (Greedy search) delivers 5x faster transcription with zero hallucination.
+    - Supports cancellation_event checking and region trimming (start_sec, end_sec).
     """
     # 錄音已結束，使用全核心進行無損音訊的高精度轉錄
 
@@ -156,6 +162,21 @@ def speech_to_text(audio_path: str) -> Optional[str]:
 
     if audio_np is None or len(audio_np) < 8000:
         print(f"[VoicePipeline] Audio PCM decode failed or too short (<0.5s): {audio_path}")
+        return None
+
+    # 局部區間裁切 (Audio Region Trimming)
+    if start_sec is not None or end_sec is not None:
+        total_sec = len(audio_np) / 16000.0
+        s_sec = max(0.0, float(start_sec or 0.0))
+        e_sec = min(total_sec, float(end_sec or total_sec))
+        if e_sec > s_sec:
+            s_idx = int(s_sec * 16000)
+            e_idx = int(e_sec * 16000)
+            audio_np = audio_np[s_idx:e_idx]
+            print(f"[VoicePipeline] Trimming audio for region: {s_sec:.2f}s - {e_sec:.2f}s (Samples: {len(audio_np)})")
+
+    if len(audio_np) < 4000:
+        print(f"[VoicePipeline] Trimmed audio too short (<0.25s): {len(audio_np)} samples")
         return None
 
     try:
@@ -176,7 +197,17 @@ def speech_to_text(audio_path: str) -> Optional[str]:
             print(f"[VoicePipeline] In-Memory Audio is absolute silence (Peak={peak:.4f}, RMS={rms:.4f}), skipping Whisper.")
             return None
 
+        # Check cancellation before acquiring lock
+        if cancellation_event and hasattr(cancellation_event, "is_set") and cancellation_event.is_set():
+            print("[VoicePipeline] Transcription aborted before lock by cancellation token.")
+            return None
+
         with _whisper_lock:
+            # Check cancellation right after acquiring lock
+            if cancellation_event and hasattr(cancellation_event, "is_set") and cancellation_event.is_set():
+                print("[VoicePipeline] Transcription aborted after acquiring lock by cancellation token.")
+                return None
+
             model = get_whisper_model()
             if model is None:
                 print("[VoicePipeline] Whisper model unavailable.")
@@ -201,6 +232,11 @@ def speech_to_text(audio_path: str) -> Optional[str]:
                     vad_parameters=dict(threshold=0.25, min_silence_duration_ms=250)
                 )
                 for seg in segments:
+                    # 每次 segment 迭代時檢驗取消權杖
+                    if cancellation_event and hasattr(cancellation_event, "is_set") and cancellation_event.is_set():
+                        print(f"[VoicePipeline] Transcription cancelled mid-stream by token (collected {len(valid_segments)} segments).")
+                        return None
+
                     # 放寬分塊邊界語音門檻 (no_speech_prob < 0.85, avg_logprob > -2.20)，防止因切片截斷導致有效語音被誤殺
                     if seg.no_speech_prob < 0.85 and seg.avg_logprob > -2.20:
                         clean_seg_text = seg.text.strip()
@@ -419,11 +455,18 @@ async def ensure_bluetooth_recording_ready() -> str:
     return target_source
 
 
-async def record_audio_from_mic(duration_sec: int, output_path: str, vu_callback: Optional[Callable[[Dict[str, Any]], Any]] = None) -> bool:
+async def record_audio_from_mic(
+    duration_sec: int,
+    output_path: str,
+    vu_callback: Optional[Callable[[Dict[str, Any]], Any]] = None,
+    cancellation_event: Optional[asyncio.Event] = None,
+    on_proc_started: Optional[Callable[[Any], Any]] = None
+) -> bool:
     """
     Record audio from Bluetooth headset mic using ffmpeg with explicit hardware source routing.
     Uses clean 16kHz resampling with highpass filter to eliminate sub-bass rumble and avoid clipping.
     If vu_callback is supplied, uses dual-output to stream raw 16kHz PCM to stdout for 50ms real-time VU and FFT spectrum metering.
+    Supports cancellation_event token for immediate hardware abort and process cleanup.
     """
     source_node = await ensure_bluetooth_recording_ready()
 
@@ -456,6 +499,12 @@ async def record_audio_from_mic(duration_sec: int, output_path: str, vu_callback
             stderr=asyncio.subprocess.DEVNULL
         )
 
+        if on_proc_started:
+            try:
+                on_proc_started(proc)
+            except Exception:
+                pass
+
         if vu_callback and proc.stdout:
             chunk_bytes = 1600  # 50ms @ 16kHz mono (800 samples * 2 bytes)
             band_slices = [
@@ -470,6 +519,14 @@ async def record_audio_from_mic(duration_sec: int, output_path: str, vu_callback
             ]
             try:
                 while True:
+                    if cancellation_event and cancellation_event.is_set():
+                        print("[VoicePipeline] Microphone recording aborting due to cancellation event.")
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                        return False
+
                     chunk = await proc.stdout.read(chunk_bytes)
                     if not chunk:
                         break
@@ -504,6 +561,14 @@ async def record_audio_from_mic(duration_sec: int, output_path: str, vu_callback
                             vu_callback(vu_payload)
             except Exception as stream_err:
                 print(f"[VoicePipeline] VU streaming loop notice: {stream_err}")
+
+        # Check cancellation before waiting
+        if cancellation_event and cancellation_event.is_set():
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            return False
 
         await proc.wait()
         if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 500:

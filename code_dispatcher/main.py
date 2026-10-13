@@ -1274,6 +1274,66 @@ async def post_demo_record(req: DemoRecordRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/api/record/cancel", tags=["Demo UI"])
+@app.post("/api/job/cancel", tags=["Demo UI"])
+async def post_demo_cancel() -> Dict[str, Any]:
+    """Instantly cancel active recording or inference job and release hardware resources."""
+    from meeting_minutes import minutes_manager
+    return await minutes_manager.cancel_current_job()
+
+
+class RegionTranscribeRequest(BaseModel):
+    job_id: Optional[str] = Field(default=None, description="目標工作 ID")
+    start_sec: float = Field(default=0.0, ge=0.0, description="開始秒數")
+    end_sec: float = Field(..., gt=0.0, description="結束秒數")
+
+
+@app.post("/api/transcribe/region", tags=["Demo UI"])
+async def post_transcribe_region(req: RegionTranscribeRequest) -> Dict[str, Any]:
+    """Transcribe selected audio region via faster-whisper without full-length re-processing."""
+    from meeting_minutes import minutes_manager
+    try:
+        return await minutes_manager.transcribe_region(
+            job_id=req.job_id,
+            start_sec=req.start_sec,
+            end_sec=req.end_sec
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/audio/latest", tags=["Demo UI"])
+def get_latest_audio() -> Dict[str, Any]:
+    """Retrieve the URL of the most recent meeting audio file for Wavesurfer.js."""
+    from meeting_minutes import minutes_manager, AUDIO_CACHE_DIR
+    target_ogg = None
+    if minutes_manager.result and minutes_manager.result.job:
+        cand = os.path.join(AUDIO_CACHE_DIR, f"{minutes_manager.result.job}.ogg")
+        if os.path.exists(cand):
+            target_ogg = f"{minutes_manager.result.job}.ogg"
+
+    if not target_ogg:
+        try:
+            ogg_files = [
+                f for f in os.listdir(AUDIO_CACHE_DIR)
+                if f.endswith(".ogg") and not f.startswith("tts_")
+            ]
+            if ogg_files:
+                ogg_files.sort(key=lambda x: os.path.getmtime(os.path.join(AUDIO_CACHE_DIR, x)), reverse=True)
+                target_ogg = ogg_files[0]
+        except Exception:
+            pass
+
+    if target_ogg:
+        return {
+            "status": "success",
+            "audio_url": f"/audio/{target_ogg}",
+            "filename": target_ogg,
+            "duration": minutes_manager.result.duration if minutes_manager.result else 0
+        }
+    return {"status": "none", "audio_url": None, "message": "尚未有錄音檔"}
+
+
 @app.get("/api/status", tags=["Demo UI"])
 def get_demo_status() -> Dict[str, Any]:
     """Poll pipeline progress, ETA, and current stage."""

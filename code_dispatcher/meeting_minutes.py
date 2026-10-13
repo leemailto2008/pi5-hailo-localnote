@@ -12,6 +12,7 @@ import asyncio
 import subprocess
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+import threading
 import requests
 from pydantic import BaseModel, Field
 import sys
@@ -192,6 +193,9 @@ class MeetingJobManager:
         self._last_cpu_idle: int = 0
         self._last_cpu_total: int = 0
         self._cpu_cache: float = 0.0
+        self._cancellation_token: asyncio.Event = asyncio.Event()
+        self._thread_cancellation_token: threading.Event = threading.Event()
+        self._current_ffmpeg_proc = None
 
     def notify_status_update(self):
         """Notify WebSocket subscribers of status update."""
@@ -251,10 +255,66 @@ class MeetingJobManager:
             pass
         return "sta"
 
+    async def cancel_current_job(self) -> Dict[str, Any]:
+        """
+        Instantly abort active recording or inference job and release hardware resources.
+        Task 11: 異步工作佇列與取消權杖 (Job Queue & Cancellation Token)
+        """
+        print("[MeetingMinutes] cancel_current_job requested.")
+        self._cancellation_token.set()
+        self._thread_cancellation_token.set()
+
+        # 1. Kill active ffmpeg recording process if still alive
+        if self._current_ffmpeg_proc:
+            try:
+                self._current_ffmpeg_proc.terminate()
+                print("[MeetingMinutes] Active ffmpeg recording process terminated.")
+            except Exception as pe:
+                print(f"[MeetingMinutes] Error terminating ffmpeg process: {pe}")
+            self._current_ffmpeg_proc = None
+
+        # 2. Cancel asyncio pipeline task
+        if self._current_task and not self._current_task.done():
+            self._current_task.cancel()
+            print("[MeetingMinutes] Background pipeline task cancelled.")
+
+        # 3. Broadcast VU reset
+        try:
+            from ws_manager import ws_manager
+            await ws_manager.broadcast("vu", {
+                "rms": 0.0,
+                "peak": 0.0,
+                "db": -60.0,
+                "level_pct": 0,
+                "status": "idle",
+                "bands": [0] * 8,
+                "active": False
+            })
+        except Exception:
+            pass
+
+        # 4. Reset status to idle
+        self.status = JobStatus(
+            state="idle",
+            phase="record",
+            progress=0,
+            elapsed=0.0,
+            total=0.0,
+            eta=0.0,
+            msg="任務已由使用者手動中斷取消。"
+        )
+        self.notify_status_update()
+        return {"status": "cancelled", "message": "任務已成功取消並釋放資源"}
+
     async def start_record(self, duration_sec: int) -> str:
         """Validate and spawn recording background task."""
         if self.status.state in ("recording", "processing"):
-            raise ValueError(f"盒子目前正處於 {self.status.state} 狀態，請等待完成。")
+            raise ValueError(f"盒子目前正處於 {self.status.state} 狀態，請等待完成或點擊取消。")
+
+        # Reset cancellation tokens
+        self._cancellation_token.clear()
+        self._thread_cancellation_token.clear()
+        self._current_ffmpeg_proc = None
 
         job_id = f"m_{int(time.time())}"
         self.status = JobStatus(
@@ -287,18 +347,33 @@ class MeetingJobManager:
                 except Exception:
                     pass
 
+            def _on_proc(proc):
+                self._current_ffmpeg_proc = proc
+
             record_task = asyncio.create_task(
-                record_audio_from_mic(duration_sec, raw_ogg, vu_callback=_on_vu)
+                record_audio_from_mic(
+                    duration_sec,
+                    raw_ogg,
+                    vu_callback=_on_vu,
+                    cancellation_event=self._cancellation_token,
+                    on_proc_started=_on_proc
+                )
             )
 
             # Progress ticker during recording
             while not record_task.done():
+                if self._cancellation_token.is_set():
+                    break
                 elapsed = time.time() - t0
                 self.status.elapsed = round(elapsed, 1)
                 self.status.progress = min(100, int((elapsed / duration_sec) * 100))
                 self.status.eta = max(0.0, float(duration_sec - elapsed))
                 self.notify_status_update()
                 await asyncio.sleep(0.5)
+
+            if self._cancellation_token.is_set():
+                print("[MeetingMinutes] Recording aborted by cancellation token.")
+                return
 
             record_ok = await record_task
 
@@ -316,10 +391,16 @@ class MeetingJobManager:
                 })
             except Exception:
                 pass
+
             if not record_ok or not os.path.exists(raw_ogg) or os.path.getsize(raw_ogg) == 0:
+                if self._cancellation_token.is_set():
+                    return
                 raise RuntimeError("麥克風收音失敗，請確認藍牙耳麥已開機並保持連線。")
 
             # --- PHASE 2: Transcribe (Whisper STT) ---
+            if self._cancellation_token.is_set():
+                return
+
             self.status.state = "processing"
             self.status.phase = "transcribe"
             self.status.progress = 35
@@ -328,7 +409,16 @@ class MeetingJobManager:
             self.notify_status_update()
 
             # Execute faster-whisper in worker thread (full 4 threads, zero-contention)
-            transcript = await asyncio.to_thread(speech_to_text, raw_ogg)
+            transcript = await asyncio.to_thread(
+                speech_to_text,
+                raw_ogg,
+                self._thread_cancellation_token
+            )
+
+            if self._cancellation_token.is_set():
+                print("[MeetingMinutes] Transcribe aborted by cancellation token.")
+                return
+
             if not transcript or not transcript.strip():
                 transcript = "（錄音結束，未能從耳麥中辨識出清晰人聲語音）"
 
@@ -343,6 +433,9 @@ class MeetingJobManager:
             )
 
             # --- PHASE 3: Summarize (Ollama Meeting Minutes LLM) ---
+            if self._cancellation_token.is_set():
+                return
+
             self.status.phase = "summarize"
             self.status.progress = 75
             self.status.eta = 20.0
@@ -350,6 +443,9 @@ class MeetingJobManager:
             self.notify_status_update()
 
             raw_markdown = await self._generate_summary_llm(transcript)
+            if self._cancellation_token.is_set():
+                return
+
             parsed = parse_markdown_minutes(raw_markdown)
 
             formatted_dt = start_dt.strftime("%m-%d %H:%M")
@@ -379,10 +475,12 @@ class MeetingJobManager:
             self.notify_status_update()
 
         except asyncio.CancelledError:
-            self.status.state = "error"
-            self.status.msg = "錄音與處理任務已被取消。"
+            self.status.state = "idle"
+            self.status.msg = "任務已手動中斷。"
             self.notify_status_update()
         except Exception as e:
+            if self._cancellation_token.is_set():
+                return
             self.status.state = "error"
             self.status.msg = f"處理失敗: {str(e)}"
             self.notify_status_update()
@@ -489,6 +587,56 @@ class MeetingJobManager:
             return "（未能成功取得模型摘要）"
 
         return await asyncio.to_thread(_call_ollama)
+
+    async def transcribe_region(self, job_id: Optional[str], start_sec: float, end_sec: float) -> Dict[str, Any]:
+        """
+        Transcribe a specific time window from cached meeting audio.
+        Task 12: 互動式音訊波形視覺化與剪輯 (Waveform Visualizer & Trimming - Wavesurfer.js)
+        """
+        target_ogg = None
+        if job_id:
+            cand = os.path.join(AUDIO_CACHE_DIR, f"{job_id}.ogg")
+            if os.path.exists(cand):
+                target_ogg = cand
+
+        if not target_ogg and self.result and self.result.job:
+            cand = os.path.join(AUDIO_CACHE_DIR, f"{self.result.job}.ogg")
+            if os.path.exists(cand):
+                target_ogg = cand
+
+        if not target_ogg:
+            # Find most recently modified .ogg file in audio cache
+            try:
+                ogg_files = [
+                    os.path.join(AUDIO_CACHE_DIR, f) for f in os.listdir(AUDIO_CACHE_DIR)
+                    if f.endswith(".ogg") and not f.startswith("tts_")
+                ]
+                if ogg_files:
+                    ogg_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+                    target_ogg = ogg_files[0]
+            except Exception:
+                pass
+
+        if not target_ogg or not os.path.exists(target_ogg):
+            raise ValueError("找不到可供剪輯轉錄的音訊母帶，請先進行錄音。")
+
+        print(f"[MeetingMinutes] Transcribing audio region {start_sec:.2f}s - {end_sec:.2f}s from {target_ogg}")
+        transcript = await asyncio.to_thread(
+            speech_to_text,
+            target_ogg,
+            self._thread_cancellation_token,
+            start_sec,
+            end_sec
+        )
+
+        clean_text = transcript.strip() if transcript else "（所選範圍內未檢測到清晰人聲語音）"
+        return {
+            "status": "success",
+            "job_id": job_id or (self.result.job if self.result else "latest"),
+            "start_sec": start_sec,
+            "end_sec": end_sec,
+            "transcript": clean_text
+        }
 
 
 # Global singleton instance

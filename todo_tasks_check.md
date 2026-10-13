@@ -10,9 +10,9 @@
 ## 📊 整體進度統計 (Overall Progress)
 
 - **總規劃任務 (Total Tasks):** 30 項
-- **已完整實裝並驗收上線 (Fully Completed):** **9 項** (30%)
+- **已完整實裝並驗收上線 (Fully Completed):** **11 項** (37%)
 - **部分實裝具備核心模組 (Partially Completed):** **3 項** (10%)
-- **待後續迭代實作 (Backlog / To-Do):** **18 項** (60%)
+- **待後續迭代實作 (Backlog / To-Do):** **16 項** (53%)
 - **額外完成關鍵專案增強 (Extra System Enhancements):** **4 項** (藍牙 Hub SPA、Captive Portal 攔截、窄螢幕響應式佈局、PipeWire 精準拓撲解析)
 
 ---
@@ -64,11 +64,20 @@
     3. 實裝嚴格動態請求排除機制：精準排除 `/api/`、`/audio/`、`/ws/` 等動態遙測與即時串流端點，防止遙測狀態與音訊被快取污染。
     4. 後端 FastAPI 掛載 `/sw.js`、`/service-worker.js` 與 `/manifest.json`，並配置 `Service-Worker-Allowed: /` 與 `Cache-Control: no-cache` 標頭，徹底解決 Service Worker Scope 與版本更迭問題。
 
-- [ ] **Task 11: 異步工作佇列與取消權杖 (Job Queue & Cancellation Token)**
-  - **狀態:** 待辦。目前後端為單任務狀態機，尚未實作多任務工作佇列與中斷取消權杖。
+- [x] **Task 11: 異步工作佇列與取消權杖 (Job Queue & Cancellation Token)** ✅ *(已實裝)*
+  - **實作模組:** `code_dispatcher/voice_pipeline.py`, `code_dispatcher/meeting_minutes.py`, `code_dispatcher/main.py`, `code_dispatcher/ui_client.html`, `code_dispatcher/static/index.html`
+  - **成效與狀態:** 
+    1. 實裝 `cancellation_token` (支援 `asyncio.Event` 與 `threading.Event`)。
+    2. 錄音期間取消時立即中斷 `ffmpeg` 子行程並釋放硬體音訊節點；Whisper 推論期間每段 segment 迭代時檢核取消權杖並中途跳出；LLM 階段終止串流，徹底根除無效運算霸佔 4 核心 CPU 的難題。
+    3. 暴露 `POST /api/record/cancel` 與 `POST /api/job/cancel` API 端點。前端進度條右側配置一鍵紅色 ⛔ **「取消」** 按鈕，點擊後即時重設管線狀態機為 `idle` 並廣播 WebSocket 歸位。
 
-- [ ] **Task 12: 互動式音訊波形視覺化與剪輯 (Waveform Visualizer & Trimming - Wavesurfer.js)**
-  - **狀態:** 待辦。
+- [x] **Task 12: 互動式音訊波形視覺化與剪輯 (Waveform Visualizer & Trimming - Wavesurfer.js)** ✅ *(已實裝)*
+  - **實作模組:** `code_dispatcher/static/vendor/wavesurfer.min.js`, `code_dispatcher/static/vendor/regions.min.js`, `code_dispatcher/ui_client.html`, `code_dispatcher/static/index.html`, `code_dispatcher/main.py`, `code_dispatcher/meeting_minutes.py`, `code_dispatcher/voice_pipeline.py`
+  - **成效與狀態:** 
+    1. 整合輕量版離線 `wavesurfer.min.js` (41KB) 與 `regions.min.js` (16KB) 至本機 vendor 目錄，無外部 CDN 依賴，100% 符合 PWA 離線熱點運作要求。
+    2. 錄音完成後自動呼叫 `/api/audio/latest` 掛載最新母帶，繪製現代化雙色音訊波形圖，支援播放、暫停、停止、點擊跳轉 (Seek) 與實時播放時間軸。
+    3. 實裝波形滑鼠拖曳選區剪輯功能 (Regions Plugin) 與局部試聽 (`playSelectedRegion()`)。
+    4. 實裝選區局部轉錄 (`POST /api/transcribe/region`)：在記憶體中快速裁切選定秒數範圍的 16kHz PCM 送交 Whisper 轉錄，無需全軌重新處理。
 
 - [ ] **Task 13: 雙語字幕時間軸對齊 (Bilingual Subtitle Sync & SRT/VTT Alignment)**
   - **狀態:** 待辦。

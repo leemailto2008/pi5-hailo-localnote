@@ -3,14 +3,16 @@
  * Version: localnote-v1 (Task 10: 漸進式 Web 應用程式離線快取)
  */
 
-const CACHE_NAME = 'localnote-cache-v1';
+const CACHE_NAME = 'localnote-cache-v1.1';
 const PRECACHE_RESOURCES = [
   '/',
   '/static/index.html',
   '/static/manifest.json',
   '/static/icon-192.png',
   '/static/icon-512.png',
-  '/static/wifi.png'
+  '/static/wifi.png',
+  '/static/vendor/wavesurfer.min.js',
+  '/static/vendor/regions.min.js'
 ];
 
 // 安裝階段：預快取核心外殼資源 (Shell Resources)

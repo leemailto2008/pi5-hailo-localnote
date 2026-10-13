@@ -15,6 +15,8 @@
 <link rel="manifest" href="/manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
 <link rel="apple-touch-icon" href="/static/icon-192.png">
+<script src="/static/vendor/wavesurfer.min.js"></script>
+<script src="/static/vendor/regions.min.js"></script>
 <style>
 /* ============================================================
    LocalNote Demo UI · 工程版 (含藍牙音訊設備管理中心)
@@ -212,7 +214,13 @@ details[open] summary::after{content:"收起 ▴"}
             <p class="hint" id="hint">戴上耳麥，按下紅色按鈕開始說。時間到自動停，盒子接著整理成紀要。</p>
           </div>
           <div class="progress" id="progress" hidden>
-            <div class="row"><span class="label">進度</span><b id="pTitle">—</b><span class="spacer"></span><span id="pEta"></span></div>
+            <div class="row" style="align-items:center;">
+              <span class="label">進度</span>
+              <b id="pTitle">—</b>
+              <span class="spacer"></span>
+              <span id="pEta"></span>
+              <button class="btn ghost danger" id="btnCancelJob" onclick="cancelActiveJob()" style="padding:3px 8px;font-size:12px;margin-left:6px;border-color:var(--rec);color:var(--rec);" title="立即終止錄音或背景推論">⛔ 取消</button>
+            </div>
             <div class="bar"><i id="pBar"></i></div>
             <span id="pSteps" style="font-size:13px"></span>
 
@@ -271,6 +279,48 @@ details[open] summary::after{content:"收起 ▴"}
       <!-- ================= 輸出 ================= -->
       <section class="col out" id="secMinutes">
         <span class="tag out">輸出</span>
+
+        <!-- Task 12: 互動式音訊波形視覺化與剪輯 (Waveform Visualizer & Trimming - Wavesurfer.js) -->
+        <div class="card out" id="waveformCard" hidden style="margin-bottom:12px;">
+          <div class="row" style="align-items:center;">
+            <h3 style="margin:0;font-size:14px;display:inline-flex;align-items:center;gap:6px;">
+              <span>🎧 錄音母帶波形與剪輯</span>
+            </h3>
+            <span class="spacer"></span>
+            <span class="chip" id="waveTimeDisplay" style="font-family:monospace;font-size:11px;">00:00 / 00:00</span>
+          </div>
+
+          <div id="waveform" style="margin:8px 0;background:var(--set-bg);border-radius:10px;padding:8px;min-height:72px;"></div>
+
+          <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;">
+            <button class="btn ghost" id="btnWavePlayPause" onclick="toggleWavePlay()" style="padding:5px 12px;font-size:13px;">
+              <span id="wavePlayIcon">▶ 播放</span>
+            </button>
+            <button class="btn ghost" id="btnWaveStop" onclick="stopWavePlay()" style="padding:5px 10px;font-size:13px;">
+              ⏹ 停止
+            </button>
+            <span class="spacer"></span>
+            <div style="display:inline-flex;align-items:center;gap:6px;font-size:12px;">
+              <span id="regionLabel" style="color:var(--muted)">選取區間: 全段</span>
+              <button class="btn ghost" id="btnPlayRegion" onclick="playSelectedRegion()" style="padding:4px 8px;font-size:12px;" disabled>
+                ▶ 播選區
+              </button>
+              <button class="btn primary" id="btnTranscribeRegion" onclick="transcribeSelectedRegion()" style="padding:4px 10px;font-size:12px;" disabled>
+                ✂️ 局部轉錄
+              </button>
+            </div>
+          </div>
+
+          <div id="regionTranscriptBox" style="margin-top:10px;font-size:13px;background:var(--set-bg);border:1px dashed var(--line);border-radius:8px;padding:8px 12px;display:none;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;color:var(--op);font-weight:600;">
+              <span>✂️ 局部轉錄結果 (<span id="regionSpan"></span>):</span>
+              <span class="spacer"></span>
+              <button class="btn ghost" style="padding:2px 6px;font-size:11px;" onclick="closeRegionTranscript()">關閉</button>
+            </div>
+            <div id="regionTranscriptText" style="color:var(--fg);line-height:1.6;white-space:pre-wrap;"></div>
+          </div>
+        </div>
+
         <div class="card out">
           <div class="row">
             <h2>會議紀要</h2>
@@ -379,7 +429,9 @@ const API = {
   btAuto: '/api/bt/trusted/auto_connect',
   record: '/api/record', status: '/api/status',
   result: '/api/result', regenerate: '/api/regenerate', translate: '/api/translate',
-  tts: '/api/tts', netSwitch: '/api/net/switch'
+  tts: '/api/tts', netSwitch: '/api/net/switch',
+  cancelJob: '/api/record/cancel', transcribeRegion: '/api/transcribe/region',
+  latestAudio: '/api/audio/latest'
 };
 const POLL_MS = 1500;
 const q = new URLSearchParams(location.search);
@@ -981,8 +1033,205 @@ async function loadResult() {
     renderMinutes(result);
     el.copyBtn.disabled = !result.markdown;
     el.regenBtn.disabled = false; el.toEnBtn.disabled = false; el.toZhBtn.disabled = false;
+    loadAudioWaveform(result?.job);
   } catch (e) { toast('讀取紀要失敗'); }
 }
+
+/* ---------- Task 11: 異步工作佇列與取消權杖 (Job Queue & Cancellation Token) ---------- */
+async function cancelActiveJob() {
+  try {
+    toast('正在中斷任務並釋放硬體資源...');
+    await api(API.cancelJob, {});
+    toast('任務已手動中斷');
+    setState('idle');
+    renderProgress({ state: 'idle' });
+  } catch (e) {
+    toast('中斷失敗：' + e.message);
+  }
+}
+
+/* ---------- Task 12: Wavesurfer 音訊波形試聽與區間剪輯 ---------- */
+let wavesurfer = null;
+let wsRegions = null;
+let currentRegion = null;
+let activeAudioUrl = null;
+
+function initWaveSurfer() {
+  if (wavesurfer) return;
+  const container = document.getElementById('waveform');
+  if (!container || typeof WaveSurfer === 'undefined') return;
+
+  try {
+    wavesurfer = WaveSurfer.create({
+      container: '#waveform',
+      waveColor: '#627d98',
+      progressColor: '#0f766e',
+      cursorColor: '#d9534f',
+      cursorWidth: 2,
+      barWidth: 3,
+      barGap: 2,
+      barRadius: 2,
+      height: 64,
+      normalize: true
+    });
+
+    const RegionPluginClass = window.RegionsPlugin || (WaveSurfer.Regions ? WaveSurfer.Regions : null);
+    if (RegionPluginClass && typeof RegionPluginClass.create === 'function') {
+      wsRegions = wavesurfer.registerPlugin(RegionPluginClass.create());
+
+      wsRegions.on('region-created', (region) => {
+        wsRegions.getRegions().forEach(r => {
+          if (r !== region) r.remove();
+        });
+        currentRegion = region;
+        updateRegionUI(region);
+      });
+
+      wsRegions.on('region-updated', (region) => {
+        currentRegion = region;
+        updateRegionUI(region);
+      });
+
+      wsRegions.on('region-clicked', (region, e) => {
+        e.stopPropagation();
+        region.play();
+      });
+    }
+
+    wavesurfer.on('audioprocess', () => updateWaveTime());
+    wavesurfer.on('seeking', () => updateWaveTime());
+    wavesurfer.on('play', () => {
+      const icon = document.getElementById('wavePlayIcon');
+      if (icon) icon.textContent = '⏸ 暫停';
+    });
+    wavesurfer.on('pause', () => {
+      const icon = document.getElementById('wavePlayIcon');
+      if (icon) icon.textContent = '▶ 播放';
+    });
+    wavesurfer.on('finish', () => {
+      const icon = document.getElementById('wavePlayIcon');
+      if (icon) icon.textContent = '▶ 播放';
+    });
+    wavesurfer.on('ready', () => {
+      updateWaveTime();
+      if (wsRegions && typeof wsRegions.enableDragSelection === 'function') {
+        wsRegions.enableDragSelection({
+          color: 'rgba(15, 118, 110, 0.22)'
+        });
+      }
+    });
+  } catch (err) {
+    console.warn('[WaveSurfer] Init error:', err);
+  }
+}
+
+function updateWaveTime() {
+  if (!wavesurfer) return;
+  const cur = wavesurfer.getCurrentTime();
+  const dur = wavesurfer.getDuration();
+  const elTime = document.getElementById('waveTimeDisplay');
+  if (elTime) elTime.textContent = `${fmt(cur)} / ${fmt(dur)}`;
+}
+
+function toggleWavePlay() {
+  if (!wavesurfer) return;
+  wavesurfer.playPause();
+}
+
+function stopWavePlay() {
+  if (!wavesurfer) return;
+  wavesurfer.stop();
+  const icon = document.getElementById('wavePlayIcon');
+  if (icon) icon.textContent = '▶ 播放';
+  updateWaveTime();
+}
+
+function updateRegionUI(region) {
+  const lbl = document.getElementById('regionLabel');
+  const btnPlay = document.getElementById('btnPlayRegion');
+  const btnTrans = document.getElementById('btnTranscribeRegion');
+  if (region) {
+    if (lbl) lbl.textContent = `選取區間: ${fmt(region.start)} ~ ${fmt(region.end)}`;
+    if (btnPlay) btnPlay.disabled = false;
+    if (btnTrans) btnTrans.disabled = false;
+  } else {
+    if (lbl) lbl.textContent = '選取區間: 全段';
+    if (btnPlay) btnPlay.disabled = true;
+    if (btnTrans) btnTrans.disabled = true;
+  }
+}
+
+function playSelectedRegion() {
+  if (currentRegion) {
+    currentRegion.play();
+  }
+}
+
+async function transcribeSelectedRegion() {
+  if (!currentRegion) {
+    toast('請先在波形圖上拖曳滑鼠選取欲轉錄的時間區間');
+    return;
+  }
+  const btn = document.getElementById('btnTranscribeRegion');
+  if (btn) btn.disabled = true;
+  toast(`正在局部聽寫 (${fmt(currentRegion.start)} ~ ${fmt(currentRegion.end)})...`);
+
+  try {
+    const res = await api(API.transcribeRegion, {
+      job_id: result?.job || null,
+      start_sec: currentRegion.start,
+      end_sec: currentRegion.end
+    });
+
+    const box = document.getElementById('regionTranscriptBox');
+    const span = document.getElementById('regionSpan');
+    const text = document.getElementById('regionTranscriptText');
+    if (box && span && text) {
+      span.textContent = `${fmt(currentRegion.start)} ~ ${fmt(currentRegion.end)}`;
+      text.textContent = res.transcript || '（所選範圍內未檢測到清晰人聲語音）';
+      box.style.display = 'block';
+    }
+    toast('局部轉錄完成！');
+  } catch (e) {
+    toast('局部轉錄失敗：' + e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function closeRegionTranscript() {
+  const box = document.getElementById('regionTranscriptBox');
+  if (box) box.style.display = 'none';
+}
+
+async function loadAudioWaveform(jobId) {
+  try {
+    const res = await api(API.latestAudio);
+    if (res.status === 'success' && res.audio_url) {
+      const waveCard = document.getElementById('waveformCard');
+      if (waveCard) waveCard.hidden = false;
+      initWaveSurfer();
+      if (wavesurfer && activeAudioUrl !== res.audio_url) {
+        activeAudioUrl = res.audio_url;
+        wavesurfer.load(res.audio_url);
+        if (wsRegions && typeof wsRegions.clearRegions === 'function') {
+          wsRegions.clearRegions();
+        }
+        currentRegion = null;
+        updateRegionUI(null);
+      }
+    }
+  } catch (e) {
+    console.warn('[WaveSurfer] Load error:', e);
+  }
+}
+
+window.cancelActiveJob = cancelActiveJob;
+window.toggleWavePlay = toggleWavePlay;
+window.stopWavePlay = stopWavePlay;
+window.playSelectedRegion = playSelectedRegion;
+window.transcribeSelectedRegion = transcribeSelectedRegion;
+window.closeRegionTranscript = closeRegionTranscript;
 function renderMinutes(r) {
   if (!r || (!r.summary && !r.todos)) { el.minutes.innerHTML = '<div class="empty">還沒有紀要。</div>'; return; }
   const when = r.started_at ? new Date(r.started_at) : null;
