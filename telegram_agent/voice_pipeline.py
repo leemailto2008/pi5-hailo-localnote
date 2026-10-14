@@ -330,7 +330,7 @@ async def ensure_bluetooth_recording_ready() -> str:
         return "default"
 
 
-async def record_audio_from_mic(duration_sec: int, output_path: str) -> bool:
+async def record_audio_from_mic(duration_sec: int, output_path: str, *args, **kwargs) -> bool:
     """
     Record audio from Bluetooth headset mic using ffmpeg with explicit hardware source routing.
     Uses clean 16kHz resampling with highpass filter to eliminate sub-bass rumble and avoid clipping.

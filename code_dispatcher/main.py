@@ -57,8 +57,12 @@ except ImportError:
 os.environ.setdefault("XDG_RUNTIME_DIR", "/run/user/1000")
 os.environ.setdefault("PULSE_SERVER", "unix:/run/user/1000/pulse/native")
 
-# Ensure task functions and telegram_agent modules can be imported
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Ensure code_dispatcher directory has absolute highest priority in sys.path
+_code_dispatcher_dir = os.path.dirname(os.path.abspath(__file__))
+if _code_dispatcher_dir in sys.path:
+    sys.path.remove(_code_dispatcher_dir)
+sys.path.insert(0, _code_dispatcher_dir)
+
 agent_candidate_dirs = [
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "telegram_agent")),
     "/home/pi/pi5-llm-arena/telegram_agent",
@@ -67,7 +71,7 @@ agent_candidate_dirs = [
 ]
 for d in agent_candidate_dirs:
     if os.path.exists(d) and d not in sys.path:
-        sys.path.insert(0, d)
+        sys.path.append(d)
 
 from tasks import analyze_code_task
 
@@ -506,7 +510,7 @@ _possible_agent_dirs = [
 ]
 for d in _possible_agent_dirs:
     if os.path.exists(d) and d not in sys.path:
-        sys.path.insert(0, d)
+        sys.path.append(d)
 
 from voice_memory import get_in_memory_cache_dir, evict_audio_ring_buffer, get_cache_stats
 

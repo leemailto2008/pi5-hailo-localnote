@@ -17,14 +17,16 @@ import requests
 from pydantic import BaseModel, Field
 import sys
 
-# Ensure current module and telegram_agent directories are in sys.path
+# Ensure current module directory has highest priority in sys.path
 _cur_dir = os.path.dirname(os.path.abspath(__file__))
-if _cur_dir not in sys.path:
-    sys.path.insert(0, _cur_dir)
+if _cur_dir in sys.path:
+    sys.path.remove(_cur_dir)
+sys.path.insert(0, _cur_dir)
 
+# Append telegram_agent to end of sys.path so it never shadows code_dispatcher modules
 _agent_dir = os.path.abspath(os.path.join(_cur_dir, "..", "telegram_agent"))
 if os.path.exists(_agent_dir) and _agent_dir not in sys.path:
-    sys.path.insert(0, _agent_dir)
+    sys.path.append(_agent_dir)
 
 from voice_memory import get_in_memory_cache_dir
 from voice_pipeline import record_audio_from_mic, speech_to_text
