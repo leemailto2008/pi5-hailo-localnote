@@ -916,7 +916,7 @@
             <div class="network-actions">
                 <button class="btn-net-switch" id="btnNetSwitch" onclick="handleNetworkToggle()">
                     <span id="btnNetSwitchIcon">📡</span>
-                    <span id="btnNetSwitchText">切換為方案 A 熱點 (raspi543_AI / 10.20.0.1)</span>
+                    <span id="btnNetSwitchText">切換為獨立熱點模式 (10.20.0.1)</span>
                 </button>
             </div>
         </div>
@@ -1878,6 +1878,8 @@
 
         // Network Switcher
         let currentNetMode = "sta";
+        let currentHotspotSSID = 'raspi543_AI';
+        let currentHostname = 'raspi543';
 
         async function fetchNetworkStatus() {
             try {
@@ -1885,6 +1887,8 @@
                 if (!res.ok) return;
                 const data = await res.json();
                 currentNetMode = data.mode;
+                if (data.hotspot_ssid) currentHotspotSSID = data.hotspot_ssid;
+                if (data.hostname) currentHostname = data.hostname;
 
                 const badge = document.getElementById('netBadge');
                 const title = document.getElementById('netModeTitle');
@@ -1896,15 +1900,15 @@
                     badge.className = 'net-badge ap';
                     badge.innerText = 'AP 獨立熱點';
                     title.innerText = '戶外 / 飛航獨立熱點模式 (Offline Edge)';
-                    details.innerText = `熱點 IP: ${data.current_ip || '10.20.0.1'} | SSID: ${data.hotspot_ssid || 'raspi543_AI'}`;
+                    details.innerText = `熱點 IP: ${data.current_ip || '10.20.0.1'} | SSID: ${currentHotspotSSID}`;
                     btnText.innerText = '切換回家用 Wi-Fi';
                     btnIcon.innerText = '🏠';
                 } else {
                     badge.className = 'net-badge sta';
                     badge.innerText = 'STA 家用連線';
-                    title.innerText = '家用 Wi-Fi 模式 (Online Gateway)';
+                    title.innerText = `家用 Wi-Fi 模式 (${currentHostname})`;
                     details.innerText = `區域 IP: ${data.current_ip || '192.168.50.228'} | 連線: ${data.active_connection}`;
-                    btnText.innerText = '切換為方案 A 熱點 (raspi543_AI)';
+                    btnText.innerText = `切換為方案 A 熱點 (${currentHotspotSSID})`;
                     btnIcon.innerText = '📡';
                 }
             } catch (e) {
@@ -1933,8 +1937,8 @@
             const btn = document.getElementById('btnNetSwitch');
 
             let confirmMsg = targetMode === 'ap'
-                ? "即將切換至【獨立熱點模式 (10.20.0.1)】！\n\n🛡️【防失聯看門狗已啟動】\n• 系統配有 180 秒故障保險：若 3 分鐘內未有手機連線，樹莓派將自動回退連回家中 Wi-Fi，絕不失聯！\n\n切換後操作：\n1. 手機連線 Wi-Fi：raspi543_AI (密碼 raspi543)\n2. 瀏覽器造訪：http://10.20.0.1 (免打 :8000)\n\n確定切換嗎？"
-                : "即將切換回【家用 Wi-Fi 模式 (192.168.50.228)】！\n\n確定切換嗎？";
+                ? `即將切換至【獨立熱點模式 (10.20.0.1)】！\n\n🛡️【防失聯看門狗已啟動】\n• 系統配有 180 秒故障保險：若 3 分鐘內未有手機連線，樹莓派將自動回退連回家中 Wi-Fi，絕不失聯！\n\n切換後操作：\n1. 手機連線 Wi-Fi：${currentHotspotSSID} (密碼 ${currentHostname})\n2. 瀏覽器造訪：http://10.20.0.1 (免打 :8000)\n\n確定切換嗎？`
+                : `即將切換回【家用 Wi-Fi 模式】！\n\n確定切換嗎？`;
 
             if (!confirm(confirmMsg)) return;
 
@@ -1948,9 +1952,9 @@
                     body: JSON.stringify({ target_mode: targetMode })
                 });
                 const data = await res.json();
-                alert(`✅ ${data.message || '切換指令已接收！'}\n\n• 若切至熱點：請連線 raspi543_AI，造訪 http://10.20.0.1\n• 🛡️ 若 3 分鐘內未連線，系統將自動復歸家用 Wi-Fi！`);
+                alert(`✅ ${data.message || '切換指令已接收！'}\n\n• 若切至熱點：請連線 ${currentHotspotSSID}，造訪 http://10.20.0.1\n• 🛡️ 若 3 分鐘內未連線，系統將自動復歸家用 Wi-Fi！`);
             } catch (err) {
-                alert(`📡 網路指令已送出！\n\n• 若切至熱點：請連線 raspi543_AI，造訪 http://10.20.0.1\n• 🛡️ 若 3 分鐘內未連線，系統將自動復歸家用 Wi-Fi！`);
+                alert(`📡 網路指令已送出！\n\n• 若切至熱點：請連線 ${currentHotspotSSID}，造訪 http://10.20.0.1\n• 🛡️ 若 3 分鐘內未連線，系統將自動復歸家用 Wi-Fi！`);
             } finally {
                 setTimeout(fetchNetworkStatus, 3000);
             }

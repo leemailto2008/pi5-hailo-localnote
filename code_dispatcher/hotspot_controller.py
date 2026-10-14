@@ -56,7 +56,7 @@ def switch_to_ap(timeout_sec: int = 180):
             subprocess.run(["sudo", "nmcli", "connection", "up", STA_PROFILE], capture_output=True, timeout=25)
         else:
             enable_hotspot_guard()
-            print("[HotspotController] AP successfully online and broadcasting raspi543_AI!")
+            print("[HotspotController] AP successfully online and broadcasting Hotspot!")
 
     threading.Thread(target=_worker, daemon=True).start()
 

@@ -12,8 +12,12 @@ import re
 import time
 import json
 import asyncio
+import socket
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+
+SYSTEM_HOSTNAME = socket.gethostname()
+DEFAULT_HOTSPOT_SSID = f"{SYSTEM_HOSTNAME}_AI" if SYSTEM_HOSTNAME not in ("raspberrypi", "localhost") else "raspi543_AI"
 
 logger = logging.getLogger("pi5-dispatcher")
 
@@ -419,8 +423,9 @@ def get_network_status() -> Dict[str, Any]:
         "mode": mode,
         "active_connection": active_conn,
         "current_ip": current_ip,
+        "hostname": SYSTEM_HOSTNAME,
         "hotspot_gateway_ip": "10.20.0.1",
-        "hotspot_ssid": "raspi543_AI",
+        "hotspot_ssid": DEFAULT_HOTSPOT_SSID,
         "sta_ssid": "My_5G_Guest1"
     }
 
@@ -437,7 +442,7 @@ def switch_network_mode(req: NetworkSwitchRequest) -> Dict[str, Any]:
             detail="target_mode must be 'ap' (hotspot) or 'sta' (client WiFi)"
         )
 
-    profile_name = "Pi5-Hotspot (raspi543_AI)" if target == "ap" else "My_5G_Guest1"
+    profile_name = f"Pi5-Hotspot ({DEFAULT_HOTSPOT_SSID})" if target == "ap" else "My_5G_Guest1"
     new_ip = "10.20.0.1" if target == "ap" else "192.168.50.228"
 
     if target == "ap":
@@ -1247,8 +1252,9 @@ def get_demo_system() -> Dict[str, Any]:
         "cpu": minutes_manager.get_cpu_load(),
         "temp": minutes_manager.get_temperature(),
         "mode": minutes_manager.get_network_mode(),
-        "ssid": "raspi543_AI",
-        "host": "localnote.local",
+        "hostname": SYSTEM_HOSTNAME,
+        "ssid": DEFAULT_HOTSPOT_SSID,
+        "host": f"{SYSTEM_HOSTNAME}.local",
         "wifi_qr": "/static/wifi.png" if os.path.exists(qr_path) else None
     }
 
@@ -1438,8 +1444,9 @@ async def ws_telemetry_loop():
                 "cpu": minutes_manager.get_cpu_load(),
                 "temp": minutes_manager.get_temperature(),
                 "mode": minutes_manager.get_network_mode(),
-                "ssid": "raspi543_AI",
-                "host": "localnote.local",
+                "hostname": SYSTEM_HOSTNAME,
+                "ssid": DEFAULT_HOTSPOT_SSID,
+                "host": f"{SYSTEM_HOSTNAME}.local",
                 "wifi_qr": "/static/wifi.png" if os.path.exists(qr_path) else None
             }
             await ws_manager.broadcast("system", sys_data)
@@ -1475,8 +1482,9 @@ async def websocket_status_endpoint(websocket: WebSocket):
             "cpu": minutes_manager.get_cpu_load(),
             "temp": minutes_manager.get_temperature(),
             "mode": minutes_manager.get_network_mode(),
-            "ssid": "raspi543_AI",
-            "host": "localnote.local",
+            "hostname": SYSTEM_HOSTNAME,
+            "ssid": DEFAULT_HOTSPOT_SSID,
+            "host": f"{SYSTEM_HOSTNAME}.local",
             "wifi_qr": "/static/wifi.png" if os.path.exists(qr_path) else None
         }
         await ws_manager.send_personal(websocket, "system", sys_data)
