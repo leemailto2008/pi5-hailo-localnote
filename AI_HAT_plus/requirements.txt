@@ -1,0 +1,10 @@
+# AI_HAT_plus/requirements.txt
+# Raspberry Pi AI HAT+ (Hailo-8 / Hailo-10H) STT 異質管線套件清單
+# 註：hailort (PyHailoRT) 由官方 Debian 套件 'python3-hailort' 原生提供
+
+numpy>=1.24.0
+soundfile>=0.12.1
+faster-whisper>=1.0.0
+pydantic>=2.0.0
+tqdm>=4.65.0
+requests>=2.28.0
