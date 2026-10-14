@@ -181,6 +181,7 @@ details[open] summary::after{content:"收起 ▴"}
   <span class="spacer"></span>
   <div class="topbar-pills" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
     <span class="pill net" id="netPill"><span class="dot"></span><span id="netText">檢查連線狀態…</span></span>
+    <span class="pill npu" id="npuPill" style="display:none;background:#e0f2fe;color:#0369a1;font-weight:700;border:1px solid #bae6fd">⚡ Hailo-8 (26 TOPS)</span>
     <span class="pill sys" id="sysPill">盒子：—</span>
   </div>
 </header>
@@ -441,7 +442,7 @@ if (q.get('dev') === '1') document.getElementById('devLinks').hidden = false;
 const $ = id => document.getElementById(id);
 const el = {
   viewMain: $('viewMain'), viewBt: $('viewBt'),
-  netPill: $('netPill'), netText: $('netText'), sysPill: $('sysPill'), btChip: $('btChip'), btText: $('btText'), btDetail: $('btDetail'),
+  netPill: $('netPill'), netText: $('netText'), npuPill: $('npuPill'), sysPill: $('sysPill'), btChip: $('btChip'), btText: $('btText'), btDetail: $('btDetail'),
   recBtn: $('recBtn'), recLabel: $('recLabel'), recSub: $('recSub'), dur: $('dur'), hint: $('hint'),
   progress: $('progress'), pTitle: $('pTitle'), pEta: $('pEta'), pBar: $('pBar'), pSteps: $('pSteps'),
   minutes: $('minutes'), transcriptBox: $('transcriptBox'), transcript: $('transcript'),
@@ -613,6 +614,14 @@ function updateSystemUI(s) {
   } else {
     el.netText.textContent = s.offline ? '離線運作 · 資料不出盒子' : '維護模式 · 有外網';
     el.sysPill.textContent = `盒子：${state === 'processing' ? '整理中' : state === 'recording' ? '錄音中' : '待命'} · 負載 ${Math.round(s.cpu)}% · ${Math.round(s.temp)}°C`;
+  }
+  if (el.npuPill) {
+    if (s.npu && s.npu.detected) {
+      el.npuPill.style.display = 'inline-flex';
+      el.npuPill.textContent = isNarrow ? '⚡ Hailo-8' : `⚡ Hailo-8 (${s.npu.tops || 26} TOPS)`;
+    } else {
+      el.npuPill.style.display = 'none';
+    }
   }
   if (s.ssid) el.ssid.textContent = s.ssid;
   if (s.host) el.host.textContent = s.host;

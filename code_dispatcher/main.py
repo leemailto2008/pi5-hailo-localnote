@@ -1251,6 +1251,25 @@ def get_demo_system() -> Dict[str, Any]:
     """Retrieve simplified system status for LocalNote client dashboard."""
     from meeting_minutes import minutes_manager
     qr_path = os.path.join(STATIC_DIR, "wifi.png")
+
+    # 探測 Hailo-8 NPU 狀態
+    npu_info = {"detected": False, "device": "CPU ARM Cortex-A76", "tops": 0}
+    try:
+        hailo_adapter_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "AI_HAT_plus"))
+        if os.path.exists(hailo_adapter_path) and hailo_adapter_path not in sys.path:
+            sys.path.append(hailo_adapter_path)
+        from hailo_engine.device_manager import is_hailo_available, HailoDeviceManager
+        if is_hailo_available():
+            info = HailoDeviceManager().get_info()
+            npu_info = {
+                "detected": True,
+                "device": "Raspberry Pi AI HAT+ (Hailo-8)",
+                "tops": 26,
+                "detail": info.get("device_type", "Hailo-8")
+            }
+    except Exception:
+        pass
+
     return {
         "offline": minutes_manager.offline_detector.is_offline,
         "cpu": minutes_manager.get_cpu_load(),
@@ -1259,7 +1278,8 @@ def get_demo_system() -> Dict[str, Any]:
         "hostname": SYSTEM_HOSTNAME,
         "ssid": DEFAULT_HOTSPOT_SSID,
         "host": f"{SYSTEM_HOSTNAME}.local",
-        "wifi_qr": "/static/wifi.png" if os.path.exists(qr_path) else None
+        "wifi_qr": "/static/wifi.png" if os.path.exists(qr_path) else None,
+        "npu": npu_info
     }
 
 

@@ -18,30 +18,39 @@ N_FRAMES = N_SAMPLES // HOP_LENGTH      # 3000 frames
 N_MELS = 80
 
 def load_audio_pcm(file_or_array: Union[str, np.ndarray]) -> np.ndarray:
-    """載入音訊並統一轉為 16kHz 單聲道 float32 浮點陣列"""
-    if isinstance(file_or_array, str):
-        if not os.path.exists(file_or_array):
-            raise FileNotFoundError(f"Audio file not found: {file_or_array}")
-        try:
-            import soundfile as sf
-        except ImportError:
-            raise ImportError("soundfile library is required to read audio files. Run 'pip install soundfile'.")
-        audio, sr = sf.read(file_or_array, dtype='float32')
-        if len(audio.shape) > 1:
-            audio = np.mean(audio, axis=1)  # 轉為單聲道
-        if sr != SAMPLE_RATE:
-            # 簡易等比例重採樣
-            indices = np.round(np.arange(0, len(audio), sr / SAMPLE_RATE)).astype(int)
-            indices = indices[indices < len(audio)]
-            audio = audio[indices]
-    elif isinstance(file_or_array, np.ndarray):
+    """載入音訊並統一轉為 16kHz 單聲道 float32 浮點陣列 (使用零磁碟 ffmpeg 記憶體管道)"""
+    if isinstance(file_or_array, np.ndarray):
         audio = file_or_array.astype(np.float32)
         if len(audio.shape) > 1:
             audio = np.mean(audio, axis=1)
-    else:
-        raise ValueError("Unsupported audio input type")
+        return audio
 
-    return audio
+    if isinstance(file_or_array, str):
+        if not os.path.exists(file_or_array):
+            raise FileNotFoundError(f"Audio file not found: {file_or_array}")
+
+        # 優先使用 code_dispatcher 的零磁碟 ffmpeg 解碼器
+        try:
+            import subprocess
+            cmd = ["ffmpeg", "-y", "-i", file_or_array, "-f", "s16le", "-ac", "1", "-ar", "16000", "-"]
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=15)
+            if proc.returncode == 0 and len(proc.stdout) >= 320:
+                return np.frombuffer(proc.stdout, dtype=np.int16).astype(np.float32) / 32768.0
+        except Exception:
+            pass
+
+        # 備用 soundfile
+        import soundfile as sf
+        audio, sr = sf.read(file_or_array, dtype='float32')
+        if len(audio.shape) > 1:
+            audio = np.mean(audio, axis=1)
+        if sr != SAMPLE_RATE:
+            indices = np.round(np.arange(0, len(audio), sr / SAMPLE_RATE)).astype(int)
+            indices = indices[indices < len(audio)]
+            audio = audio[indices]
+        return audio
+
+    raise ValueError("Unsupported audio input type")
 
 def pad_or_trim(audio: np.ndarray, length: int = N_SAMPLES) -> np.ndarray:
     """將音訊填充或截斷至標準 30 秒長度 (480,000 採樣點)"""

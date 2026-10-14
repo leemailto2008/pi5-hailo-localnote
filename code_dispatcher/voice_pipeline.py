@@ -6,6 +6,7 @@ Bi-directional Voice Pipeline for Raspberry Pi 5:
 """
 
 import os
+import sys
 import asyncio
 import subprocess
 from typing import Optional, Any, Callable, Dict
@@ -152,6 +153,29 @@ def speech_to_text(
     if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
         print(f"[VoicePipeline] Audio file missing or empty: {audio_path}")
         return None
+
+    # ---------------------------------------------------------
+    # 🚀 AI HAT+ (Hailo-8 NPU 26 TOPS) 硬體加速與自動探測切換
+    # ---------------------------------------------------------
+    if start_sec is None and end_sec is None:
+        try:
+            hailo_adapter_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "AI_HAT_plus"))
+            if os.path.exists(hailo_adapter_path) and hailo_adapter_path not in sys.path:
+                sys.path.append(hailo_adapter_path)
+            
+            from hailo_engine.device_manager import is_hailo_available
+            if is_hailo_available():
+                from hailo_engine.whisper_adapter import get_whisper_engine
+                engine = get_whisper_engine(auto_detect=True, model_size="base")
+                if "Hailo" in engine.get_engine_type():
+                    print("[VoicePipeline] ⚡ 探測到 Hailo-8 NPU (26 TOPS)！啟動硬體加速聽寫...")
+                    res = engine.transcribe(audio_path, language="zh", cancellation_event=cancellation_event)
+                    if res and res.get("text"):
+                        text = to_taiwan_traditional(res["text"])
+                        print(f"[VoicePipeline] ⚡ Hailo-8 轉錄完成: '{text}' (耗時: {res.get('duration_sec', 0):.2f}s, RTF: {res.get('rtf', 0):.2f})")
+                        return text
+        except Exception as hailo_err:
+            print(f"[VoicePipeline] Hailo-8 硬體轉錄異常，自動平滑降級至 CPU: {hailo_err}")
 
     try:
         from voice_memory import audio_to_pcm_array
