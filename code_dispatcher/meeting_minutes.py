@@ -401,6 +401,61 @@ class MeetingJobManager:
                 except Exception:
                     pass
 
+            # --- 雙工即時串流聽寫佇列與工作者 (Concurrent Streaming STT via NPU) ---
+            chunk_queue: asyncio.Queue = asyncio.Queue()
+            accumulated_chunks: List[str] = []
+            streaming_active = True
+            loop = asyncio.get_running_loop()
+
+            async def _on_pcm_chunk(chunk_bytes: bytes, is_tail: bool):
+                """Fired from ffmpeg stdout loop every 5s or at recording end."""
+                if self._cancellation_token.is_set():
+                    return
+                await chunk_queue.put((chunk_bytes, is_tail))
+
+            async def _streaming_stt_worker():
+                """Concurrent STT worker: consumes 5s audio slice and inferences immediately."""
+                from voice_pipeline import transcribe_pcm_chunk
+                while streaming_active or not chunk_queue.empty():
+                    try:
+                        chunk_bytes, is_tail = await asyncio.wait_for(chunk_queue.get(), timeout=0.4)
+                    except asyncio.TimeoutError:
+                        continue
+
+                    if self._cancellation_token.is_set():
+                        chunk_queue.task_done()
+                        break
+
+                    try:
+                        # 異步派發至工作線程執行 AI NPU / Whisper 單塊推論 (耗時僅 ~0.4s-0.8s)
+                        seg_text = await asyncio.to_thread(transcribe_pcm_chunk, chunk_bytes)
+                        if seg_text and seg_text.strip():
+                            accumulated_chunks.append(seg_text.strip())
+                            curr_preview = "\n\n".join(accumulated_chunks)
+                            self.status.transcript = curr_preview
+                            paras = [p for p in curr_preview.split("\n\n") if p.strip()]
+                            self.status.metrics["stt_chars"] = len(curr_preview.replace("\n", "").strip())
+                            self.status.metrics["stt_paragraphs"] = len(paras)
+                            self.notify_status_update()
+
+                            # ⚡ 即時廣播 transcript_stream，前端第 5~6 秒起逐段動態出字！
+                            try:
+                                from ws_manager import ws_manager
+                                await ws_manager.broadcast("transcript_stream", {
+                                    "job_id": job_id,
+                                    "transcript": curr_preview,
+                                    "segment": seg_text.strip(),
+                                    "is_final": False
+                                })
+                            except Exception:
+                                pass
+                    except Exception as inf_err:
+                        print(f"[StreamingSTT] Chunk inference notice: {inf_err}")
+                    finally:
+                        chunk_queue.task_done()
+
+            streaming_worker_task = asyncio.create_task(_streaming_stt_worker())
+
             def _on_proc(proc):
                 self._current_ffmpeg_proc = proc
 
@@ -410,7 +465,9 @@ class MeetingJobManager:
                     raw_ogg,
                     vu_callback=_on_vu,
                     cancellation_event=self._cancellation_token,
-                    on_proc_started=_on_proc
+                    on_proc_started=_on_proc,
+                    pcm_chunk_callback=_on_pcm_chunk,
+                    chunk_sec=5.0
                 )
             )
 
@@ -428,6 +485,8 @@ class MeetingJobManager:
 
             if self._cancellation_token.is_set():
                 print("[MeetingMinutes] Recording aborted by cancellation token.")
+                streaming_active = False
+                streaming_worker_task.cancel()
                 if self._record_task and not self._record_task.done():
                     self._record_task.cancel()
                 return
@@ -453,6 +512,8 @@ class MeetingJobManager:
                 pass
 
             if not record_ok or not os.path.exists(raw_ogg) or os.path.getsize(raw_ogg) == 0:
+                streaming_active = False
+                streaming_worker_task.cancel()
                 if self._cancellation_token.is_set():
                     return
                 raise RuntimeError("麥克風收音失敗，請確認藍牙耳麥已開機並保持連線。")
@@ -471,69 +532,39 @@ class MeetingJobManager:
             except Exception:
                 pass
 
-            # --- PHASE 2: Transcribe (Whisper STT) ---
+            # --- PHASE 2: Transcribe Finalization ---
             if self._cancellation_token.is_set():
+                streaming_active = False
+                streaming_worker_task.cancel()
                 return
 
             self.status.state = "processing"
             self.status.phase = "transcribe"
-            self.status.progress = 30
+            self.status.progress = 60
             self.status.metrics["stt_status"] = "running"
-            est_stt_sec = max(10.0, float(duration_sec) * 0.26)
-            self.status.eta = est_stt_sec
-            self.status.msg = f"🎧 錄音已就緒！AI 正在進行語音聽寫（預計需 {int(est_stt_sec)} 秒）..."
+            self.status.eta = 2.0
+            self.status.msg = "🎧 錄音完成！AI 正在彙整逐字稿..."
             self.notify_status_update()
 
-            stt_done_event = asyncio.Event()
             stt_start = time.time()
-
-            async def _stt_ticker():
-                while not stt_done_event.is_set() and not self._cancellation_token.is_set():
-                    await asyncio.sleep(0.8)
-                    elapsed_stt = time.time() - stt_start
-                    rem_eta = max(1.0, est_stt_sec - elapsed_stt)
-                    pct = min(72, int(30 + (elapsed_stt / est_stt_sec) * 42))
-                    self.status.progress = pct
-                    self.status.eta = round(rem_eta, 1)
-                    self.status.metrics["stt_elapsed"] = round(elapsed_stt, 1)
-                    self.status.msg = f"🎧 錄音完成！AI 正在聽寫語音（已耗時 {int(elapsed_stt)} 秒，剩餘約 {int(rem_eta)} 秒）..."
-                    self.notify_status_update()
-
-            loop = asyncio.get_running_loop()
-
-            def _on_stt_segment(current_preview: str, new_seg: str, is_final: bool):
-                self.status.transcript = current_preview
-                paras = [p for p in current_preview.split("\n\n") if p.strip()]
-                self.status.metrics["stt_chars"] = len(current_preview.replace("\n", "").strip())
-                self.status.metrics["stt_paragraphs"] = len(paras)
-                self.notify_status_update()
-                try:
-                    from ws_manager import ws_manager
-                    asyncio.run_coroutine_threadsafe(
-                        ws_manager.broadcast("transcript_stream", {
-                            "job_id": job_id,
-                            "transcript": current_preview,
-                            "segment": new_seg,
-                            "is_final": is_final
-                        }),
-                        loop
-                    )
-                except Exception:
-                    pass
-
-            ticker_task = asyncio.create_task(_stt_ticker())
+            streaming_active = False
+            # 等待剩餘未消化完的音訊切片（通常 < 1.0 秒）
             try:
+                await asyncio.wait_for(chunk_queue.join(), timeout=6.0)
+            except asyncio.TimeoutError:
+                pass
+            streaming_worker_task.cancel()
+
+            # 彙整全文逐字稿
+            if accumulated_chunks:
+                transcript = "\n\n".join(accumulated_chunks)
+            else:
+                # 靜音或極短音訊保險回退
                 transcript = await asyncio.to_thread(
                     speech_to_text,
                     raw_ogg,
-                    self._thread_cancellation_token,
-                    None,
-                    None,
-                    _on_stt_segment
+                    self._thread_cancellation_token
                 )
-            finally:
-                stt_done_event.set()
-                ticker_task.cancel()
 
             stt_dur = round(time.time() - stt_start, 2)
             stt_rtf = round(stt_dur / max(1.0, float(duration_sec)), 2)

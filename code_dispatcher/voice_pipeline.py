@@ -518,12 +518,14 @@ async def record_audio_from_mic(
     output_path: str,
     vu_callback: Optional[Callable[[Dict[str, Any]], Any]] = None,
     cancellation_event: Optional[asyncio.Event] = None,
-    on_proc_started: Optional[Callable[[Any], Any]] = None
+    on_proc_started: Optional[Callable[[Any], Any]] = None,
+    pcm_chunk_callback: Optional[Callable[[bytes, bool], Any]] = None,
+    chunk_sec: float = 5.0
 ) -> bool:
     """
     Record audio from Bluetooth headset mic using ffmpeg with explicit hardware source routing.
     Uses clean 16kHz resampling with highpass filter to eliminate sub-bass rumble and avoid clipping.
-    If vu_callback is supplied, uses dual-output to stream raw 16kHz PCM to stdout for 50ms real-time VU and FFT spectrum metering.
+    If vu_callback or pcm_chunk_callback is supplied, streams raw 16kHz PCM to stdout for 50ms VU and concurrent streaming STT chunk slicing.
     Supports cancellation_event token for immediate hardware abort and process cleanup.
     """
     source_node = await ensure_bluetooth_recording_ready()
@@ -540,7 +542,8 @@ async def record_audio_from_mic(
         output_path
     ]
 
-    if vu_callback:
+    need_stdout_pcm = bool(vu_callback or pcm_chunk_callback)
+    if need_stdout_pcm:
         cmd += [
             "-t", str(duration_sec),
             "-f", "s16le",
@@ -563,8 +566,11 @@ async def record_audio_from_mic(
             except Exception:
                 pass
 
-        if vu_callback and proc.stdout:
+        if need_stdout_pcm and proc.stdout:
             chunk_bytes = 1600  # 50ms @ 16kHz mono (800 samples * 2 bytes)
+            target_slice_bytes = int(chunk_sec * 32000)
+            chunk_buffer = bytearray()
+
             band_slices = [
                 (4, 13),    # 80-250 Hz (Sub-bass & fundamental pitch)
                 (13, 25),   # 250-500 Hz (Low-mid vowels)
@@ -599,37 +605,67 @@ async def record_audio_from_mic(
                         continue
                     if not chunk:
                         break
-                    num_samples = len(chunk) // 2
-                    if num_samples >= 160:
-                        samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
-                        rms = float(np.sqrt(np.mean(samples ** 2)))
-                        peak = float(np.max(np.abs(samples)))
-                        db = float(20 * np.log10(max(1e-5, rms)))
-                        level_pct = min(100, int(rms * 280))
 
-                        # 8-band FFT spectrum
-                        fft_mag = np.abs(np.fft.rfft(samples))
-                        bands = []
-                        for s_start, s_end in band_slices:
-                            b_val = float(np.mean(fft_mag[s_start:s_end])) if s_end <= len(fft_mag) else 0.0
-                            bands.append(min(100, int(b_val * 65)))
+                    # 收集滑動切片 PCM
+                    if pcm_chunk_callback:
+                        chunk_buffer.extend(chunk)
+                        if len(chunk_buffer) >= target_slice_bytes:
+                            slice_data = bytes(chunk_buffer[:target_slice_bytes])
+                            chunk_buffer = chunk_buffer[target_slice_bytes:]
+                            try:
+                                if asyncio.iscoroutinefunction(pcm_chunk_callback):
+                                    await pcm_chunk_callback(slice_data, False)
+                                else:
+                                    pcm_chunk_callback(slice_data, False)
+                            except Exception as c_err:
+                                print(f"[VoicePipeline] pcm_chunk_callback error: {c_err}")
 
-                        status_label = "active" if peak >= 0.03 else ("weak" if peak >= 0.01 else "silent")
-                        vu_payload = {
-                            "rms": round(rms, 4),
-                            "peak": round(peak, 4),
-                            "db": round(db, 1),
-                            "level_pct": level_pct,
-                            "status": status_label,
-                            "bands": bands,
-                            "active": True
-                        }
-                        if asyncio.iscoroutinefunction(vu_callback):
-                            await vu_callback(vu_payload)
+                    # VU 表計算
+                    if vu_callback:
+                        num_samples = len(chunk) // 2
+                        if num_samples >= 160:
+                            samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
+                            rms = float(np.sqrt(np.mean(samples ** 2)))
+                            peak = float(np.max(np.abs(samples)))
+                            db = float(20 * np.log10(max(1e-5, rms)))
+                            level_pct = min(100, int(rms * 280))
+
+                            # 8-band FFT spectrum
+                            fft_mag = np.abs(np.fft.rfft(samples))
+                            bands = []
+                            for s_start, s_end in band_slices:
+                                b_val = float(np.mean(fft_mag[s_start:s_end])) if s_end <= len(fft_mag) else 0.0
+                                bands.append(min(100, int(b_val * 65)))
+
+                            status_label = "active" if peak >= 0.03 else ("weak" if peak >= 0.01 else "silent")
+                            vu_payload = {
+                                "rms": round(rms, 4),
+                                "peak": round(peak, 4),
+                                "db": round(db, 1),
+                                "level_pct": level_pct,
+                                "status": status_label,
+                                "bands": bands,
+                                "active": True
+                            }
+                            if asyncio.iscoroutinefunction(vu_callback):
+                                await vu_callback(vu_payload)
+                            else:
+                                vu_callback(vu_payload)
+
+                # 錄音退出後派發尾端剩餘音訊（>=0.5 秒）
+                if pcm_chunk_callback and len(chunk_buffer) >= 16000:
+                    tail_data = bytes(chunk_buffer)
+                    chunk_buffer.clear()
+                    try:
+                        if asyncio.iscoroutinefunction(pcm_chunk_callback):
+                            await pcm_chunk_callback(tail_data, True)
                         else:
-                            vu_callback(vu_payload)
+                            pcm_chunk_callback(tail_data, True)
+                    except Exception as c_err:
+                        print(f"[VoicePipeline] pcm_chunk_callback tail error: {c_err}")
+
             except Exception as stream_err:
-                print(f"[VoicePipeline] VU streaming loop notice: {stream_err}")
+                print(f"[VoicePipeline] Streaming loop notice: {stream_err}")
 
         # Check cancellation before waiting
         if cancellation_event and cancellation_event.is_set():
@@ -668,5 +704,55 @@ async def record_audio_from_mic(
     except Exception as e:
         print(f"[VoicePipeline] Microphone recording failed: {e}")
         return False
+
+
+def transcribe_pcm_chunk(pcm_bytes: bytes) -> Optional[str]:
+    """
+    Transcribe a 16kHz 16-bit mono PCM chunk using Hailo-8 AI NPU or faster-whisper.
+    Used for concurrent streaming STT while recording is in progress.
+    """
+    if not pcm_bytes or len(pcm_bytes) < 8000:
+        return None
+    try:
+        samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        peak = float(np.max(np.abs(samples)))
+        rms = float(np.sqrt(np.mean(samples ** 2)))
+        # VAD 靜音與呼吸聲過濾
+        if peak < 0.02 and rms < 0.0015:
+            return None
+
+        # 優先調用 AI NPU 引擎
+        hailo_adapter_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "AI_HAT_plus"))
+        if os.path.exists(hailo_adapter_path) and hailo_adapter_path not in sys.path:
+            sys.path.append(hailo_adapter_path)
+        try:
+            from hailo_engine.device_manager import is_hailo_available
+            if is_hailo_available():
+                from hailo_engine.whisper_adapter import get_whisper_engine
+                engine = get_whisper_engine(auto_detect=True, model_size="base")
+                res = engine.transcribe(samples, language="zh")
+                if res and res.get("text"):
+                    return to_taiwan_traditional(res["text"]).strip()
+        except Exception as hailo_err:
+            pass
+
+        # 回退至 CPU faster-whisper (單執行緒/2執行緒避免爭搶)
+        with _whisper_lock:
+            model = get_whisper_model()
+            if model:
+                segments, _ = model.transcribe(
+                    samples,
+                    beam_size=1,
+                    language="zh",
+                    vad_filter=True,
+                    initial_prompt="繁體中文"
+                )
+                texts = [s.text.strip() for s in segments if s.text.strip()]
+                if texts:
+                    return to_taiwan_traditional("".join(texts)).strip()
+    except Exception as e:
+        print(f"[VoicePipeline] transcribe_pcm_chunk error: {e}")
+    return None
+
 
 

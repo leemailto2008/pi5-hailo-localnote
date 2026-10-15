@@ -9,6 +9,7 @@
 
 ## 1. 核心亮點 (Key Features)
 
+* **邊錄邊即時轉錄 (Concurrent Streaming STT):** 錄音開始後第 5~6 秒即由 AI NPU 啟動即時分塊轉錄，逐字稿動態秒出，錄音結束等待時間壓縮至 < 1 秒！
 * **10 倍速語音轉錄 (10x Faster STT):** 3 分鐘會議音訊轉錄耗時從原本 CPU 的 40~45 秒壓縮至 **3~5 秒** (即時因子 RTF < 0.03)。
 * **消除藍牙音訊爭搶 (Zero-Contention):** 將密集張量運算移至獨立 PCIe NPU，CPU 佔用率降至 < 15%，杜絕 UART 7.5ms SCO 爆音。
 * **無痛回退保險 (Graceful Fallback):** 內建 `get_whisper_engine()` 智能工廠。當硬體尚未插上或驅動異常時，自動切回原生 `faster-whisper`，保證業務 100% 不中斷。
@@ -19,6 +20,7 @@
 
 ```
 AI_HAT_plus/
+├── SPEC.md                   # 邊錄邊辨與雙工音訊串流架構規格書
 ├── plan.md                   # 系統架構四階段詳細規劃書
 ├── setup_hailo_env.sh        # 一鍵 PCIe 3.0 與官方 HailoRT 驅動安裝腳本
 ├── requirements.txt          # Python 相依清單

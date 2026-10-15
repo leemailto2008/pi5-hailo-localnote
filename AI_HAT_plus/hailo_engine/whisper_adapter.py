@@ -55,9 +55,11 @@ class CPUWhisperEngine(BaseWhisperEngine):
         cancellation_event: Any = None,
         on_segment_callback: Optional[Any] = None
     ) -> Dict[str, Any]:
-        from .audio_preprocessor import load_audio_pcm
         t0 = time.perf_counter()
-        audio_np = load_audio_pcm(audio_path)
+        if isinstance(audio_path, np.ndarray):
+            audio_np = audio_path.astype(np.float32)
+        else:
+            audio_np = load_audio_pcm(audio_path)
         audio_dur = len(audio_np) / 16000.0
 
         model = self._get_model()
