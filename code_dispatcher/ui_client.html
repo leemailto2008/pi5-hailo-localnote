@@ -990,6 +990,20 @@ async function handleStatusUpdate(st) {
   if (!st) return;
   renderProgress(st);
   if (st.state !== state) setState(st.state);
+
+  // ⚡ 雙保險 1: 當 STT 完成且已有逐字稿時，立即展開逐字稿與音訊波形，0 秒等待！
+  if (st.transcript && (el.transcriptBox.hidden || !el.transcriptBox.open || !el.transcript.innerText)) {
+    el.transcriptBox.hidden = false;
+    el.transcriptBox.open = true;
+    el.transcript.innerText = st.transcript;
+    if (st.job) loadAudioWaveform(st.job);
+  }
+
+  // ⚡ 雙保險 2: 當 LLM 正在生成時，若輪詢到 summary_stream，以打字機呈現
+  if (st.summary_stream && st.state === 'processing' && st.phase === 'summarize') {
+    renderStreamingMinutes(st.summary_stream);
+  }
+
   if (st.state === 'done' && st.job && st.job !== lastJob) {
     lastJob = st.job;
     await loadResult();
@@ -1281,7 +1295,8 @@ function handleTranscriptReady(data) {
   if (!data) return;
   if (data.transcript) {
     el.transcriptBox.hidden = false;
-    el.transcript.textContent = data.transcript;
+    el.transcriptBox.open = true; // ⚡ 自動展開 details，不需手動點擊！
+    el.transcript.innerText = data.transcript;
     toast('🎧 逐字稿已出爐！音訊就緒可試聽');
     try {
       el.transcriptBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1326,8 +1341,13 @@ function renderMinutes(r) {
       ${(r.todos || []).map(t => `<tr><td>${esc(t.item)}</td><td>${esc(t.owner || '待定')}</td><td>${esc(t.due || '待定')}</td></tr>`).join('') || '<tr><td colspan="3">—</td></tr>'}
     </tbody></table></div>
     <div><h4>決議</h4><ul>${(r.decisions || []).map(s => `<li>${esc(s)}</li>`).join('') || '<li>—</li>'}</ul></div>`;
-  el.transcriptBox.hidden = !r.transcript;
-  el.transcript.textContent = r.transcript || '';
+  if (r.transcript) {
+    el.transcriptBox.hidden = false;
+    el.transcriptBox.open = true;
+    el.transcript.innerText = r.transcript;
+  } else {
+    el.transcriptBox.hidden = true;
+  }
 }
 el.copyBtn.addEventListener('click', async () => {
   const text = result?.markdown || '';

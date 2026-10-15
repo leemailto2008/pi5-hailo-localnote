@@ -226,6 +226,10 @@ def speech_to_text(
             print("[VoicePipeline] Transcription aborted before lock by cancellation token.")
             return None
 
+        paragraphs = []
+        current_para = []
+        last_end = 0.0
+
         with _whisper_lock:
             # Check cancellation right after acquiring lock
             if cancellation_event and hasattr(cancellation_event, "is_set") and cancellation_event.is_set():
@@ -237,10 +241,7 @@ def speech_to_text(
                 print("[VoicePipeline] Whisper model unavailable.")
                 return None
 
-            valid_segments = []
             try:
-                # Fast single-pass transcription with beam_size=1 on In-Memory PCM array (Zero-Disk)
-                # 使用精簡繁體中文提示詞，杜絕長 prompt 導致長錄音 cross-attention 鎖死與 0 segment 靜音抑制
                 segments, info = model.transcribe(
                     audio_np,
                     beam_size=1,
@@ -252,22 +253,44 @@ def speech_to_text(
                     vad_parameters=dict(threshold=0.25, min_silence_duration_ms=250)
                 )
                 for seg in segments:
-                    # 每次 segment 迭代時檢驗取消權杖
                     if cancellation_event and hasattr(cancellation_event, "is_set") and cancellation_event.is_set():
-                        print(f"[VoicePipeline] Transcription cancelled mid-stream by token (collected {len(valid_segments)} segments).")
+                        print(f"[VoicePipeline] Transcription cancelled mid-stream by token.")
                         return None
 
-                    # 放寬分塊邊界語音門檻 (no_speech_prob < 0.85, avg_logprob > -2.20)，防止因切片截斷導致有效語音被誤殺
                     if seg.no_speech_prob < 0.85 and seg.avg_logprob > -2.20:
                         clean_seg_text = seg.text.strip()
                         if clean_seg_text:
-                            valid_segments.append(clean_seg_text)
+                            start_t = getattr(seg, "start", 0.0)
+                            end_t = getattr(seg, "end", 0.0)
+                            pause_gap = start_t - last_end
+
+                            # 更加細膩的停頓斷句分段 (適合手機閱讀)
+                            should_break = False
+                            curr_len = sum(len(x) for x in current_para)
+                            if current_para:
+                                if pause_gap >= 0.45:
+                                    should_break = True
+                                elif pause_gap >= 0.25 and (curr_len >= 45 or any(current_para[-1].endswith(p) for p in ("。", "！", "？", "，", "…", "!", "?", "."))):
+                                    should_break = True
+                                elif curr_len >= 75:
+                                    should_break = True
+
+                            if should_break and current_para:
+                                paragraphs.append("".join(current_para))
+                                current_para = [clean_seg_text]
+                            else:
+                                current_para.append(clean_seg_text)
+
+                            last_end = end_t
                     else:
                         print(f"[VoicePipeline] Discarded low-confidence segment: '{seg.text}' (no_speech_prob={seg.no_speech_prob:.2f}, logprob={seg.avg_logprob:.2f})")
             except Exception as vad_err:
                 print(f"[VoicePipeline] Whisper transcribe exception: {vad_err}")
 
-        text = "".join(valid_segments).strip()
+        if current_para:
+            paragraphs.append("".join(current_para))
+
+        text = "\n\n".join(paragraphs).strip()
 
         # Sanitize known Whisper hallucination substrings
         hallucinations = [

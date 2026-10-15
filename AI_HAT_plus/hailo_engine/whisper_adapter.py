@@ -63,28 +63,60 @@ class CPUWhisperEngine(BaseWhisperEngine):
             initial_prompt="繁體中文"
         )
         
-        full_text = []
+        full_segments_text = []
         seg_list = []
+        last_end = 0.0
+        current_para = []
+
         for s in segments:
             if cancellation_event and hasattr(cancellation_event, "is_set") and cancellation_event.is_set():
                 logger.info("CPU transcription cancelled by token.")
                 break
             clean_text = s.text.strip()
-            if clean_text:
-                full_text.append(clean_text)
-                seg_list.append({
-                    "start": s.start,
-                    "end": s.end,
-                    "text": clean_text
-                })
+            if not clean_text:
+                continue
+
+            start_t = getattr(s, "start", 0.0)
+            end_t = getattr(s, "end", 0.0)
+            pause_gap = start_t - last_end
+
+            # 更加細膩的停頓斷句分段 (適合手機閱讀)
+            should_break = False
+            curr_len = sum(len(x) for x in current_para)
+            if current_para:
+                if pause_gap >= 0.45:
+                    should_break = True
+                elif pause_gap >= 0.25 and (curr_len >= 45 or any(current_para[-1].endswith(p) for p in ("。", "！", "？", "，", "…", "!", "?", "."))):
+                    should_break = True
+                elif curr_len >= 75:
+                    should_break = True
+
+            if should_break and current_para:
+                full_segments_text.append("".join(current_para))
+                current_para = [clean_text]
+            else:
+                current_para.append(clean_text)
+
+            seg_list.append({
+                "start": start_t,
+                "end": end_t,
+                "text": clean_text
+            })
+            last_end = end_t
+
+        if current_para:
+            full_segments_text.append("".join(current_para))
 
         duration = time.perf_counter() - t0
         audio_dur = getattr(info, "duration", 0.0)
         rtf = duration / audio_dur if audio_dur > 0 else 0.0
 
+        # 以雙換行分隔自然段落
+        formatted_text = "\n\n".join(full_segments_text)
+
         return {
             "engine": self.get_engine_type(),
-            "text": "".join(full_text),
+            "text": formatted_text,
             "segments": seg_list,
             "duration_sec": duration,
             "audio_duration_sec": audio_dur,

@@ -60,6 +60,9 @@ class JobStatus(BaseModel):
     eta: Optional[float] = None
     job: Optional[str] = None
     msg: Optional[str] = None
+    transcript: Optional[str] = None
+    audio_url: Optional[str] = None
+    summary_stream: Optional[str] = None
 
 
 class OfflineDetector:
@@ -460,6 +463,14 @@ class MeetingJobManager:
                 transcript = "（錄音結束，未能從耳麥中辨識出清晰人聲語音）"
 
             # Intermediate result update: frontend can immediately inspect transcript
+            self.status.transcript = transcript
+            self.status.audio_url = f"/audio/{job_id}.ogg"
+            self.status.phase = "summarize"
+            self.status.progress = 65
+            self.status.eta = 20.0
+            self.status.msg = "🎧 逐字稿已出爐！AI 正在即時提煉會議紀要..."
+            self.notify_status_update()
+
             self.result = MeetingResult(
                 job=job_id,
                 title="會議紀要",
@@ -484,12 +495,6 @@ class MeetingJobManager:
             # --- PHASE 3: Summarize (Ollama Meeting Minutes LLM with Token Streaming) ---
             if self._cancellation_token.is_set():
                 return
-
-            self.status.phase = "summarize"
-            self.status.progress = 65
-            self.status.eta = 20.0
-            self.status.msg = "🎧 逐字稿已出爐！AI 正在即時提煉會議紀要..."
-            self.notify_status_update()
 
             llm_done_event = asyncio.Event()
 
@@ -651,8 +656,9 @@ class MeetingJobManager:
                                     if token:
                                         accumulated.append(token)
                                         # 逐 Token 打字機串流廣播
+                                        curr_text = "".join(accumulated)
+                                        self.status.summary_stream = curr_text
                                         if job_id:
-                                            curr_text = "".join(accumulated)
                                             await ws_manager.broadcast("summary_stream", {
                                                 "job_id": job_id,
                                                 "token": token,
@@ -663,6 +669,7 @@ class MeetingJobManager:
 
                             full_text = "".join(accumulated).strip()
                             if full_text:
+                                self.status.summary_stream = full_text
                                 if job_id:
                                     await ws_manager.broadcast("summary_stream", {
                                         "job_id": job_id,
