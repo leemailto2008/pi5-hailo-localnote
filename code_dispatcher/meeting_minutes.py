@@ -469,12 +469,37 @@ class MeetingJobManager:
                     self.status.msg = f"🎧 錄音完成！AI 正在聽寫語音（已耗時 {int(elapsed_stt)} 秒，剩餘約 {int(rem_eta)} 秒）..."
                     self.notify_status_update()
 
+            loop = asyncio.get_running_loop()
+
+            def _on_stt_segment(current_preview: str, new_seg: str, is_final: bool):
+                self.status.transcript = current_preview
+                paras = [p for p in current_preview.split("\n\n") if p.strip()]
+                self.status.metrics["stt_chars"] = len(current_preview.replace("\n", "").strip())
+                self.status.metrics["stt_paragraphs"] = len(paras)
+                self.notify_status_update()
+                try:
+                    from ws_manager import ws_manager
+                    asyncio.run_coroutine_threadsafe(
+                        ws_manager.broadcast("transcript_stream", {
+                            "job_id": job_id,
+                            "transcript": current_preview,
+                            "segment": new_seg,
+                            "is_final": is_final
+                        }),
+                        loop
+                    )
+                except Exception:
+                    pass
+
             ticker_task = asyncio.create_task(_stt_ticker())
             try:
                 transcript = await asyncio.to_thread(
                     speech_to_text,
                     raw_ogg,
-                    self._thread_cancellation_token
+                    self._thread_cancellation_token,
+                    None,
+                    None,
+                    _on_stt_segment
                 )
             finally:
                 stt_done_event.set()

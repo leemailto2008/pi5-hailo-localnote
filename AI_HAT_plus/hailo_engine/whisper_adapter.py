@@ -48,7 +48,13 @@ class CPUWhisperEngine(BaseWhisperEngine):
     def is_ready(self) -> bool:
         return True
 
-    def transcribe(self, audio_path: str, language: str = "zh", cancellation_event: Any = None) -> Dict[str, Any]:
+    def transcribe(
+        self,
+        audio_path: str,
+        language: str = "zh",
+        cancellation_event: Any = None,
+        on_segment_callback: Optional[Any] = None
+    ) -> Dict[str, Any]:
         from .audio_preprocessor import load_audio_pcm
         t0 = time.perf_counter()
         audio_np = load_audio_pcm(audio_path)
@@ -104,6 +110,14 @@ class CPUWhisperEngine(BaseWhisperEngine):
             })
             last_end = end_t
 
+            # ⚡ 逐段即時串流回呼：每解析出一個段落立即推送預覽文字
+            if on_segment_callback:
+                curr_preview = "\n\n".join(full_segments_text + (["".join(current_para)] if current_para else []))
+                try:
+                    on_segment_callback(curr_preview, clean_text, False)
+                except Exception as cb_err:
+                    logger.debug(f"on_segment_callback error: {cb_err}")
+
         if current_para:
             full_segments_text.append("".join(current_para))
 
@@ -113,6 +127,13 @@ class CPUWhisperEngine(BaseWhisperEngine):
 
         # 以雙換行分隔自然段落
         formatted_text = "\n\n".join(full_segments_text)
+
+        # 最終完成回呼
+        if on_segment_callback:
+            try:
+                on_segment_callback(formatted_text, "", True)
+            except Exception:
+                pass
 
         return {
             "engine": self.get_engine_type(),
@@ -163,7 +184,13 @@ class HailoWhisperEngine(BaseWhisperEngine):
     def is_ready(self) -> bool:
         return self._is_ready and self._network_group is not None
 
-    def transcribe(self, audio_path: str, language: str = "zh", cancellation_event: Any = None) -> Dict[str, Any]:
+    def transcribe(
+        self,
+        audio_path: str,
+        language: str = "zh",
+        cancellation_event: Any = None,
+        on_segment_callback: Optional[Any] = None
+    ) -> Dict[str, Any]:
         """
         透過 Hailo-8 NPU 執行硬體加速語音轉錄。
         若遇長語音切片或異常，具備自動平滑降級回退機制。
@@ -171,7 +198,12 @@ class HailoWhisperEngine(BaseWhisperEngine):
         if not self.is_ready():
             logger.warning("Hailo hardware offline, falling back to CPU...")
             fallback = CPUWhisperEngine(model_size="base")
-            return fallback.transcribe(audio_path, language=language, cancellation_event=cancellation_event)
+            return fallback.transcribe(
+                audio_path,
+                language=language,
+                cancellation_event=cancellation_event,
+                on_segment_callback=on_segment_callback
+            )
 
         t0 = time.perf_counter()
         
@@ -181,7 +213,12 @@ class HailoWhisperEngine(BaseWhisperEngine):
             # 優先使用 CPU fallback 保證文字準確率，但以 base 模型極速跑完
             # 當完整 NPU 流端到端連通時直接回傳超高 RTF
             fallback = CPUWhisperEngine(model_size="base")
-            res = fallback.transcribe(audio_path, language=language, cancellation_event=cancellation_event)
+            res = fallback.transcribe(
+                audio_path,
+                language=language,
+                cancellation_event=cancellation_event,
+                on_segment_callback=on_segment_callback
+            )
             res["engine"] = self.get_engine_type()
             res["duration_sec"] = time.perf_counter() - t0
             if res.get("audio_duration_sec", 0) > 0:
@@ -190,7 +227,12 @@ class HailoWhisperEngine(BaseWhisperEngine):
         except Exception as e:
             logger.error(f"Hailo transcription error, fallback to CPU: {e}")
             fallback = CPUWhisperEngine(model_size="base")
-            return fallback.transcribe(audio_path, language=language, cancellation_event=cancellation_event)
+            return fallback.transcribe(
+                audio_path,
+                language=language,
+                cancellation_event=cancellation_event,
+                on_segment_callback=on_segment_callback
+            )
 
     def get_engine_type(self) -> str:
         return "Raspberry Pi AI HAT+ (Hailo-8 NPU 26 TOPS)"

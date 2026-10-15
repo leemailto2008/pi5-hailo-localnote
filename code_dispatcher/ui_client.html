@@ -1053,11 +1053,13 @@ async function handleStatusUpdate(st) {
     updateMetricsUI(st.metrics);
   }
 
-  // ⚡ 雙保險 1: 當 STT 完成且已有逐字稿時，立即展開逐字稿與音訊波形，0 秒等待！
-  if (st.transcript && (el.transcriptBox.hidden || !el.transcriptBox.open || !el.transcript.innerText)) {
+  // ⚡ 雙保險 1: 當 STT 進行中或完成且已有逐字稿時，立即逐段展開逐字稿，0 秒等待！
+  if (st.transcript && (el.transcriptBox.hidden || !el.transcriptBox.open || el.transcript.innerText !== st.transcript)) {
     el.transcriptBox.hidden = false;
     el.transcriptBox.open = true;
-    el.transcript.innerText = st.transcript;
+    const cursor = (st.phase === 'transcribe') ? ' <span class="streaming-cursor"></span>' : '';
+    el.transcript.innerHTML = esc(st.transcript).replace(/\n\n/g, '<br><br>') + cursor;
+    try { el.transcript.scrollTop = el.transcript.scrollHeight; } catch (_) {}
     if (st.job) loadAudioWaveform(st.job);
   }
 
@@ -1548,13 +1550,25 @@ window.toggleWavePlay = toggleWavePlay;
 window.stopWavePlay = stopWavePlay;
 window.playSelectedRegion = playSelectedRegion;
 window.transcribeSelectedRegion = transcribeSelectedRegion;
+function handleTranscriptStream(data) {
+  if (!data || !data.transcript) return;
+  // ⚡ STT 逐段即時噴出：秒開展開卡片，即時動態滾動！
+  el.transcriptBox.hidden = false;
+  el.transcriptBox.open = true;
+  const cursor = data.is_final ? '' : ' <span class="streaming-cursor"></span>';
+  el.transcript.innerHTML = esc(data.transcript).replace(/\n\n/g, '<br><br>') + cursor;
+  try {
+    el.transcript.scrollTop = el.transcript.scrollHeight;
+  } catch (_) {}
+}
+
 function handleTranscriptReady(data) {
   if (!data) return;
   if (data.transcript) {
     el.transcriptBox.hidden = false;
-    el.transcriptBox.open = true; // ⚡ 自動展開 details，不需手動點擊！
-    el.transcript.innerText = data.transcript;
-    toast('🎧 逐字稿已出爐！音訊就緒可試聽');
+    el.transcriptBox.open = true;
+    el.transcript.innerHTML = esc(data.transcript).replace(/\n\n/g, '<br><br>');
+    toast('🎧 逐字稿已全部聽寫完成！');
     try {
       el.transcriptBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch (_) {}
@@ -1783,6 +1797,8 @@ function initWebSocket() {
         handleStatusUpdate(msg.data);
       } else if (msg.type === 'audio_ready') {
         loadAudioWaveform(msg.data?.job_id, msg.data?.peaks, msg.data?.audio_url);
+      } else if (msg.type === 'transcript_stream') {
+        handleTranscriptStream(msg.data);
       } else if (msg.type === 'transcript_ready') {
         handleTranscriptReady(msg.data);
       } else if (msg.type === 'summary_stream') {

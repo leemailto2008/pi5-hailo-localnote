@@ -137,7 +137,8 @@ def speech_to_text(
     audio_path: str,
     cancellation_event: Optional[Any] = None,
     start_sec: Optional[float] = None,
-    end_sec: Optional[float] = None
+    end_sec: Optional[float] = None,
+    on_segment_callback: Optional[Any] = None
 ) -> Optional[str]:
     """
     Transcribe speech from an audio file to Traditional Chinese text.
@@ -147,6 +148,7 @@ def speech_to_text(
     - Threading lock prevents CTranslate2 OpenMP deadlocks/spin-waits.
     - beam_size=1 (Greedy search) delivers 5x faster transcription with zero hallucination.
     - Supports cancellation_event checking and region trimming (start_sec, end_sec).
+    - Supports real-time segment-by-segment streaming callback (on_segment_callback).
     """
     # 錄音已結束，使用全核心進行無損音訊的高精度轉錄
 
@@ -169,7 +171,12 @@ def speech_to_text(
                 engine = get_whisper_engine(auto_detect=True, model_size="base")
                 if "Hailo" in engine.get_engine_type():
                     print("[VoicePipeline] ⚡ 探測到 Hailo-8 NPU (26 TOPS)！啟動硬體加速聽寫...")
-                    res = engine.transcribe(audio_path, language="zh", cancellation_event=cancellation_event)
+                    res = engine.transcribe(
+                        audio_path,
+                        language="zh",
+                        cancellation_event=cancellation_event,
+                        on_segment_callback=on_segment_callback
+                    )
                     if res and res.get("text"):
                         text = to_taiwan_traditional(res["text"])
                         print(f"[VoicePipeline] ⚡ Hailo-8 轉錄完成: '{text}' (耗時: {res.get('duration_sec', 0):.2f}s, RTF: {res.get('rtf', 0):.2f})")
@@ -282,6 +289,14 @@ def speech_to_text(
                                 current_para.append(clean_seg_text)
 
                             last_end = end_t
+
+                            # ⚡ 逐段即時串流回呼
+                            if on_segment_callback:
+                                curr_prev = "\n\n".join(paragraphs + (["".join(current_para)] if current_para else []))
+                                try:
+                                    on_segment_callback(curr_prev, clean_seg_text, False)
+                                except Exception:
+                                    pass
                     else:
                         print(f"[VoicePipeline] Discarded low-confidence segment: '{seg.text}' (no_speech_prob={seg.no_speech_prob:.2f}, logprob={seg.avg_logprob:.2f})")
             except Exception as vad_err:
