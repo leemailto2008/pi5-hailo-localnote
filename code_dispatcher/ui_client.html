@@ -215,6 +215,14 @@ details[open] summary::after{content:"收起 ▴"}
                 <option value="180">3 分鐘</option>
               </select>
             </div>
+            <div class="row" style="margin-top:6px;padding:6px 10px;background:var(--set-bg);border-radius:8px;justify-content:space-between;align-items:center;">
+              <span style="font-size:12.5px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;">
+                🧹 新錄音清空舊內容
+              </span>
+              <button type="button" class="toggle-btn active" id="btnToggleAutoClear" title="點擊切換：開啟時開始新錄音會先清空舊畫面；關閉時保留舊波形與文稿直到新結果出爐">
+                ✓ 自動清空: 開
+              </button>
+            </div>
             <p class="hint" id="hint">戴上耳麥，按下紅色按鈕開始說。時間到自動停，盒子接著整理成紀要。</p>
           </div>
           <div class="progress" id="progress" hidden>
@@ -1023,11 +1031,77 @@ async function poll() {
   }
 }
 
+/* ---------- 新錄音自動清空舊內容開關 (手動設定 & 本地持久化) ---------- */
+let autoClearOnRecord = localStorage.getItem('localnote_auto_clear_on_record') !== '0';
+
+function updateAutoClearUI() {
+  const btn = $('btnToggleAutoClear');
+  if (!btn) return;
+  if (autoClearOnRecord) {
+    btn.className = 'toggle-btn active';
+    btn.innerHTML = '✓ 自動清空: 開';
+    btn.title = '點擊切換：目前為開啟（開始新錄音時會先清空舊畫面）';
+  } else {
+    btn.className = 'toggle-btn';
+    btn.innerHTML = '✕ 自動清空: 關';
+    btn.title = '點擊切換：目前為關閉（開始新錄音時保留舊波形與文稿，直到新結果出爐）';
+  }
+}
+
+function clearPreviousOutputs() {
+  // 1. 清空會議紀要輸出
+  if (el.minutes) el.minutes.innerHTML = '<div class="empty">錄音中，完成後將在此整理出會議紀要。</div>';
+  result = null;
+  lastJob = null;
+  if (el.copyBtn) el.copyBtn.disabled = true;
+  if (el.regenBtn) el.regenBtn.disabled = true;
+  if (el.toEnBtn) el.toEnBtn.disabled = true;
+  if (el.toZhBtn) el.toZhBtn.disabled = true;
+  if (el.enBox) el.enBox.hidden = true;
+
+  // 2. 清空並收合逐字稿
+  if (el.transcriptBox) {
+    el.transcriptBox.hidden = true;
+    el.transcriptBox.open = false;
+  }
+  if (el.transcript) el.transcript.innerText = '';
+
+  // 3. 隱藏並清空音訊波形圖
+  const waveCard = document.getElementById('waveformCard');
+  if (waveCard) waveCard.hidden = true;
+  if (wavesurfer) {
+    try {
+      wavesurfer.stop();
+      wavesurfer.empty();
+    } catch (_) {}
+  }
+  const regionBox = document.getElementById('regionTranscriptBox');
+  if (regionBox) regionBox.hidden = true;
+  activeAudioUrl = null;
+}
+
+const btnToggleAutoClear = $('btnToggleAutoClear');
+if (btnToggleAutoClear) {
+  btnToggleAutoClear.addEventListener('click', () => {
+    autoClearOnRecord = !autoClearOnRecord;
+    localStorage.setItem('localnote_auto_clear_on_record', autoClearOnRecord ? '1' : '0');
+    updateAutoClearUI();
+    toast(autoClearOnRecord ? '已開啟：新錄音時將自動清空舊畫面' : '已關閉：新錄音時將保留舊文稿與波形');
+  });
+}
+updateAutoClearUI();
+
 el.recBtn.addEventListener('click', async () => {
   if (state === 'recording' || state === 'processing') return;
   try {
     el.recBtn.disabled = true;
     const durSec = +el.dur.value;
+
+    // 依據使用者設定：若開啟清空開關，新錄音啟動時先清空上一份輸出
+    if (autoClearOnRecord) {
+      clearPreviousOutputs();
+    }
+
     setState('recording');
     renderProgress({ state: 'recording', elapsed: 0, total: durSec });
     toast('開始錄音');
