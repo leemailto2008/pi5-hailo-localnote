@@ -1,4 +1,4 @@
-﻿# 🤖 Pi 5 Local Note - Antigravity Agent Project Memory & Context
+# 🤖 Pi 5 Local Note - Antigravity Agent Project Memory & Context
 # 樹莓派 5 邊緣雙語口譯、語音筆記與藍牙網關專案記憶檔案 (AGENTS.md)
 
 > 本文件為 Antigravity AI Agent 專案記憶中樞。當您在此專案目錄（`F:\13_prj_raspi5_localnote`）展開工作時，必須嚴格遵守並繼承下列所有工程規範、歷史經驗、避坑指引與部署設定。
@@ -9,17 +9,20 @@
 
 本專案配置有 GitHub 與 GitLab 雙遠端倉庫，任何程式碼更新必須保持雙端同步：
 
-- **GitHub (Origin):**
-  - URL: `https://alntu2@github.com/leemailto2008/pi5-llm-localnote.git`
-  - 授權身分: `alntu2` (Windows Credential Manager / PAT)
-  - 推送指令: `git push origin main`
-- **GitLab (GitLab Remote):**
-  - URL: `http://andrew.lee@gitlab.mytekcentral.com:8081/andrew.lee/pi5-llm-localnote.git`
+- **GitLab (主倉庫 / Remote: gitlab):**
+  - URL: `http://andrew.lee@gitlab.mytekcentral.com:8081/andrew.lee/pi5-hailo-localnote.git`
   - 授權身分: `andrew.lee`
   - 推送指令: `git push gitlab main`
+- **GitHub (Remote: origin):**
+  - URL: `https://alntu2@github.com/leemailto2008/pi5-hailo-localnote.git`
+  - 授權身分: `alntu2` (Windows Credential Manager / PAT)
+  - 推送指令: `git push origin main`
+- **歷史相容倉庫 (Legacy Remotes):**
+  - `origin-legacy`: `https://alntu2@github.com/leemailto2008/pi5-llm-localnote.git`
+  - `gitlab-legacy`: `http://andrew.lee@gitlab.mytekcentral.com:8081/andrew.lee/pi5-llm-localnote.git`
 - **一鍵雙推規範：**
   - 提交訊息遵循 Conventional Commits（`feat:`, `fix:`, `docs:`, `chore:`）。
-  - 驗收完成後執行：`git push origin main && git push gitlab main`。
+  - 驗收完成後執行：`git push gitlab main && git push origin main`。
 
 ---
 
