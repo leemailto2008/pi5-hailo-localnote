@@ -116,69 +116,79 @@ class OfflineDetector:
 def parse_markdown_minutes(raw_text: str) -> Dict[str, Any]:
     """
     Robust regex parser for Ollama meeting minutes markdown.
-    Extracts summary, todos table, and decisions.
+    Extracts summary, todos table, and decisions with full tolerance.
     """
     summaries: List[str] = []
     todos: List[Dict[str, str]] = []
     decisions: List[str] = []
 
-    # 1. Extract Summary
+    # 1. Extract Summary (Header-based)
     summary_match = re.search(r"##\s*摘要\s*\n([\s\S]*?)(?=\n##|\Z)", raw_text, re.IGNORECASE)
     if summary_match:
         lines = [l.strip() for l in summary_match.group(1).splitlines() if l.strip()]
-        bullet_items = []
-        raw_items = []
         for line_str in lines:
             m = re.match(r"^(?:[\*\-•]|\d+\.)\s*(.*)", line_str)
             if m:
                 item = m.group(1).strip()
                 if item:
-                    bullet_items.append(item)
-            elif not line_str.startswith("#"):
-                raw_items.append(line_str)
-        summaries = bullet_items if bullet_items else raw_items
+                    summaries.append(item)
+            elif not line_str.startswith(("#", "|")):
+                summaries.append(line_str)
 
-    # 2. Extract Todos Table
+    # 2. Extract Todos Table (Header-based or raw markdown table scan)
+    table_lines: List[str] = []
     todo_match = re.search(r"##\s*待辦\s*\n([\s\S]*?)(?=\n##|\Z)", raw_text, re.IGNORECASE)
     if todo_match:
-        lines = todo_match.group(1).strip().splitlines()
-        for line in lines:
-            line_str = line.strip()
-            if not line_str.startswith("|") or "---" in line_str:
+        table_lines = [l.strip() for l in todo_match.group(1).splitlines() if l.strip()]
+    else:
+        # Fallback: scan whole raw_text for any markdown table
+        for line in raw_text.splitlines():
+            l_str = line.strip()
+            if l_str.startswith("|") and not "---" in l_str:
+                table_lines.append(l_str)
+
+    for line_str in table_lines:
+        if not line_str.startswith("|") or "---" in line_str:
+            continue
+        cols = [c.strip() for c in line_str.split("|")[1:-1]]
+        if len(cols) >= 3:
+            # Skip header row
+            if "事項" in cols[0] or "待辦" in cols[0]:
                 continue
-            cols = [c.strip() for c in line_str.split("|")[1:-1]]
-            if len(cols) >= 3:
-                # Skip header row
-                if "事項" in cols[0] or "待辦" in cols[0]:
-                    continue
-                todos.append({
-                    "item": cols[0],
-                    "owner": cols[1] if cols[1] else "待定",
-                    "due": cols[2] if cols[2] else "待定"
-                })
+            todos.append({
+                "item": cols[0],
+                "owner": cols[1] if cols[1] else "待定",
+                "due": cols[2] if cols[2] else "待定"
+            })
 
     # 3. Extract Decisions
     decision_match = re.search(r"##\s*決議\s*\n([\s\S]*?)(?=\n##|\Z)", raw_text, re.IGNORECASE)
     if decision_match:
         lines = [l.strip() for l in decision_match.group(1).splitlines() if l.strip()]
-        bullet_items = []
-        raw_items = []
         for line_str in lines:
             m = re.match(r"^(?:[\*\-•]|\d+\.)\s*(.*)", line_str)
             if m:
                 item = m.group(1).strip()
                 if item:
-                    bullet_items.append(item)
-            elif not line_str.startswith("#"):
-                raw_items.append(line_str)
-        decisions = bullet_items if bullet_items else raw_items
+                    decisions.append(item)
+            elif not line_str.startswith(("#", "|")):
+                decisions.append(line_str)
 
-    # Fallback heuristics if markdown was freeform
-    if not summaries and not todos and not decisions:
+    # 4. Fallback heuristics: If summary is still empty, collect bullet/numbered items outside table
+    if not summaries:
         for line in raw_text.splitlines():
-            line_str = line.strip()
-            if line_str.startswith(("-", "*", "•")):
-                summaries.append(line_str.lstrip("-*• ").strip())
+            l_str = line.strip()
+            if l_str.startswith(("#", "|")):
+                continue
+            m = re.match(r"^(?:[\*\-•]|\d+\.)\s*(.*)", l_str)
+            if m:
+                item = m.group(1).strip()
+                if item and len(item) <= 60:
+                    summaries.append(item)
+            elif l_str and len(l_str) <= 50 and not l_str.startswith("http"):
+                summaries.append(l_str)
+        if len(summaries) > 3:
+            summaries = summaries[:3]
 
     return {
         "summary": summaries,
@@ -507,15 +517,35 @@ class MeetingJobManager:
                 except Exception:
                     pass
 
-            # 採用 100% 完整母帶進行高精度轉錄，保證全文零遺漏
-            transcript = await asyncio.to_thread(
-                speech_to_text,
-                raw_ogg,
-                self._thread_cancellation_token,
-                None,
-                None,
-                _on_stt_segment
-            )
+            stt_done_event = asyncio.Event()
+            est_stt_dur = max(5.0, duration_sec * 0.5)
+
+            async def _stt_ticker():
+                while not stt_done_event.is_set() and not self._cancellation_token.is_set():
+                    await asyncio.sleep(0.8)
+                    elapsed_stt = time.time() - stt_start
+                    pct = min(88, int(50 + (elapsed_stt / est_stt_dur) * 38))
+                    rem_eta = max(1.0, est_stt_dur - elapsed_stt)
+                    self.status.progress = pct
+                    self.status.eta = round(rem_eta, 1)
+                    self.status.metrics["stt_elapsed"] = round(elapsed_stt, 1)
+                    self.status.msg = f"🎧 錄音完成！AI 正在進行高精度轉錄（串流解算中 {int(elapsed_stt)}s）..."
+                    self.notify_status_update()
+
+            stt_ticker_task = asyncio.create_task(_stt_ticker())
+            try:
+                # 採用 100% 完整母帶進行高精度轉錄，保證全文零遺漏
+                transcript = await asyncio.to_thread(
+                    speech_to_text,
+                    raw_ogg,
+                    self._thread_cancellation_token,
+                    None,
+                    None,
+                    _on_stt_segment
+                )
+            finally:
+                stt_done_event.set()
+                stt_ticker_task.cancel()
 
             stt_dur = round(time.time() - stt_start, 2)
             stt_rtf = round(stt_dur / max(1.0, float(duration_sec)), 2)
@@ -695,15 +725,18 @@ class MeetingJobManager:
         from ws_manager import ws_manager
 
         prompt = (
-            "你是專業會議記錄員。根據下面的逐字稿，用繁體中文輸出符合以下格式的紀要：\n"
+            "你是專業筆記與會議記錄員。請嚴格根據下面的逐字稿，使用台灣繁體中文輸出結構化紀要。\n"
+            "請嚴格依序輸出以下三個區塊標題（包含 ## 符號），嚴禁加入任何開場白或問候語：\n\n"
             "## 摘要\n"
-            "3 條，每條不超過 25 字\n"
+            "1. （核心重點 1，每條不超過 30 字，忠實呈現對話討論實況）\n"
+            "2. （核心重點 2）\n\n"
             "## 待辦\n"
-            "Markdown 表格三欄：| 事項 | 負責人 | 時間 |。若未提及負責人或時間請填寫「待定」\n"
+            "| 事項 | 負責人 | 時間 |\n"
+            "| --- | --- | --- |\n"
+            "| （若無具體待辦請填「無具體待辦事項」） | 待定 | 待定 |\n\n"
             "## 決議\n"
-            "1–3 條，只寫已經定下來的事項\n"
-            "嚴禁加入任何開場白、問候語或結尾廢話，直接輸出 Markdown 內容。\n\n"
-            f"逐字稿：\n{transcript}"
+            "1. （只寫真正定案的事項；若純為經驗交流請寫「無特定決議事項（經驗分享與交流）」）\n\n"
+            f"逐字稿內容：\n{transcript}"
         )
 
         accumulated = []

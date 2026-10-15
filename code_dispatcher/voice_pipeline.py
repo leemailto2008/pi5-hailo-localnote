@@ -255,7 +255,7 @@ def speech_to_text(
                     beam_size=1,
                     best_of=1,
                     language="zh",
-                    initial_prompt="繁體中文",
+                    initial_prompt="以下為繁體中文生活對話與商務交流，可能包含英文單字如 immigration, flight, boarding, staff, ground staff, Sir 等。請使用台灣繁體中文。",
                     condition_on_previous_text=False,
                     vad_filter=True,
                     vad_parameters=dict(threshold=0.25, min_silence_duration_ms=250)
@@ -265,7 +265,7 @@ def speech_to_text(
                         print(f"[VoicePipeline] Transcription cancelled mid-stream by token.")
                         return None
 
-                    clean_seg_text = seg.text.strip()
+                    clean_seg_text = to_taiwan_traditional(seg.text.strip())
                     # 容許藍牙 mSBC 語音特有的底噪，只要 logprob > -3.2 且非純靜音即完整保留，杜絕截字少句
                     if clean_seg_text and seg.avg_logprob > -3.2 and (seg.no_speech_prob < 0.95 or seg.avg_logprob > -2.0):
                         start_t = getattr(seg, "start", 0.0)

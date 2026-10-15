@@ -1411,6 +1411,7 @@ def get_demo_result() -> Dict[str, Any]:
 
 
 @app.post("/api/regenerate", tags=["Demo UI"])
+@app.post("/api/minutes/regenerate", tags=["Demo UI"], include_in_schema=False)
 async def post_demo_regenerate() -> Dict[str, Any]:
     """Regenerate meeting summary from transcript without recording again."""
     from meeting_minutes import minutes_manager
