@@ -63,6 +63,7 @@ class JobStatus(BaseModel):
     transcript: Optional[str] = None
     audio_url: Optional[str] = None
     summary_stream: Optional[str] = None
+    metrics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class OfflineDetector:
@@ -344,6 +345,26 @@ class MeetingJobManager:
         try:
             # --- PHASE 1: Recording ---
             t0 = time.time()
+            self.status.metrics = {
+                "job_id": job_id,
+                "record_status": "running",
+                "record_elapsed": 0.0,
+                "record_total": float(duration_sec),
+                "audio_file": f"{job_id}.ogg",
+                "stt_status": "waiting",
+                "stt_elapsed": 0.0,
+                "stt_duration": None,
+                "stt_rtf": None,
+                "stt_chars": 0,
+                "stt_paragraphs": 0,
+                "stt_engine": "Hailo-8 NPU (26 TOPS)",
+                "llm_status": "waiting",
+                "llm_elapsed": 0.0,
+                "llm_duration": None,
+                "llm_tokens": 0,
+                "llm_tps": 0.0,
+                "total_latency": None
+            }
 
             async def _on_vu(vu_data: Dict[str, Any]):
                 try:
@@ -373,6 +394,7 @@ class MeetingJobManager:
                 self.status.elapsed = round(elapsed, 1)
                 self.status.progress = min(100, int((elapsed / duration_sec) * 100))
                 self.status.eta = max(0.0, float(duration_sec - elapsed))
+                self.status.metrics["record_elapsed"] = round(elapsed, 1)
                 self.notify_status_update()
                 await asyncio.sleep(0.5)
 
@@ -381,6 +403,9 @@ class MeetingJobManager:
                 return
 
             record_ok = await record_task
+            rec_finish_time = time.time()
+            self.status.metrics["record_status"] = "done"
+            self.status.metrics["record_elapsed"] = float(duration_sec)
 
             # Broadcast reset frame upon recording completion
             try:
@@ -423,17 +448,16 @@ class MeetingJobManager:
             self.status.state = "processing"
             self.status.phase = "transcribe"
             self.status.progress = 30
-            # 根據錄音秒數動態計算預估聽寫耗時 (樹莓派 5 faster-whisper RTF 約 0.25)
+            self.status.metrics["stt_status"] = "running"
             est_stt_sec = max(10.0, float(duration_sec) * 0.26)
             self.status.eta = est_stt_sec
             self.status.msg = f"🎧 錄音已就緒！AI 正在進行語音聽寫（預計需 {int(est_stt_sec)} 秒）..."
             self.notify_status_update()
 
-            # 動態心跳協程：在 STT 背景執行期間持續平滑推進進度條與倒數秒數，杜絕假死現象
             stt_done_event = asyncio.Event()
+            stt_start = time.time()
 
             async def _stt_ticker():
-                stt_start = time.time()
                 while not stt_done_event.is_set() and not self._cancellation_token.is_set():
                     await asyncio.sleep(0.8)
                     elapsed_stt = time.time() - stt_start
@@ -441,6 +465,7 @@ class MeetingJobManager:
                     pct = min(72, int(30 + (elapsed_stt / est_stt_sec) * 42))
                     self.status.progress = pct
                     self.status.eta = round(rem_eta, 1)
+                    self.status.metrics["stt_elapsed"] = round(elapsed_stt, 1)
                     self.status.msg = f"🎧 錄音完成！AI 正在聽寫語音（已耗時 {int(elapsed_stt)} 秒，剩餘約 {int(rem_eta)} 秒）..."
                     self.notify_status_update()
 
@@ -455,12 +480,23 @@ class MeetingJobManager:
                 stt_done_event.set()
                 ticker_task.cancel()
 
+            stt_dur = round(time.time() - stt_start, 2)
+            stt_rtf = round(stt_dur / max(1.0, float(duration_sec)), 2)
+
             if self._cancellation_token.is_set():
                 print("[MeetingMinutes] Transcribe aborted by cancellation token.")
                 return
 
             if not transcript or not transcript.strip():
                 transcript = "（錄音結束，未能從耳麥中辨識出清晰人聲語音）"
+
+            paras_count = len([p for p in transcript.split("\n\n") if p.strip()])
+            chars_count = len(transcript.replace("\n", "").strip())
+            self.status.metrics["stt_status"] = "done"
+            self.status.metrics["stt_duration"] = stt_dur
+            self.status.metrics["stt_rtf"] = stt_rtf
+            self.status.metrics["stt_chars"] = chars_count
+            self.status.metrics["stt_paragraphs"] = paras_count
 
             # Intermediate result update: frontend can immediately inspect transcript
             self.status.transcript = transcript
@@ -496,10 +532,11 @@ class MeetingJobManager:
             if self._cancellation_token.is_set():
                 return
 
+            self.status.metrics["llm_status"] = "running"
             llm_done_event = asyncio.Event()
+            llm_start = time.time()
 
             async def _llm_ticker():
-                llm_start = time.time()
                 while not llm_done_event.is_set() and not self._cancellation_token.is_set():
                     await asyncio.sleep(0.8)
                     elapsed_llm = time.time() - llm_start
@@ -507,6 +544,7 @@ class MeetingJobManager:
                     rem_eta = max(1.0, 25.0 - elapsed_llm)
                     self.status.progress = pct
                     self.status.eta = round(rem_eta, 1)
+                    self.status.metrics["llm_elapsed"] = round(elapsed_llm, 1)
                     self.status.msg = f"🎧 逐字稿已就緒！AI 正在提煉紀要（串流打字中 {int(elapsed_llm)}s）..."
                     self.notify_status_update()
 
@@ -516,6 +554,13 @@ class MeetingJobManager:
             finally:
                 llm_done_event.set()
                 llm_ticker_task.cancel()
+
+            llm_dur = round(time.time() - llm_start, 2)
+            total_lat = round(time.time() - rec_finish_time, 2)
+            self.status.metrics["llm_status"] = "done"
+            self.status.metrics["llm_duration"] = llm_dur
+            self.status.metrics["total_latency"] = max(0.0, total_lat)
+
             if self._cancellation_token.is_set():
                 return
 
@@ -658,6 +703,7 @@ class MeetingJobManager:
                                         # 逐 Token 打字機串流廣播
                                         curr_text = "".join(accumulated)
                                         self.status.summary_stream = curr_text
+                                        self.status.metrics["llm_tokens"] = len(accumulated)
                                         if job_id:
                                             await ws_manager.broadcast("summary_stream", {
                                                 "job_id": job_id,
@@ -670,6 +716,7 @@ class MeetingJobManager:
                             full_text = "".join(accumulated).strip()
                             if full_text:
                                 self.status.summary_stream = full_text
+                                self.status.metrics["llm_tokens"] = len(accumulated)
                                 if job_id:
                                     await ws_manager.broadcast("summary_stream", {
                                         "job_id": job_id,

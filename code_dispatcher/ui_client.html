@@ -186,6 +186,7 @@ details[open] summary::after{content:"收起 ▴"}
     <span class="pill net" id="netPill"><span class="dot"></span><span id="netText">檢查連線狀態…</span></span>
     <span class="pill npu" id="npuPill" style="display:none;background:#e0f2fe;color:#0369a1;font-weight:700;border:1px solid #bae6fd">⚡ Hailo-8 (26 TOPS)</span>
     <span class="pill sys" id="sysPill">盒子：—</span>
+    <button class="pill" id="btnToggleMetrics" style="cursor:pointer;background:var(--card);border:1px solid var(--line);font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;" title="點擊切換顯示/隱藏核心效能與耗時指標（預設隱藏，Demo 給客戶時不露餡）">📊 效能指標</button>
   </div>
 </header>
 
@@ -257,6 +258,54 @@ details[open] summary::after{content:"收起 ▴"}
                 <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
                 <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
                 <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 核心效能與耗時指標清單區 (預設隱藏，點擊頂部開關展開) -->
+          <div id="metricsPanel" class="metrics-panel" hidden style="margin-top:12px;background:#0f172a;border:1px solid #1e293b;border-radius:12px;padding:12px 14px;color:#e2e8f0;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;border-bottom:1px solid #334155;padding-bottom:6px;">
+              <span style="font-weight:700;color:#38bdf8;display:inline-flex;align-items:center;gap:6px">
+                📊 核心效能與耗時指標 <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:#1e293b;color:#94a3b8">即時監測</span>
+              </span>
+              <span id="metricTotalLatency" style="font-family:monospace;font-size:12px;font-weight:700;color:#34d399">總交付: --</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <!-- 1. 藍牙收音 -->
+              <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+                <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                  <span>🎙️ 藍牙收音</span>
+                  <span id="metricRecStatus" style="color:#38bdf8">待命</span>
+                </div>
+                <div style="font-size:13px;font-weight:700;margin-top:2px;font-family:monospace;" id="metricRecTime">00:00 / 00:00</div>
+                <div style="color:#64748b;font-size:10.5px;margin-top:2px;">16kHz SCO · Zero-Disk</div>
+              </div>
+              <!-- 2. STT 聽寫 -->
+              <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+                <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                  <span>⚡ STT 聽寫</span>
+                  <span id="metricSttStatus" style="color:#94a3b8">等待</span>
+                </div>
+                <div style="font-size:13px;font-weight:700;margin-top:2px;font-family:monospace;" id="metricSttTime">耗時: --</div>
+                <div style="color:#64748b;font-size:10.5px;margin-top:2px;" id="metricSttRtf">RTF: -- · 段落: --</div>
+              </div>
+              <!-- 3. LLM 摘要 -->
+              <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+                <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                  <span>📝 LLM 摘要</span>
+                  <span id="metricLlmStatus" style="color:#94a3b8">等待</span>
+                </div>
+                <div style="font-size:13px;font-weight:700;margin-top:2px;font-family:monospace;" id="metricLlmTime">耗時: --</div>
+                <div style="color:#64748b;font-size:10.5px;margin-top:2px;" id="metricLlmTokens">Tokens: --</div>
+              </div>
+              <!-- 4. 運算架構與硬體 -->
+              <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+                <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                  <span>🚀 加速架構</span>
+                  <span style="color:#34d399">硬體就緒</span>
+                </div>
+                <div style="font-size:12px;font-weight:700;margin-top:2px;color:#cbd5e1" id="metricEngine">Hailo-8 (26 TOPS)</div>
+                <div style="color:#64748b;font-size:10.5px;margin-top:2px;">Pi 5 16GB · Qwen2.5-3B</div>
               </div>
             </div>
           </div>
@@ -999,6 +1048,11 @@ async function handleStatusUpdate(st) {
   renderProgress(st);
   if (st.state !== state) setState(st.state);
 
+  // ⚡ 實時更新核心效能與耗時指標
+  if (st.metrics) {
+    updateMetricsUI(st.metrics);
+  }
+
   // ⚡ 雙保險 1: 當 STT 完成且已有逐字稿時，立即展開逐字稿與音訊波形，0 秒等待！
   if (st.transcript && (el.transcriptBox.hidden || !el.transcriptBox.open || !el.transcript.innerText)) {
     el.transcriptBox.hidden = false;
@@ -1090,6 +1144,135 @@ if (btnToggleAutoClear) {
   });
 }
 updateAutoClearUI();
+
+/* ---------- 核心效能與耗時指標面板 (即時更新 & 手動切換開關，預設隱藏) ---------- */
+const btnToggleMetrics = $('btnToggleMetrics');
+const metricsPanel = $('metricsPanel');
+let showMetrics = localStorage.getItem('localnote_show_telemetry') === '1'; // 預設為 false (隱藏)
+
+function updateMetricsToggleUI() {
+  if (metricsPanel) metricsPanel.hidden = !showMetrics;
+  if (btnToggleMetrics) {
+    btnToggleMetrics.style.color = showMetrics ? 'var(--op)' : 'var(--muted)';
+    btnToggleMetrics.style.borderColor = showMetrics ? 'var(--op)' : 'var(--line)';
+    btnToggleMetrics.style.background = showMetrics ? 'var(--op-soft)' : 'var(--card)';
+    btnToggleMetrics.innerHTML = showMetrics ? '📊 效能指標 (開)' : '📊 效能指標';
+  }
+}
+
+if (btnToggleMetrics) {
+  btnToggleMetrics.addEventListener('click', () => {
+    showMetrics = !showMetrics;
+    localStorage.setItem('localnote_show_telemetry', showMetrics ? '1' : '0');
+    updateMetricsToggleUI();
+    toast(showMetrics ? '已顯示核心效能與耗時指標面板' : '已隱藏效能指標面板 (Demo 模式)');
+  });
+}
+updateMetricsToggleUI();
+
+function updateMetricsUI(m) {
+  if (!m) return;
+  const elRecStatus = $('metricRecStatus');
+  const elRecTime = $('metricRecTime');
+  const elSttStatus = $('metricSttStatus');
+  const elSttTime = $('metricSttTime');
+  const elSttRtf = $('metricSttRtf');
+  const elLlmStatus = $('metricLlmStatus');
+  const elLlmTime = $('metricLlmTime');
+  const elLlmTokens = $('metricLlmTokens');
+  const elTotalLat = $('metricTotalLatency');
+  const elEngine = $('metricEngine');
+
+  if (elEngine && m.stt_engine) elEngine.textContent = m.stt_engine;
+
+  // 1. 藍牙收音
+  if (elRecStatus) {
+    if (m.record_status === 'running') {
+      elRecStatus.textContent = '收音中 🔴';
+      elRecStatus.style.color = '#ef4444';
+    } else if (m.record_status === 'done') {
+      elRecStatus.textContent = '完成 🟢';
+      elRecStatus.style.color = '#34d399';
+    } else {
+      elRecStatus.textContent = '待命';
+      elRecStatus.style.color = '#94a3b8';
+    }
+  }
+  if (elRecTime) {
+    elRecTime.textContent = `${fmt(m.record_elapsed || 0)} / ${fmt(m.record_total || 0)}`;
+  }
+
+  // 2. STT 聽寫
+  if (elSttStatus) {
+    if (m.stt_status === 'running') {
+      elSttStatus.textContent = '聽寫中 ⚡';
+      elSttStatus.style.color = '#38bdf8';
+    } else if (m.stt_status === 'done') {
+      elSttStatus.textContent = '完成 🟢';
+      elSttStatus.style.color = '#34d399';
+    } else {
+      elSttStatus.textContent = '等待';
+      elSttStatus.style.color = '#94a3b8';
+    }
+  }
+  if (elSttTime) {
+    if (m.stt_duration != null) {
+      elSttTime.textContent = `耗時: ${m.stt_duration.toFixed(2)}s`;
+    } else if (m.stt_elapsed != null && m.stt_status === 'running') {
+      elSttTime.textContent = `耗時: ${m.stt_elapsed.toFixed(1)}s (推論中)`;
+    } else {
+      elSttTime.textContent = '耗時: --';
+    }
+  }
+  if (elSttRtf) {
+    const rtfText = m.stt_rtf != null ? `RTF: ${m.stt_rtf.toFixed(2)}x` : 'RTF: --';
+    const infoText = m.stt_chars ? `${m.stt_chars}字 · ${m.stt_paragraphs || 0}段` : '段落: --';
+    elSttRtf.textContent = `${rtfText} · ${infoText}`;
+  }
+
+  // 3. LLM 摘要
+  if (elLlmStatus) {
+    if (m.llm_status === 'running') {
+      elLlmStatus.textContent = '提煉中 📝';
+      elLlmStatus.style.color = '#fbbf24';
+    } else if (m.llm_status === 'done') {
+      elLlmStatus.textContent = '完成 🟢';
+      elLlmStatus.style.color = '#34d399';
+    } else {
+      elLlmStatus.textContent = '等待';
+      elLlmStatus.style.color = '#94a3b8';
+    }
+  }
+  if (elLlmTime) {
+    if (m.llm_duration != null) {
+      elLlmTime.textContent = `耗時: ${m.llm_duration.toFixed(2)}s`;
+    } else if (m.llm_elapsed != null && m.llm_status === 'running') {
+      elLlmTime.textContent = `耗時: ${m.llm_elapsed.toFixed(1)}s (生成中)`;
+    } else {
+      elLlmTime.textContent = '耗時: --';
+    }
+  }
+  if (elLlmTokens) {
+    const tok = m.llm_tokens || 0;
+    const tps = m.llm_tps ? ` (${m.llm_tps} t/s)` : '';
+    elLlmTokens.textContent = tok ? `輸出: ~${tok} Tokens${tps}` : 'Tokens: --';
+  }
+
+  // 4. 總交付延遲
+  if (elTotalLat) {
+    if (m.total_latency != null) {
+      elTotalLat.textContent = `總交付: ${m.total_latency.toFixed(1)}s ✓`;
+      elTotalLat.style.color = '#34d399';
+    } else if (m.record_status === 'done') {
+      const liveLat = (m.stt_elapsed || m.stt_duration || 0) + (m.llm_elapsed || m.llm_duration || 0);
+      elTotalLat.textContent = `處理中: ${liveLat.toFixed(1)}s`;
+      elTotalLat.style.color = '#38bdf8';
+    } else {
+      elTotalLat.textContent = '總交付: --';
+      elTotalLat.style.color = '#94a3b8';
+    }
+  }
+}
 
 el.recBtn.addEventListener('click', async () => {
   if (state === 'recording' || state === 'processing') return;
