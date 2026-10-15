@@ -1263,9 +1263,9 @@ def get_demo_system() -> Dict[str, Any]:
             info = HailoDeviceManager().get_info()
             npu_info = {
                 "detected": True,
-                "device": "Raspberry Pi AI HAT+ (Hailo-8)",
+                "device": "AI NPU",
                 "tops": 26,
-                "detail": info.get("device_type", "Hailo-8")
+                "detail": "AI NPU"
             }
     except Exception:
         pass
@@ -1360,13 +1360,19 @@ def get_latest_audio() -> Dict[str, Any]:
             pass
 
     if target_ogg:
-        peaks = []
-        try:
-            from two_layer_audio import extract_waveform_peaks
-            full_path = os.path.join(AUDIO_CACHE_DIR, target_ogg)
-            peaks = extract_waveform_peaks(full_path, num_peaks=200)
-        except Exception:
-            pass
+        global _peaks_cache
+        if "_peaks_cache" not in globals():
+            _peaks_cache = {}
+
+        peaks = _peaks_cache.get(target_ogg)
+        if peaks is None:
+            try:
+                from two_layer_audio import extract_waveform_peaks
+                full_path = os.path.join(AUDIO_CACHE_DIR, target_ogg)
+                peaks = extract_waveform_peaks(full_path, num_peaks=200)
+                _peaks_cache[target_ogg] = peaks
+            except Exception:
+                peaks = []
 
         return {
             "status": "success",

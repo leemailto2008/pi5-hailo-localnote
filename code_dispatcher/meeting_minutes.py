@@ -385,7 +385,7 @@ class MeetingJobManager:
                 "stt_rtf": None,
                 "stt_chars": 0,
                 "stt_paragraphs": 0,
-                "stt_engine": "Hailo-8 NPU (26 TOPS)",
+                "stt_engine": "AI NPU",
                 "llm_status": "waiting",
                 "llm_elapsed": 0.0,
                 "llm_duration": None,

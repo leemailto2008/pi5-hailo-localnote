@@ -170,7 +170,7 @@ def speech_to_text(
                 from hailo_engine.whisper_adapter import get_whisper_engine
                 engine = get_whisper_engine(auto_detect=True, model_size="base")
                 if "Hailo" in engine.get_engine_type():
-                    print("[VoicePipeline] ⚡ 探測到 Hailo-8 NPU (26 TOPS)！啟動硬體加速聽寫...")
+                    print("[VoicePipeline] ⚡ 探測到 AI NPU！啟動硬體加速聽寫...")
                     res = engine.transcribe(
                         audio_path,
                         language="zh",
@@ -179,10 +179,10 @@ def speech_to_text(
                     )
                     if res and res.get("text"):
                         text = to_taiwan_traditional(res["text"])
-                        print(f"[VoicePipeline] ⚡ Hailo-8 轉錄完成: '{text}' (耗時: {res.get('duration_sec', 0):.2f}s, RTF: {res.get('rtf', 0):.2f})")
+                        print(f"[VoicePipeline] ⚡ AI NPU 轉錄完成: '{text}' (耗時: {res.get('duration_sec', 0):.2f}s, RTF: {res.get('rtf', 0):.2f})")
                         return text
         except Exception as hailo_err:
-            print(f"[VoicePipeline] Hailo-8 硬體轉錄異常，自動平滑降級至 CPU: {hailo_err}")
+            print(f"[VoicePipeline] AI NPU 轉錄異常，自動平滑降級至 CPU: {hailo_err}")
 
     try:
         from voice_memory import audio_to_pcm_array
