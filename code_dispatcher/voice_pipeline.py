@@ -585,7 +585,18 @@ async def record_audio_from_mic(
                             pass
                         return False
 
-                    chunk = await proc.stdout.read(chunk_bytes)
+                    try:
+                        chunk = await asyncio.wait_for(proc.stdout.read(chunk_bytes), timeout=0.25)
+                    except asyncio.TimeoutError:
+                        if cancellation_event and cancellation_event.is_set():
+                            print("[VoicePipeline] Microphone recording aborting due to cancellation event (timeout).")
+                            try:
+                                proc.terminate()
+                                proc.kill()
+                            except Exception:
+                                pass
+                            return False
+                        continue
                     if not chunk:
                         break
                     num_samples = len(chunk) // 2

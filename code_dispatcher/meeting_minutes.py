@@ -194,6 +194,8 @@ class MeetingJobManager:
         self.status = JobStatus()
         self.result: Optional[MeetingResult] = None
         self._current_task: Optional[asyncio.Task] = None
+        self._record_task: Optional[asyncio.Task] = None
+        self._main_loop: Optional[asyncio.AbstractEventLoop] = None
         self.offline_detector = OfflineDetector(check_interval=10.0)
         self._last_cpu_time: float = 0.0
         self._last_cpu_idle: int = 0
@@ -204,10 +206,19 @@ class MeetingJobManager:
         self._current_ffmpeg_proc = None
 
     def notify_status_update(self):
-        """Notify WebSocket subscribers of status update."""
+        """Notify WebSocket subscribers of status update safely across async and worker threads."""
         try:
             from ws_manager import ws_manager
-            asyncio.create_task(ws_manager.broadcast("status", self.status.model_dump()))
+            coro = ws_manager.broadcast("status", self.status.model_dump())
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(coro)
+            except RuntimeError:
+                # In background worker thread (e.g. STT segment callback)
+                if self._main_loop and self._main_loop.is_running():
+                    asyncio.run_coroutine_threadsafe(coro, self._main_loop)
+                else:
+                    coro.close()
         except Exception:
             pass
 
@@ -274,17 +285,27 @@ class MeetingJobManager:
         if self._current_ffmpeg_proc:
             try:
                 self._current_ffmpeg_proc.terminate()
-                print("[MeetingMinutes] Active ffmpeg recording process terminated.")
+                try:
+                    self._current_ffmpeg_proc.kill()
+                except Exception:
+                    pass
+                print("[MeetingMinutes] Active ffmpeg recording process terminated and killed.")
             except Exception as pe:
                 print(f"[MeetingMinutes] Error terminating ffmpeg process: {pe}")
             self._current_ffmpeg_proc = None
 
-        # 2. Cancel asyncio pipeline task
+        # 2. Cancel record sub-task if active
+        if self._record_task and not self._record_task.done():
+            self._record_task.cancel()
+            self._record_task = None
+            print("[MeetingMinutes] Active recording sub-task cancelled.")
+
+        # 3. Cancel asyncio pipeline task
         if self._current_task and not self._current_task.done():
             self._current_task.cancel()
             print("[MeetingMinutes] Background pipeline task cancelled.")
 
-        # 3. Broadcast VU reset
+        # 4. Broadcast VU reset
         try:
             from ws_manager import ws_manager
             await ws_manager.broadcast("vu", {
@@ -299,7 +320,7 @@ class MeetingJobManager:
         except Exception:
             pass
 
-        # 4. Reset status to idle
+        # 5. Reset status to idle
         self.status = JobStatus(
             state="idle",
             phase="record",
@@ -317,10 +338,17 @@ class MeetingJobManager:
         if self.status.state in ("recording", "processing"):
             raise ValueError(f"盒子目前正處於 {self.status.state} 狀態，請等待完成或點擊取消。")
 
-        # Reset cancellation tokens
-        self._cancellation_token.clear()
-        self._thread_cancellation_token.clear()
+        # Capture running loop for thread-safe cross-thread calls
+        try:
+            self._main_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+
+        # Always instantiate brand new cancellation tokens to avoid race condition with zombie tasks
+        self._cancellation_token = asyncio.Event()
+        self._thread_cancellation_token = threading.Event()
         self._current_ffmpeg_proc = None
+        self._record_task = None
 
         job_id = f"m_{int(time.time())}"
         self.status = JobStatus(
@@ -376,7 +404,7 @@ class MeetingJobManager:
             def _on_proc(proc):
                 self._current_ffmpeg_proc = proc
 
-            record_task = asyncio.create_task(
+            self._record_task = asyncio.create_task(
                 record_audio_from_mic(
                     duration_sec,
                     raw_ogg,
@@ -387,7 +415,7 @@ class MeetingJobManager:
             )
 
             # Progress ticker during recording
-            while not record_task.done():
+            while not self._record_task.done():
                 if self._cancellation_token.is_set():
                     break
                 elapsed = time.time() - t0
@@ -400,9 +428,11 @@ class MeetingJobManager:
 
             if self._cancellation_token.is_set():
                 print("[MeetingMinutes] Recording aborted by cancellation token.")
+                if self._record_task and not self._record_task.done():
+                    self._record_task.cancel()
                 return
 
-            record_ok = await record_task
+            record_ok = await self._record_task
             rec_finish_time = time.time()
             self.status.metrics["record_status"] = "done"
             self.status.metrics["record_elapsed"] = float(duration_sec)

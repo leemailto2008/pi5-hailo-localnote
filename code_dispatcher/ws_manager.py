@@ -25,7 +25,10 @@ class ConnectionManager:
         await websocket.accept()
         async with self._lock:
             self.active_connections.add(websocket)
-            self.subscriptions[websocket] = {"system", "status", "bt", "vu"}
+            self.subscriptions[websocket] = {
+                "*", "system", "status", "bt", "vu",
+                "audio_ready", "transcript_stream", "transcript_ready", "summary_stream"
+            }
         logger.info(f"[WS] Client connected. Active clients: {len(self.active_connections)}")
 
     async def disconnect(self, websocket: WebSocket):
@@ -60,7 +63,7 @@ class ConnectionManager:
         async with self._lock:
             targets = [
                 ws for ws in self.active_connections
-                if target_topic in self.subscriptions.get(ws, set())
+                if "*" in self.subscriptions.get(ws, set()) or target_topic in self.subscriptions.get(ws, set())
             ]
 
         if not targets:
