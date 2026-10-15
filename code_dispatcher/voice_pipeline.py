@@ -169,7 +169,8 @@ def speech_to_text(
             if is_hailo_available():
                 from hailo_engine.whisper_adapter import get_whisper_engine
                 engine = get_whisper_engine(auto_detect=True, model_size="base")
-                if "Hailo" in engine.get_engine_type():
+                # 僅在具備純 NPU 端到端推論管線時接管，否則交由原生 4 核心 faster-whisper 極速執行
+                if "Hailo" in engine.get_engine_type() and getattr(engine, "has_full_npu_pipeline", False):
                     print("[VoicePipeline] ⚡ 探測到 AI NPU！啟動硬體加速聽寫...")
                     res = engine.transcribe(
                         audio_path,
@@ -264,41 +265,42 @@ def speech_to_text(
                         print(f"[VoicePipeline] Transcription cancelled mid-stream by token.")
                         return None
 
-                    if seg.no_speech_prob < 0.85 and seg.avg_logprob > -2.20:
-                        clean_seg_text = seg.text.strip()
-                        if clean_seg_text:
-                            start_t = getattr(seg, "start", 0.0)
-                            end_t = getattr(seg, "end", 0.0)
-                            pause_gap = start_t - last_end
+                    clean_seg_text = seg.text.strip()
+                    # 容許藍牙 mSBC 語音特有的底噪，只要 logprob > -3.2 且非純靜音即完整保留，杜絕截字少句
+                    if clean_seg_text and seg.avg_logprob > -3.2 and (seg.no_speech_prob < 0.95 or seg.avg_logprob > -2.0):
+                        start_t = getattr(seg, "start", 0.0)
+                        end_t = getattr(seg, "end", 0.0)
+                        pause_gap = start_t - last_end
 
-                            # 更加細膩的停頓斷句分段 (適合手機閱讀)
-                            should_break = False
-                            curr_len = sum(len(x) for x in current_para)
-                            if current_para:
-                                if pause_gap >= 0.45:
-                                    should_break = True
-                                elif pause_gap >= 0.25 and (curr_len >= 45 or any(current_para[-1].endswith(p) for p in ("。", "！", "？", "，", "…", "!", "?", "."))):
-                                    should_break = True
-                                elif curr_len >= 75:
-                                    should_break = True
+                        # 更加細膩的停頓斷句分段 (適合手機閱讀)
+                        should_break = False
+                        curr_len = sum(len(x) for x in current_para)
+                        if current_para:
+                            if pause_gap >= 0.45:
+                                should_break = True
+                            elif pause_gap >= 0.25 and (curr_len >= 45 or any(current_para[-1].endswith(p) for p in ("。", "！", "？", "，", "…", "!", "?", "."))):
+                                should_break = True
+                            elif curr_len >= 75:
+                                should_break = True
 
-                            if should_break and current_para:
-                                paragraphs.append("".join(current_para))
-                                current_para = [clean_seg_text]
-                            else:
-                                current_para.append(clean_seg_text)
+                        if should_break and current_para:
+                            paragraphs.append("".join(current_para))
+                            current_para = [clean_seg_text]
+                        else:
+                            current_para.append(clean_seg_text)
 
-                            last_end = end_t
+                        last_end = end_t
 
-                            # ⚡ 逐段即時串流回呼
-                            if on_segment_callback:
-                                curr_prev = "\n\n".join(paragraphs + (["".join(current_para)] if current_para else []))
-                                try:
-                                    on_segment_callback(curr_prev, clean_seg_text, False)
-                                except Exception:
-                                    pass
+                        # ⚡ 逐段即時串流回呼
+                        if on_segment_callback:
+                            curr_prev = "\n\n".join(paragraphs + (["".join(current_para)] if current_para else []))
+                            try:
+                                on_segment_callback(curr_prev, clean_seg_text, False)
+                            except Exception:
+                                pass
                     else:
-                        print(f"[VoicePipeline] Discarded low-confidence segment: '{seg.text}' (no_speech_prob={seg.no_speech_prob:.2f}, logprob={seg.avg_logprob:.2f})")
+                        if clean_seg_text:
+                            print(f"[VoicePipeline] Filtered hallucination/noise: '{seg.text}' (no_speech_prob={seg.no_speech_prob:.2f}, logprob={seg.avg_logprob:.2f})")
             except Exception as vad_err:
                 print(f"[VoicePipeline] Whisper transcribe exception: {vad_err}")
 

@@ -14,6 +14,25 @@ from typing import Dict, Any, List, Optional, Tuple
 logger = logging.getLogger("whisper-adapter")
 
 
+def load_audio_pcm(audio_path: str) -> np.ndarray:
+    """Load audio file directly into 16kHz float32 PCM numpy array."""
+    try:
+        from voice_memory import audio_to_pcm_array
+        arr = audio_to_pcm_array(audio_path)
+        if arr is not None and len(arr) > 0:
+            return arr
+    except Exception:
+        pass
+    import subprocess
+    cmd = [
+        "ffmpeg", "-nostdin", "-threads", "0",
+        "-i", audio_path,
+        "-f", "s16le", "-ac", "1", "-acodec", "pcm_s16le", "-ar", "16000", "-"
+    ]
+    out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+    return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
+
+
 class BaseWhisperEngine(ABC):
     """Whisper 引擎統一抽象介面"""
     @abstractmethod

@@ -1060,7 +1060,7 @@ async function handleStatusUpdate(st) {
     const cursor = (st.phase === 'transcribe') ? ' <span class="streaming-cursor"></span>' : '';
     el.transcript.innerHTML = esc(st.transcript).replace(/\n\n/g, '<br><br>') + cursor;
     try { el.transcript.scrollTop = el.transcript.scrollHeight; } catch (_) {}
-    if (st.job) loadAudioWaveform(st.job);
+    if (st.job && st.state !== 'recording') loadAudioWaveform(st.job);
   }
 
   // ⚡ 雙保險 2: 當 LLM 正在生成時，若輪詢到 summary_stream，以打字機呈現
