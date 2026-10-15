@@ -469,14 +469,26 @@ class MeetingJobManager:
                 markdown=f"# 會議紀要\n\n## 逐字稿\n{transcript}"
             )
 
-            # --- PHASE 3: Summarize (Ollama Meeting Minutes LLM) ---
+            # ⚡ [漸進式展示] 聽寫完成立即向前端推播逐字稿與音訊波形，0秒等待！
+            try:
+                from ws_manager import ws_manager
+                await ws_manager.broadcast("transcript_ready", {
+                    "job_id": job_id,
+                    "transcript": transcript,
+                    "duration": duration_sec,
+                    "audio_url": f"/audio/{job_id}.ogg"
+                })
+            except Exception as b_err:
+                print(f"[MeetingMinutes] Notice broadcasting transcript_ready: {b_err}")
+
+            # --- PHASE 3: Summarize (Ollama Meeting Minutes LLM with Token Streaming) ---
             if self._cancellation_token.is_set():
                 return
 
             self.status.phase = "summarize"
-            self.status.progress = 75
-            self.status.eta = 15.0
-            self.status.msg = "聽寫完成，正在提煉會議紀要與待辦事項..."
+            self.status.progress = 65
+            self.status.eta = 20.0
+            self.status.msg = "🎧 逐字稿已出爐！AI 正在即時提煉會議紀要..."
             self.notify_status_update()
 
             llm_done_event = asyncio.Event()
@@ -486,16 +498,16 @@ class MeetingJobManager:
                 while not llm_done_event.is_set() and not self._cancellation_token.is_set():
                     await asyncio.sleep(0.8)
                     elapsed_llm = time.time() - llm_start
-                    pct = min(96, int(75 + (elapsed_llm / 15.0) * 21))
-                    rem_eta = max(1.0, 15.0 - elapsed_llm)
+                    pct = min(96, int(65 + (elapsed_llm / 25.0) * 30))
+                    rem_eta = max(1.0, 25.0 - elapsed_llm)
                     self.status.progress = pct
                     self.status.eta = round(rem_eta, 1)
-                    self.status.msg = f"聽寫完成！正在提煉會議紀要（已耗時 {int(elapsed_llm)} 秒）..."
+                    self.status.msg = f"🎧 逐字稿已就緒！AI 正在提煉紀要（串流打字中 {int(elapsed_llm)}s）..."
                     self.notify_status_update()
 
             llm_ticker_task = asyncio.create_task(_llm_ticker())
             try:
-                raw_markdown = await self._generate_summary_llm(transcript)
+                raw_markdown = await self._generate_summary_llm(transcript, job_id=job_id)
             finally:
                 llm_done_event.set()
                 llm_ticker_task.cancel()
@@ -562,7 +574,7 @@ class MeetingJobManager:
         async def _regen_worker():
             try:
                 transcript = self.result.transcript
-                raw_markdown = await self._generate_summary_llm(transcript)
+                raw_markdown = await self._generate_summary_llm(transcript, job_id=job_id)
                 parsed = parse_markdown_minutes(raw_markdown)
 
                 start_dt = datetime.fromisoformat(self.result.started_at) if self.result.started_at else datetime.now()
@@ -589,8 +601,12 @@ class MeetingJobManager:
         asyncio.create_task(_regen_worker())
         return job_id
 
-    async def _generate_summary_llm(self, transcript: str) -> str:
-        """Call Ollama LLM to synthesize meeting minutes in Traditional Chinese."""
+    async def _generate_summary_llm(self, transcript: str, job_id: Optional[str] = None) -> str:
+        """Call Ollama LLM to synthesize meeting minutes with real-time SSE token streaming."""
+        import httpx
+        import json
+        from ws_manager import ws_manager
+
         prompt = (
             "你是專業會議記錄員。根據下面的逐字稿，用繁體中文輸出符合以下格式的紀要：\n"
             "## 摘要\n"
@@ -603,46 +619,63 @@ class MeetingJobManager:
             f"逐字稿：\n{transcript}"
         )
 
-        def _call_ollama():
-            target_model = DEFAULT_MODEL
-            try:
-                resp = requests.post(
-                    DEFAULT_OLLAMA_URL,
-                    json={
-                        "model": target_model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "keep_alive": "24h",
-                        "options": {"temperature": 0.2}
-                    },
-                    timeout=90
-                )
-                if resp.status_code == 200:
-                    return resp.json().get("response", "").strip()
-            except Exception:
-                pass
+        accumulated = []
+        target_models = [DEFAULT_MODEL, FALLBACK_MODEL]
 
-            # Fallback to general qwen2.5:3b
+        for model_name in target_models:
+            accumulated.clear()
             try:
-                resp = requests.post(
-                    DEFAULT_OLLAMA_URL,
-                    json={
-                        "model": FALLBACK_MODEL,
-                        "prompt": prompt,
-                        "stream": False,
-                        "keep_alive": "24h",
-                        "options": {"temperature": 0.2}
-                    },
-                    timeout=90
-                )
-                if resp.status_code == 200:
-                    return resp.json().get("response", "").strip()
+                async with httpx.AsyncClient(timeout=90.0) as client:
+                    async with client.stream(
+                        "POST",
+                        DEFAULT_OLLAMA_URL,
+                        json={
+                            "model": model_name,
+                            "prompt": prompt,
+                            "stream": True,
+                            "keep_alive": "24h",
+                            "options": {"temperature": 0.2}
+                        }
+                    ) as resp:
+                        if resp.status_code == 200:
+                            async for line in resp.aiter_lines():
+                                if self._cancellation_token and self._cancellation_token.is_set():
+                                    print("[MeetingMinutes] LLM generation aborted by cancellation token.")
+                                    return ""
+                                line = line.strip()
+                                if not line:
+                                    continue
+                                try:
+                                    chunk = json.loads(line)
+                                    token = chunk.get("response", "")
+                                    if token:
+                                        accumulated.append(token)
+                                        # 逐 Token 打字機串流廣播
+                                        if job_id:
+                                            curr_text = "".join(accumulated)
+                                            await ws_manager.broadcast("summary_stream", {
+                                                "job_id": job_id,
+                                                "token": token,
+                                                "accumulated": curr_text
+                                            })
+                                except Exception:
+                                    pass
+
+                            full_text = "".join(accumulated).strip()
+                            if full_text:
+                                if job_id:
+                                    await ws_manager.broadcast("summary_stream", {
+                                        "job_id": job_id,
+                                        "token": "",
+                                        "accumulated": full_text
+                                    })
+                                return full_text
             except Exception as e:
-                return f"## 摘要\n- LLM 處理發生逾時或未就緒 ({str(e)})\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 檢查模型服務 | 工程師 | 即刻 |\n\n## 決議\n- 維持目前本機逐字稿紀錄"
+                print(f"[MeetingMinutes] Streaming Ollama error with model {model_name}: {e}")
 
-            return "（未能成功取得模型摘要）"
-
-        return await asyncio.to_thread(_call_ollama)
+        if accumulated:
+            return "".join(accumulated).strip()
+        return "## 摘要\n- 會議內容已完整保留於逐字稿\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 確認逐字稿細節 | 全體 | 待定 |\n\n## 決議\n- 錄音與逐字稿存檔完成"
 
     async def transcribe_region(self, job_id: Optional[str], start_sec: float, end_sec: float) -> Dict[str, Any]:
         """

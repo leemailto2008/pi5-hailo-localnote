@@ -63,6 +63,9 @@ main{max-width:1200px;margin:0 auto;padding:18px 20px 56px}
 .card.out{border-left:6px solid var(--out)}
 .card.out.minor{border-left-color:#9db3cf}
 .card.set{background:var(--set-bg);border:1px dashed var(--set-line);padding:14px 18px;color:var(--set);font-size:14px}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+@keyframes pulseGlow{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.4;transform:scale(0.92)}}
+.streaming-cursor{display:inline-block;width:8px;height:16px;background:var(--op);margin-left:3px;vertical-align:middle;animation:blink 0.8s infinite;border-radius:2px}
 .card h2{margin:0;font-size:17px}
 .card.set h2{font-size:15px;color:var(--set)}
 .row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
@@ -1274,7 +1277,44 @@ window.toggleWavePlay = toggleWavePlay;
 window.stopWavePlay = stopWavePlay;
 window.playSelectedRegion = playSelectedRegion;
 window.transcribeSelectedRegion = transcribeSelectedRegion;
-window.closeRegionTranscript = closeRegionTranscript;
+function handleTranscriptReady(data) {
+  if (!data) return;
+  if (data.transcript) {
+    el.transcriptBox.hidden = false;
+    el.transcript.textContent = data.transcript;
+    toast('🎧 逐字稿已出爐！音訊就緒可試聽');
+    try {
+      el.transcriptBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } catch (_) {}
+  }
+  if (data.job_id) {
+    loadAudioWaveform(data.job_id);
+  }
+}
+
+function handleSummaryStream(data) {
+  if (!data || !data.accumulated) return;
+  renderStreamingMinutes(data.accumulated);
+}
+
+function renderStreamingMinutes(text) {
+  if (!text) return;
+  const html = text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/^### (.*$)/gim, '<h4 style="margin:10px 0 4px;color:var(--op);font-size:14px">$1</h4>')
+    .replace(/^## (.*$)/gim, '<h3 style="margin:14px 0 6px;color:var(--out);border-bottom:1px solid var(--line);padding-bottom:4px;font-size:16px">$1</h3>')
+    .replace(/^\- (.*$)/gim, '<li style="margin-left:18px;line-height:1.6">$1</li>')
+    .replace(/\n/g, '<br>');
+
+  el.minutes.innerHTML = `
+    <div class="streaming-container" style="line-height:1.75">
+      <div style="font-size:12.5px;font-weight:700;color:var(--op);margin-bottom:10px;display:flex;align-items:center;gap:6px">
+        <span class="dot" style="background:#0f766e;animation:pulseGlow 1s infinite"></span> AI 即時摘要提煉中…
+      </div>
+      <div style="font-size:14.5px;color:var(--fg)">${html}<span class="streaming-cursor"></span></div>
+    </div>`;
+}
+
 function renderMinutes(r) {
   if (!r || (!r.summary && !r.todos)) { el.minutes.innerHTML = '<div class="empty">還沒有紀要。</div>'; return; }
   const when = r.started_at ? new Date(r.started_at) : null;
@@ -1466,6 +1506,10 @@ function initWebSocket() {
         handleStatusUpdate(msg.data);
       } else if (msg.type === 'audio_ready') {
         loadAudioWaveform(msg.data?.job_id, msg.data?.peaks, msg.data?.audio_url);
+      } else if (msg.type === 'transcript_ready') {
+        handleTranscriptReady(msg.data);
+      } else if (msg.type === 'summary_stream') {
+        handleSummaryStream(msg.data);
       } else if (msg.type === 'system') {
         updateSystemUI(msg.data);
       } else if (msg.type === 'bt') {
