@@ -16,6 +16,7 @@ import threading
 import requests
 from pydantic import BaseModel, Field
 import sys
+import numpy as np
 
 # Ensure current module directory has highest priority in sys.path
 _cur_dir = os.path.dirname(os.path.abspath(__file__))

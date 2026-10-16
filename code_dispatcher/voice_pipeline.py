@@ -172,22 +172,26 @@ def speech_to_text(
                 if os.path.exists(hailo_adapter_path) and hailo_adapter_path not in sys.path:
                     sys.path.append(hailo_adapter_path)
                 
-                from hailo_engine.device_manager import is_hailo_available
+                from hailo_engine.device_manager import is_hailo_available, HailoDeviceManager
                 if is_hailo_available():
-                    from hailo_engine.whisper_adapter import get_whisper_engine
-                    engine = get_whisper_engine(auto_detect=True, model_size="base")
-                    if "Hailo" in engine.get_engine_type() and getattr(engine, "has_full_npu_pipeline", False):
-                        print("[VoicePipeline] ⚡ 探測到 AI NPU！啟動硬體加速聽寫...")
-                        res = engine.transcribe(
-                            audio_source,
-                            language="zh",
-                            cancellation_event=cancellation_event,
-                            on_segment_callback=on_segment_callback
-                        )
-                        if res and res.get("text"):
-                            text = to_taiwan_traditional(res["text"])
-                            print(f"[VoicePipeline] ⚡ AI NPU 轉錄完成: '{text}' (耗時: {res.get('duration_sec', 0):.2f}s, RTF: {res.get('rtf', 0):.2f})")
-                            return text
+                    dev_info = HailoDeviceManager().get_info()
+                    arch = str(dev_info.get("arch", "")).upper()
+                    # Hailo-10H 專職負責 LLM，不載入不相容的 Hailo-8 Whisper HEF
+                    if "HAILO10" not in arch:
+                        from hailo_engine.whisper_adapter import get_whisper_engine
+                        engine = get_whisper_engine(auto_detect=True, model_size="base")
+                        if "Hailo" in engine.get_engine_type() and getattr(engine, "has_full_npu_pipeline", False):
+                            print("[VoicePipeline] ⚡ 探測到 AI NPU！啟動硬體加速聽寫...")
+                            res = engine.transcribe(
+                                audio_source,
+                                language="zh",
+                                cancellation_event=cancellation_event,
+                                on_segment_callback=on_segment_callback
+                            )
+                            if res and res.get("text"):
+                                text = to_taiwan_traditional(res["text"])
+                                print(f"[VoicePipeline] ⚡ AI NPU 轉錄完成: '{text}' (耗時: {res.get('duration_sec', 0):.2f}s, RTF: {res.get('rtf', 0):.2f})")
+                                return text
             except Exception as hailo_err:
                 print(f"[VoicePipeline] AI NPU 轉錄異常，自動平滑降級至 CPU: {hailo_err}")
 
