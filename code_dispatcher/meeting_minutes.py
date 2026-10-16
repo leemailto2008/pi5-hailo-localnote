@@ -214,6 +214,7 @@ class MeetingJobManager:
         self._cancellation_token: asyncio.Event = asyncio.Event()
         self._thread_cancellation_token: threading.Event = threading.Event()
         self._current_ffmpeg_proc = None
+        self.bypass_summary: bool = False
 
     def notify_status_update(self):
         """Notify WebSocket subscribers of status update safely across async and worker threads."""
@@ -343,10 +344,13 @@ class MeetingJobManager:
         self.notify_status_update()
         return {"status": "cancelled", "message": "任務已成功取消並釋放資源"}
 
-    async def start_record(self, duration_sec: int) -> str:
+    async def start_record(self, duration_sec: int, bypass_summary: Optional[bool] = None) -> str:
         """Validate and spawn recording background task."""
         if self.status.state in ("recording", "processing"):
             raise ValueError(f"盒子目前正處於 {self.status.state} 狀態，請等待完成或點擊取消。")
+
+        if bypass_summary is not None:
+            self.bypass_summary = bool(bypass_summary)
 
         # Capture running loop for thread-safe cross-thread calls
         try:
@@ -371,11 +375,11 @@ class MeetingJobManager:
             job=job_id,
             msg="正在進行耳麥錄音..."
         )
-        self._current_task = asyncio.create_task(self._pipeline_worker(job_id, duration_sec))
+        self._current_task = asyncio.create_task(self._pipeline_worker(job_id, duration_sec, self.bypass_summary))
         self.notify_status_update()
         return job_id
 
-    async def _pipeline_worker(self, job_id: str, duration_sec: int):
+    async def _pipeline_worker(self, job_id: str, duration_sec: int, bypass_summary: bool = False):
         """Sequential pipeline: Record (CPU exclusive) -> Transcribe (Whisper 4t) -> Summarize (Ollama)."""
         raw_ogg = os.path.join(AUDIO_CACHE_DIR, f"{job_id}.ogg")
         start_dt = datetime.now()
@@ -617,6 +621,33 @@ class MeetingJobManager:
                 })
             except Exception as b_err:
                 print(f"[MeetingMinutes] Notice broadcasting transcript_ready: {b_err}")
+
+            # ⚡ 快速調校開關：若開啟 bypass_summary，跳過最後 AI 總結，直出完整逐字稿！
+            if bypass_summary:
+                print(f"[MeetingMinutes] ⚡ 啟用快速調校模式 (Bypass Summary)，跳過 LLM 總結，直接完成！STT 耗時: {stt_dur}s")
+                self.status.state = "completed"
+                self.status.phase = "done"
+                self.status.progress = 100
+                self.status.eta = 0.0
+                self.status.msg = f"🎉 逐字稿產出完成！（已啟用調校模式，跳過 AI 總結，STT: {stt_dur}s）"
+                self.status.metrics["llm_status"] = "skipped"
+                self.status.metrics["llm_duration"] = 0.0
+                self.status.metrics["total_elapsed"] = round(time.time() - t0, 1)
+                self.notify_status_update()
+
+                try:
+                    from ws_manager import ws_manager
+                    await ws_manager.broadcast("completed", {
+                        "job_id": job_id,
+                        "status": "completed",
+                        "transcript": transcript,
+                        "markdown": self.result.markdown,
+                        "audio_url": f"/audio/{job_id}.ogg",
+                        "metrics": self.status.metrics
+                    })
+                except Exception as c_err:
+                    print(f"[MeetingMinutes] Notice broadcasting completed: {c_err}")
+                return
 
             # --- PHASE 3: Summarize (Ollama Meeting Minutes LLM with Token Streaming) ---
             if self._cancellation_token.is_set():

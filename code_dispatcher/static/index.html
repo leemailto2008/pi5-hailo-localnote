@@ -224,6 +224,14 @@ details[open] summary::after{content:"收起 ▴"}
                 ✓ 自動清空: 開
               </button>
             </div>
+            <div class="row" style="margin-top:6px;padding:6px 10px;background:var(--set-bg);border-radius:8px;justify-content:space-between;align-items:center;">
+              <span style="font-size:12.5px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;">
+                ⚡ 快速調校 (跳過 AI 總結)
+              </span>
+              <button type="button" class="toggle-btn" id="btnToggleBypassSummary" title="點擊切換：開啟後僅執行 STT 語音轉逐字稿，跳過最後 AI 生成會議摘要與待辦">
+                ✕ 跳過總結: 關 (完整總結)
+              </button>
+            </div>
             <p class="hint" id="hint">戴上耳麥，按下紅色按鈕開始說。時間到自動停，盒子接著整理成紀要。</p>
           </div>
           <div class="progress" id="progress" hidden>
@@ -1147,6 +1155,39 @@ if (btnToggleAutoClear) {
 }
 updateAutoClearUI();
 
+/* ---------- 快速調校模式：跳過 AI 總結開關 (Bypass Summary) ---------- */
+let bypassSummary = localStorage.getItem('localnote_bypass_summary') === '1'; // 預設 0 (關閉)
+
+function updateBypassSummaryUI() {
+  const btn = $('btnToggleBypassSummary');
+  if (!btn) return;
+  if (bypassSummary) {
+    btn.className = 'toggle-btn active';
+    btn.innerHTML = '✓ 跳過總結: 開 (純逐字稿)';
+    btn.title = '點擊切換：目前為開啟（錄音完成後僅輸出逐字稿，跳過 AI 會議總結）';
+  } else {
+    btn.className = 'toggle-btn';
+    btn.innerHTML = '✕ 跳過總結: 關 (完整總結)';
+    btn.title = '點擊切換：目前為關閉（錄音完成後進行 AI 會議總結與待辦生成）';
+  }
+}
+
+const btnToggleBypassSummary = $('btnToggleBypassSummary');
+if (btnToggleBypassSummary) {
+  btnToggleBypassSummary.addEventListener('click', () => {
+    bypassSummary = !bypassSummary;
+    localStorage.setItem('localnote_bypass_summary', bypassSummary ? '1' : '0');
+    updateBypassSummaryUI();
+    toast(bypassSummary ? '⚡ 已開啟調校模式：僅產出逐字稿，跳過 AI 總結' : '已關閉調校模式：完整生成會議摘要與待辦');
+    fetch('/api/config/bypass_summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: bypassSummary })
+    }).catch(() => {});
+  });
+}
+updateBypassSummaryUI();
+
 /* ---------- 核心效能與耗時指標面板 (即時更新 & 手動切換開關，預設隱藏) ---------- */
 const btnToggleMetrics = $('btnToggleMetrics');
 const metricsPanel = $('metricsPanel');
@@ -1289,8 +1330,8 @@ el.recBtn.addEventListener('click', async () => {
 
     setState('recording');
     renderProgress({ state: 'recording', elapsed: 0, total: durSec });
-    toast('開始錄音');
-    await api(API.record, { seconds: durSec });
+    toast(bypassSummary ? '開始錄音 (調校模式: 跳過總結)' : '開始錄音');
+    await api(API.record, { seconds: durSec, bypass_summary: bypassSummary });
     if (!wsConnected) {
       clearTimeout(pollTimer);
       poll();
@@ -1614,7 +1655,15 @@ function renderStreamingMinutes(text) {
 }
 
 function renderMinutes(r) {
-  if (!r || (!r.summary && !r.todos)) { el.minutes.innerHTML = '<div class="empty">還沒有紀要。</div>'; return; }
+  if (!r) { el.minutes.innerHTML = '<div class="empty">還沒有紀要。</div>'; return; }
+  if ((!r.summary || !r.summary.length) && (!r.todos || !r.todos.length) && r.transcript) {
+    el.minutes.innerHTML = '<div style="padding:14px;background:var(--set-bg);border-radius:8px;color:var(--text);font-size:14px;line-height:1.6">⚡ <b>快速調校模式</b>：已跳過 AI 會議總結。<br><span style="color:var(--muted);font-size:13px">完整逐字稿已展開於下方，音訊波形圖已就緒。若需生成總結可隨時點擊下方「重新整理」按鈕。</span></div>';
+    el.transcriptBox.hidden = false;
+    el.transcriptBox.open = true;
+    el.transcript.innerText = r.transcript;
+    return;
+  }
+  if (!r.summary && !r.todos) { el.minutes.innerHTML = '<div class="empty">還沒有紀要。</div>'; return; }
   const when = r.started_at ? new Date(r.started_at) : null;
   const meta = [when ? `${when.getMonth() + 1} 月 ${when.getDate()} 日 ${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}` : '', r.duration ? fmt(r.duration).replace(/^(\d+):(\d+)$/, (m, a, b) => `${+a} 分 ${+b} 秒`) : ''].filter(Boolean).join(' · ');
   el.minutes.innerHTML = `

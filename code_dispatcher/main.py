@@ -1231,6 +1231,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 class DemoRecordRequest(BaseModel):
     seconds: int = Field(default=90, ge=10, le=300, description="錄音秒數")
+    bypass_summary: Optional[bool] = Field(default=None, description="是否跳過 AI 總結，僅輸出完整逐字稿")
 
 
 class DemoTranslateRequest(BaseModel):
@@ -1244,6 +1245,25 @@ class DemoTTSRequest(BaseModel):
 
 class DemoNetSwitchRequest(BaseModel):
     mode: str = Field(..., description="'ap' 切換為獨立熱點或 'sta' 切回家用 Wi-Fi")
+
+
+class BypassSummaryConfigRequest(BaseModel):
+    enabled: bool = Field(..., description="是否啟用調校模式跳過總結")
+
+
+@app.post("/api/config/bypass_summary", tags=["Demo UI"])
+async def set_bypass_summary_config(req: BypassSummaryConfigRequest) -> Dict[str, Any]:
+    """Toggle bypassing AI summary for rapid STT tuning."""
+    from meeting_minutes import minutes_manager
+    minutes_manager.bypass_summary = req.enabled
+    return {"bypass_summary": minutes_manager.bypass_summary}
+
+
+@app.get("/api/config/bypass_summary", tags=["Demo UI"])
+async def get_bypass_summary_config() -> Dict[str, Any]:
+    """Get current bypass summary setting."""
+    from meeting_minutes import minutes_manager
+    return {"bypass_summary": getattr(minutes_manager, "bypass_summary", False)}
 
 
 @app.get("/api/system", tags=["Demo UI"])
@@ -1279,7 +1299,8 @@ def get_demo_system() -> Dict[str, Any]:
         "ssid": DEFAULT_HOTSPOT_SSID,
         "host": f"{SYSTEM_HOSTNAME}.local",
         "wifi_qr": "/static/wifi.png" if os.path.exists(qr_path) else None,
-        "npu": npu_info
+        "npu": npu_info,
+        "bypass_summary": getattr(minutes_manager, "bypass_summary", False)
     }
 
 
@@ -1298,7 +1319,7 @@ async def post_demo_record(req: DemoRecordRequest) -> Dict[str, Any]:
     """Start fixed-duration recording and pipeline job."""
     from meeting_minutes import minutes_manager
     try:
-        job_id = await minutes_manager.start_record(req.seconds)
+        job_id = await minutes_manager.start_record(req.seconds, bypass_summary=req.bypass_summary)
         return {"job": job_id}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
