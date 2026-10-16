@@ -9,7 +9,7 @@ import os
 import sys
 import asyncio
 import subprocess
-from typing import Optional, Any, Callable, Dict
+from typing import Optional, Any, Callable, Dict, Union
 import numpy as np
 
 from config import (
@@ -134,66 +134,72 @@ _whisper_lock = threading.Lock()
 
 
 def speech_to_text(
-    audio_path: str,
+    audio_source: Union[str, np.ndarray, bytes],
     cancellation_event: Optional[Any] = None,
     start_sec: Optional[float] = None,
     end_sec: Optional[float] = None,
     on_segment_callback: Optional[Any] = None
 ) -> Optional[str]:
     """
-    Transcribe speech from an audio file to Traditional Chinese text.
+    Transcribe speech from an audio file, PCM bytes, or float32 PCM ndarray to Traditional Chinese text.
     Optimized with 100% Zero-Disk I/O and RAM-based PCM streaming for Raspberry Pi 5:
     - Decodes audio directly into float32 16kHz PCM array in RAM.
+    - Directly accepts in-memory numpy array for 0-latency live chunk streaming.
     - Zero temporary WAV files on physical storage (0 MicroSD wear).
     - Threading lock prevents CTranslate2 OpenMP deadlocks/spin-waits.
     - beam_size=1 (Greedy search) delivers 5x faster transcription with zero hallucination.
     - Supports cancellation_event checking and region trimming (start_sec, end_sec).
     - Supports real-time segment-by-segment streaming callback (on_segment_callback).
     """
-    # 錄音已結束，使用全核心進行無損音訊的高精度轉錄
+    audio_np: Optional[np.ndarray] = None
 
-    if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
-        print(f"[VoicePipeline] Audio file missing or empty: {audio_path}")
-        return None
+    if isinstance(audio_source, np.ndarray):
+        audio_np = audio_source
+    elif isinstance(audio_source, bytes):
+        if len(audio_source) >= 2:
+            audio_np = np.frombuffer(audio_source, dtype=np.int16).astype(np.float32) / 32768.0
+    elif isinstance(audio_source, str):
+        if not os.path.exists(audio_source) or os.path.getsize(audio_source) == 0:
+            print(f"[VoicePipeline] Audio file missing or empty: {audio_source}")
+            return None
 
-    # ---------------------------------------------------------
-    # 🚀 AI HAT+ (Hailo-8 NPU 26 TOPS) 硬體加速與自動探測切換
-    # ---------------------------------------------------------
-    if start_sec is None and end_sec is None:
+        # ---------------------------------------------------------
+        # 🚀 AI HAT+ (Hailo-8 NPU 26 TOPS) 硬體加速與自動探測切換
+        # ---------------------------------------------------------
+        if start_sec is None and end_sec is None:
+            try:
+                hailo_adapter_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "AI_HAT_plus"))
+                if os.path.exists(hailo_adapter_path) and hailo_adapter_path not in sys.path:
+                    sys.path.append(hailo_adapter_path)
+                
+                from hailo_engine.device_manager import is_hailo_available
+                if is_hailo_available():
+                    from hailo_engine.whisper_adapter import get_whisper_engine
+                    engine = get_whisper_engine(auto_detect=True, model_size="base")
+                    if "Hailo" in engine.get_engine_type() and getattr(engine, "has_full_npu_pipeline", False):
+                        print("[VoicePipeline] ⚡ 探測到 AI NPU！啟動硬體加速聽寫...")
+                        res = engine.transcribe(
+                            audio_source,
+                            language="zh",
+                            cancellation_event=cancellation_event,
+                            on_segment_callback=on_segment_callback
+                        )
+                        if res and res.get("text"):
+                            text = to_taiwan_traditional(res["text"])
+                            print(f"[VoicePipeline] ⚡ AI NPU 轉錄完成: '{text}' (耗時: {res.get('duration_sec', 0):.2f}s, RTF: {res.get('rtf', 0):.2f})")
+                            return text
+            except Exception as hailo_err:
+                print(f"[VoicePipeline] AI NPU 轉錄異常，自動平滑降級至 CPU: {hailo_err}")
+
         try:
-            hailo_adapter_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "AI_HAT_plus"))
-            if os.path.exists(hailo_adapter_path) and hailo_adapter_path not in sys.path:
-                sys.path.append(hailo_adapter_path)
-            
-            from hailo_engine.device_manager import is_hailo_available
-            if is_hailo_available():
-                from hailo_engine.whisper_adapter import get_whisper_engine
-                engine = get_whisper_engine(auto_detect=True, model_size="base")
-                # 僅在具備純 NPU 端到端推論管線時接管，否則交由原生 4 核心 faster-whisper 極速執行
-                if "Hailo" in engine.get_engine_type() and getattr(engine, "has_full_npu_pipeline", False):
-                    print("[VoicePipeline] ⚡ 探測到 AI NPU！啟動硬體加速聽寫...")
-                    res = engine.transcribe(
-                        audio_path,
-                        language="zh",
-                        cancellation_event=cancellation_event,
-                        on_segment_callback=on_segment_callback
-                    )
-                    if res and res.get("text"):
-                        text = to_taiwan_traditional(res["text"])
-                        print(f"[VoicePipeline] ⚡ AI NPU 轉錄完成: '{text}' (耗時: {res.get('duration_sec', 0):.2f}s, RTF: {res.get('rtf', 0):.2f})")
-                        return text
-        except Exception as hailo_err:
-            print(f"[VoicePipeline] AI NPU 轉錄異常，自動平滑降級至 CPU: {hailo_err}")
-
-    try:
-        from voice_memory import audio_to_pcm_array
-        audio_np = audio_to_pcm_array(audio_path)
-    except Exception as e:
-        print(f"[VoicePipeline] Failed in-memory decoding: {e}")
-        audio_np = None
+            from voice_memory import audio_to_pcm_array
+            audio_np = audio_to_pcm_array(audio_source)
+        except Exception as e:
+            print(f"[VoicePipeline] Failed in-memory decoding: {e}")
+            audio_np = None
 
     if audio_np is None or len(audio_np) < 8000:
-        print(f"[VoicePipeline] Audio PCM decode failed or too short (<0.5s): {audio_path}")
+        print(f"[VoicePipeline] Audio PCM decode failed or too short (<0.5s)")
         return None
 
     # 局部區間裁切 (Audio Region Trimming)
@@ -256,7 +262,7 @@ def speech_to_text(
                     best_of=1,
                     temperature=0.0,
                     language="zh",
-                    initial_prompt="以下為繁體中文生活對話與商務交流，可能包含英文單字如 immigration, flight, boarding, staff, ground staff, Sir 等。請使用台灣繁體中文。",
+                    initial_prompt="繁體中文。",
                     condition_on_previous_text=False,
                     compression_ratio_threshold=2.4,
                     vad_filter=True,
