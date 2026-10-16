@@ -49,9 +49,32 @@ def touch_keepalive():
     with open(WATCHDOG_FLAG_FILE, "w") as f:
         f.write(str(time.time()))
 
+def get_sta_profiles() -> list:
+    """Dynamically get all configured Wi-Fi client connections from nmcli."""
+    profiles = []
+    try:
+        res = subprocess.run(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"], capture_output=True, text=True, timeout=5)
+        for line in res.stdout.strip().splitlines():
+            if not line:
+                continue
+            parts = line.split(":")
+            if len(parts) >= 2:
+                name, ctype = parts[0], parts[1]
+                if "wireless" in ctype and "hotspot" not in name.lower() and "ap" not in name.lower():
+                    profiles.append(name)
+    except Exception:
+        pass
+    
+    # Priority defaults
+    defaults = ["netplan-wlan0-My_5G_Guest1", "netplan-wlan0-My_2G_Guest1", "My_5G_Guest1"]
+    for d in defaults:
+        if d not in profiles:
+            profiles.append(d)
+    return profiles
+
 def revert_to_sta():
     """Safely revert Pi 5 back to home Wi-Fi station mode."""
-    candidates = ["netplan-wlan0-My_2G_Guest1", "My_5G_Guest1", STA_PROFILE]
+    candidates = get_sta_profiles()
     seen = set()
     unique_candidates = [x for x in candidates if not (x in seen or seen.add(x))]
 
