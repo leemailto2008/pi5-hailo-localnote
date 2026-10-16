@@ -595,11 +595,18 @@ class MeetingJobManager:
 
             paras_count = len([p for p in transcript.split("\n\n") if p.strip()])
             chars_count = len(transcript.replace("\n", "").strip())
+            total_stt_sec = round(float(duration_sec) + stt_dur, 1)
+
             self.status.metrics["stt_status"] = "done"
             self.status.metrics["stt_duration"] = stt_dur
+            self.status.metrics["stt_tail_wait"] = stt_dur
+            self.status.metrics["record_duration"] = float(duration_sec)
+            self.status.metrics["total_stt_time"] = total_stt_sec
+            self.status.metrics["is_under_210s"] = bool(total_stt_sec <= 210.0)
             self.status.metrics["stt_rtf"] = stt_rtf
             self.status.metrics["stt_chars"] = chars_count
             self.status.metrics["stt_paragraphs"] = paras_count
+            self.status.metrics["stt_chars_per_sec"] = round(chars_count / max(1.0, total_stt_sec), 1)
 
             # Intermediate result update: frontend can immediately inspect transcript
             self.status.transcript = transcript

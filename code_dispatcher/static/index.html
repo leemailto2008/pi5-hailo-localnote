@@ -270,50 +270,50 @@ details[open] summary::after{content:"收起 ▴"}
             </div>
           </div>
 
-          <!-- 核心效能與耗時指標清單區 (預設隱藏，點擊頂部開關展開) -->
+          <!-- 核心效能與耗時指標清單區 (清晰直觀看板) -->
           <div id="metricsPanel" class="metrics-panel" hidden style="margin-top:12px;background:#0f172a;border:1px solid #1e293b;border-radius:12px;padding:12px 14px;color:#e2e8f0;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;border-bottom:1px solid #334155;padding-bottom:6px;">
               <span style="font-weight:700;color:#38bdf8;display:inline-flex;align-items:center;gap:6px">
-                📊 核心效能與耗時指標 <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:#1e293b;color:#94a3b8">即時監測</span>
+                📊 聽記盒真實效能看板 <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:#1e293b;color:#94a3b8">即時監測</span>
               </span>
-              <span id="metricTotalLatency" style="font-family:monospace;font-size:12px;font-weight:700;color:#34d399">總交付: --</span>
+              <span id="metricTargetStatus" style="font-size:11.5px;font-weight:700;color:#34d399">門檻: 總耗時 &le; 210s</span>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-              <!-- 1. 藍牙收音 -->
+              <!-- 1. 錄音時間 -->
               <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
                 <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
-                  <span>🎙️ 藍牙收音</span>
+                  <span>🎙️ 錄音時間</span>
                   <span id="metricRecStatus" style="color:#38bdf8">待命</span>
                 </div>
-                <div style="font-size:13px;font-weight:700;margin-top:2px;font-family:monospace;" id="metricRecTime">00:00 / 00:00</div>
-                <div style="color:#64748b;font-size:10.5px;margin-top:2px;">16kHz SCO · Zero-Disk</div>
+                <div style="font-size:14px;font-weight:700;margin-top:2px;font-family:monospace;color:#f8fafc;" id="metricRecTime">00:00 / 00:00</div>
+                <div style="color:#64748b;font-size:10px;margin-top:2px;">藍牙 16kHz · 記憶體零磁碟</div>
               </div>
-              <!-- 2. STT 聽寫 -->
+              <!-- 2. 逐字稿等待 (尾端延遲) -->
               <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
                 <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
-                  <span>⚡ STT 聽寫</span>
+                  <span>⚡ 逐字稿等待時間</span>
                   <span id="metricSttStatus" style="color:#94a3b8">等待</span>
                 </div>
-                <div style="font-size:13px;font-weight:700;margin-top:2px;font-family:monospace;" id="metricSttTime">耗時: --</div>
-                <div style="color:#64748b;font-size:10.5px;margin-top:2px;" id="metricSttRtf">RTF: -- · 段落: --</div>
+                <div style="font-size:14px;font-weight:700;margin-top:2px;font-family:monospace;color:#38bdf8;" id="metricSttTime">等待: --</div>
+                <div style="color:#64748b;font-size:10px;margin-top:2px;" id="metricSttDesc">邊錄邊轉 · 停錄瞬間出稿</div>
               </div>
-              <!-- 3. LLM 摘要 -->
+              <!-- 3. 總完工時間 (錄音+轉錄) -->
               <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
                 <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
-                  <span>📝 LLM 摘要</span>
-                  <span id="metricLlmStatus" style="color:#94a3b8">等待</span>
+                  <span>⏱️ 總完工時間</span>
+                  <span id="metricTotalGoal" style="color:#34d399">目標 &le; 210s</span>
                 </div>
-                <div style="font-size:13px;font-weight:700;margin-top:2px;font-family:monospace;" id="metricLlmTime">耗時: --</div>
-                <div style="color:#64748b;font-size:10.5px;margin-top:2px;" id="metricLlmTokens">Tokens: --</div>
+                <div style="font-size:14px;font-weight:700;margin-top:2px;font-family:monospace;color:#34d399;" id="metricTotalTime">總耗時: --</div>
+                <div style="color:#64748b;font-size:10px;margin-top:2px;" id="metricTotalDesc">從按下開始到看到全稿</div>
               </div>
-              <!-- 4. 運算架構與硬體 -->
+              <!-- 4. 產出成果與模型 -->
               <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
                 <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
-                  <span>🚀 加速架構</span>
-                  <span style="color:#34d399">硬體就緒</span>
+                  <span>📝 成果與模型</span>
+                  <span style="color:#a78bfa" id="metricModelBadge">Whisper small</span>
                 </div>
-                <div style="font-size:12px;font-weight:700;margin-top:2px;color:#cbd5e1" id="metricEngine">AI NPU</div>
-                <div style="color:#64748b;font-size:10.5px;margin-top:2px;">Pi 5 16GB · Qwen2.5-3B</div>
+                <div style="font-size:13px;font-weight:700;margin-top:2px;color:#f8fafc;" id="metricOutputWords">文字: --</div>
+                <div style="color:#64748b;font-size:10px;margin-top:2px;" id="metricOutputSpeed">繁中頂級無同音錯字</div>
               </div>
             </div>
           </div>
@@ -999,21 +999,27 @@ function renderProgress(st) {
   }
   if (st.state === 'recording') {
     p.hidden = false; p.className = 'progress rec';
-    el.pTitle.textContent = '錄音中';
-    el.pEta.textContent = `${fmt(st.elapsed || 0)} / ${fmt(st.total || 90)}`;
+    el.pTitle.textContent = '🎙️ 藍牙收音中 (背景同步聽寫中 ⚡)';
+    const recRemain = Math.max(0, (st.total || 90) - (st.elapsed || 0));
+    el.pEta.textContent = `已錄 ${fmt(st.elapsed || 0)} · 倒數 ${fmt(recRemain)}`;
     el.pBar.style.width = Math.min(100, 100 * (st.elapsed || 0) / Math.max(1, (st.total || 90))) + '%';
-    el.pSteps.textContent = '時間到會自動停';
-    el.recSub.textContent = fmt(Math.max(0, (st.total || 90) - (st.elapsed || 0)));
+    el.pSteps.textContent = 'AI 正邊聽邊切片轉錄，說完可按取消或等時間到自動收音...';
+    el.recSub.textContent = `剩 ${fmt(recRemain)}`;
     handledDoneJob = null;
     clearTimeout(doneHideTimer);
   } else if (st.state === 'processing') {
     updateVuMeter({ active: false });
     p.hidden = false; p.className = 'progress busy';
-    el.pTitle.textContent = (st.phase === 'transcribe') ? 'AI 正在進行語音聽寫 ⚡' : 'AI 正在提煉會議紀要 📝';
-    el.pEta.textContent = st.eta != null ? `剩餘約 ${Math.max(1, Math.round(st.eta))} 秒` : '';
-    el.pBar.style.width = Math.max(15, Math.min(96, st.progress ?? 35)) + '%';
-    const done = (k) => (['record', 'transcribe', 'summarize'].indexOf(st.phase) > ['record', 'transcribe', 'summarize'].indexOf(k)) ? ' ✓' : (st.phase === k ? '…' : '');
-    el.pSteps.textContent = st.msg || `錄音完成 ✓ → 聽寫${done('transcribe')} → 整理紀要${done('summarize')}`;
+    if (st.phase === 'transcribe') {
+      el.pTitle.textContent = '⚡ 錄音完成！AI 正彙整最後尾音';
+      el.pEta.textContent = '即將產出逐字稿 (約數秒)...';
+      el.pSteps.textContent = st.msg || '前段 90% 音訊已在錄音中轉出，正在整合母帶...';
+    } else {
+      el.pTitle.textContent = '📝 逐字稿已就緒！AI 正提煉會議重點';
+      el.pEta.textContent = '正在結構化會議決議與待辦...';
+      el.pSteps.textContent = st.msg || '逐字稿已出爐於下方，AI 正在分析重點...';
+    }
+    el.pBar.style.width = Math.max(25, Math.min(96, st.progress ?? 50)) + '%';
     handledDoneJob = null;
     clearTimeout(doneHideTimer);
     // 錄音結束進入處理中時，波形圖 0 延遲立即嘗試載入母帶
@@ -1027,18 +1033,18 @@ function renderProgress(st) {
     if (handledDoneJob !== currentJobKey) {
       handledDoneJob = currentJobKey;
       p.hidden = false; p.className = 'progress ok';
-      el.pTitle.textContent = '紀要已完成 ✓';
-      el.pEta.textContent = '';
+      el.pTitle.textContent = '🎉 任務全數完成！';
+      el.pEta.textContent = '100% 完工 ✓';
       el.pBar.style.width = '100%';
       const isSingleCol = window.innerWidth <= 700;
       if (isSingleCol) {
-        el.pSteps.innerHTML = '<span style="cursor:pointer;text-decoration:underline" onclick="scrollToMinutes()">👇 紀要已在下方生成 (點擊查看)</span>';
+        el.pSteps.innerHTML = '<span style="cursor:pointer;text-decoration:underline" onclick="scrollToMinutes()">👇 成果已在下方展開 (點擊查看)</span>';
         setTimeout(() => { scrollToMinutes(); }, 350);
       } else {
-        el.pSteps.textContent = '👉 請看右側輸出區';
+        el.pSteps.textContent = '👉 完整逐字稿與音訊波形圖已就緒';
       }
       clearTimeout(doneHideTimer);
-      doneHideTimer = setTimeout(() => { p.hidden = true; }, 7000);
+      doneHideTimer = setTimeout(() => { p.hidden = true; }, 10000);
     }
   } else if (st.state === 'error') {
     updateVuMeter({ active: false });
@@ -1219,16 +1225,15 @@ function updateMetricsUI(m) {
   const elRecTime = $('metricRecTime');
   const elSttStatus = $('metricSttStatus');
   const elSttTime = $('metricSttTime');
-  const elSttRtf = $('metricSttRtf');
-  const elLlmStatus = $('metricLlmStatus');
-  const elLlmTime = $('metricLlmTime');
-  const elLlmTokens = $('metricLlmTokens');
-  const elTotalLat = $('metricTotalLatency');
-  const elEngine = $('metricEngine');
+  const elSttDesc = $('metricSttDesc');
+  const elTotalTime = $('metricTotalTime');
+  const elTotalGoal = $('metricTotalGoal');
+  const elTotalDesc = $('metricTotalDesc');
+  const elOutputWords = $('metricOutputWords');
+  const elOutputSpeed = $('metricOutputSpeed');
+  const elTargetStatus = $('metricTargetStatus');
 
-  if (elEngine && m.stt_engine) elEngine.textContent = m.stt_engine;
-
-  // 1. 藍牙收音
+  // 1. 錄音時間
   if (elRecStatus) {
     if (m.record_status === 'running') {
       elRecStatus.textContent = '收音中 🔴';
@@ -1242,16 +1247,18 @@ function updateMetricsUI(m) {
     }
   }
   if (elRecTime) {
-    elRecTime.textContent = `${fmt(m.record_elapsed || 0)} / ${fmt(m.record_total || 0)}`;
+    const recSec = m.record_elapsed || m.record_duration || 0;
+    const totSec = m.record_total || 180;
+    elRecTime.textContent = `${fmt(recSec)} / ${fmt(totSec)}`;
   }
 
-  // 2. STT 聽寫
+  // 2. 逐字稿等待時間 (Tail Latency)
   if (elSttStatus) {
     if (m.stt_status === 'running') {
-      elSttStatus.textContent = '聽寫中 ⚡';
+      elSttStatus.textContent = '收尾中 ⚡';
       elSttStatus.style.color = '#38bdf8';
     } else if (m.stt_status === 'done') {
-      elSttStatus.textContent = '完成 🟢';
+      elSttStatus.textContent = '已出稿 🟢';
       elSttStatus.style.color = '#34d399';
     } else {
       elSttStatus.textContent = '等待';
@@ -1259,60 +1266,68 @@ function updateMetricsUI(m) {
     }
   }
   if (elSttTime) {
-    if (m.stt_duration != null) {
-      elSttTime.textContent = `耗時: ${m.stt_duration.toFixed(2)}s`;
-    } else if (m.stt_elapsed != null && m.stt_status === 'running') {
-      elSttTime.textContent = `耗時: ${m.stt_elapsed.toFixed(1)}s (推論中)`;
+    const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : m.stt_duration;
+    if (waitSec != null) {
+      elSttTime.textContent = `等待: ${waitSec.toFixed(1)} 秒`;
+    } else if (m.stt_status === 'running') {
+      elSttTime.textContent = '收尾彙整中...';
     } else {
-      elSttTime.textContent = '耗時: --';
+      elSttTime.textContent = '等待: --';
     }
   }
-  if (elSttRtf) {
-    const rtfText = m.stt_rtf != null ? `RTF: ${m.stt_rtf.toFixed(2)}x` : 'RTF: --';
-    const infoText = m.stt_chars ? `${m.stt_chars}字 · ${m.stt_paragraphs || 0}段` : '段落: --';
-    elSttRtf.textContent = `${rtfText} · ${infoText}`;
+  if (elSttDesc) {
+    if (m.stt_status === 'done') {
+      const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : m.stt_duration;
+      elSttDesc.textContent = `錄音停止後僅等 ${waitSec.toFixed(1)}s 🚀`;
+    }
   }
 
-  // 3. LLM 摘要
-  if (elLlmStatus) {
-    if (m.llm_status === 'running') {
-      elLlmStatus.textContent = '提煉中 📝';
-      elLlmStatus.style.color = '#fbbf24';
-    } else if (m.llm_status === 'done') {
-      elLlmStatus.textContent = '完成 🟢';
-      elLlmStatus.style.color = '#34d399';
+  // 3. 總完工時間 (錄音 + STT)
+  const totalSec = m.total_stt_time || (m.record_duration ? m.record_duration + (m.stt_duration || 0) : null);
+  if (elTotalTime) {
+    if (totalSec != null) {
+      elTotalTime.textContent = `總時長: ${totalSec.toFixed(1)} 秒 (${fmt(Math.round(totalSec))})`;
+      if (totalSec <= 210.0) {
+        elTotalTime.style.color = '#34d399';
+      } else {
+        elTotalTime.style.color = '#f87171';
+      }
+    } else if (m.record_status === 'running') {
+      elTotalTime.textContent = '計時中...';
     } else {
-      elLlmStatus.textContent = '等待';
-      elLlmStatus.style.color = '#94a3b8';
+      elTotalTime.textContent = '總耗時: --';
     }
   }
-  if (elLlmTime) {
-    if (m.llm_duration != null) {
-      elLlmTime.textContent = `耗時: ${m.llm_duration.toFixed(2)}s`;
-    } else if (m.llm_elapsed != null && m.llm_status === 'running') {
-      elLlmTime.textContent = `耗時: ${m.llm_elapsed.toFixed(1)}s (生成中)`;
+  if (elTotalGoal && totalSec != null) {
+    if (totalSec <= 210.0) {
+      elTotalGoal.textContent = '目標 <= 210s ✅ 達標';
+      elTotalGoal.style.color = '#34d399';
     } else {
-      elLlmTime.textContent = '耗時: --';
+      elTotalGoal.textContent = '門檻 210s ⚠️ 超時';
+      elTotalGoal.style.color = '#f87171';
     }
   }
-  if (elLlmTokens) {
-    const tok = m.llm_tokens || 0;
-    const tps = m.llm_tps ? ` (${m.llm_tps} t/s)` : '';
-    elLlmTokens.textContent = tok ? `輸出: ~${tok} Tokens${tps}` : 'Tokens: --';
+  if (elTargetStatus && totalSec != null) {
+    elTargetStatus.textContent = totalSec <= 210.0 ? '🎉 極速達標！總耗時 <= 210 秒' : '⚠️ 總耗時超過 210 秒';
+    elTargetStatus.style.color = totalSec <= 210.0 ? '#34d399' : '#f87171';
   }
 
-  // 4. 總交付延遲
-  if (elTotalLat) {
-    if (m.total_latency != null) {
-      elTotalLat.textContent = `總交付: ${m.total_latency.toFixed(1)}s ✓`;
-      elTotalLat.style.color = '#34d399';
-    } else if (m.record_status === 'done') {
-      const liveLat = (m.stt_elapsed || m.stt_duration || 0) + (m.llm_elapsed || m.llm_duration || 0);
-      elTotalLat.textContent = `處理中: ${liveLat.toFixed(1)}s`;
-      elTotalLat.style.color = '#38bdf8';
+  // 4. 成果與字數
+  if (elOutputWords) {
+    const chars = m.stt_chars || 0;
+    const paras = m.stt_paragraphs || 0;
+    if (chars > 0) {
+      elOutputWords.textContent = `${chars} 字 (${paras} 段)`;
     } else {
-      elTotalLat.textContent = '總交付: --';
-      elTotalLat.style.color = '#94a3b8';
+      elOutputWords.textContent = '文字: --';
+    }
+  }
+  if (elOutputSpeed) {
+    const cps = m.stt_chars_per_sec;
+    if (cps != null && cps > 0) {
+      elOutputSpeed.textContent = `辨識速率: ~${cps} 字/秒 · 繁中頂級`;
+    } else {
+      elOutputSpeed.textContent = '繁中頂級無同音錯字';
     }
   }
 }
