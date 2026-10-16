@@ -754,7 +754,11 @@ class MeetingJobManager:
                             "prompt": prompt,
                             "stream": True,
                             "keep_alive": "24h",
-                            "options": {"temperature": 0.2}
+                            "options": {
+                                "temperature": 0.2,
+                                "num_predict": 220,
+                                "num_thread": 4
+                            }
                         }
                     ) as resp:
                         if resp.status_code == 200:

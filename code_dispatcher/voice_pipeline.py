@@ -254,11 +254,13 @@ def speech_to_text(
                     audio_np,
                     beam_size=1,
                     best_of=1,
+                    temperature=0.0,
                     language="zh",
                     initial_prompt="以下為繁體中文生活對話與商務交流，可能包含英文單字如 immigration, flight, boarding, staff, ground staff, Sir 等。請使用台灣繁體中文。",
                     condition_on_previous_text=False,
+                    compression_ratio_threshold=2.4,
                     vad_filter=True,
-                    vad_parameters=dict(threshold=0.25, min_silence_duration_ms=250)
+                    vad_parameters=dict(threshold=0.30, min_silence_duration_ms=350, speech_pad_ms=150)
                 )
                 for seg in segments:
                     if cancellation_event and hasattr(cancellation_event, "is_set") and cancellation_event.is_set():
