@@ -439,6 +439,14 @@ class MeetingJobManager:
                         try:
                             # 轉為 16kHz float32 PCM numpy 陣列
                             pcm_np = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+
+                            # VAD 靜音快篩：若切片為停頓或微弱環境音，0秒直接跳過，杜絕佇列堆疊
+                            peak = float(np.max(np.abs(pcm_np)))
+                            rms = float(np.sqrt(np.mean(pcm_np**2)))
+                            if peak < 0.035 and rms < 0.0025:
+                                chunk_queue.task_done()
+                                continue
+
                             seg_text = await asyncio.to_thread(
                                 speech_to_text,
                                 pcm_np,
@@ -479,7 +487,7 @@ class MeetingJobManager:
                     cancellation_event=self._cancellation_token,
                     on_proc_started=_on_proc,
                     pcm_chunk_callback=_on_pcm_slice,
-                    chunk_sec=6.0
+                    chunk_sec=8.0
                 )
             )
 
