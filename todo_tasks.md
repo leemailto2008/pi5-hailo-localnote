@@ -1,8 +1,8 @@
 # 🚀 樹莓派 5 邊緣 AI 與語音網關改良藍圖 (Pi 5 Edge AI Arena Improvement Roadmap)
 
-> **版本 (Version):** 1.0.0  
-> **系統架構 (Architecture):** Raspberry Pi 5 (8GB) | Debian 13 Bookworm/Trixie | PipeWire Bluetooth mSBC | faster-whisper | Ollama Qwen 3B | FastAPI  
-> **最後更新 (Last Updated):** 2026-10-08  
+> **版本 (Version):** 1.3.0  
+> **系統架構 (Architecture):** Raspberry Pi 5 (8GB) | Debian 13 Bookworm/Trixie | PipeWire Bluetooth mSBC | faster-whisper (Small, int8) | Hailo-8 NPU (26 TOPS) | Ollama Qwen 3B | FastAPI  
+> **最後更新 (Last Updated):** 2026-10-16  
 
 本清單依據系統架構深度、可維護性 (Maintainability)、使用者體驗與極致效能，規劃 30 個具體、結構化且可落地的改良任務。
 
@@ -108,7 +108,7 @@
   - **改良方案：** 整合 CPU 溫度讀取與動態風扇 PWM 控制，並在溫度過高時動態調配 OpenMP 執行緒數。
   - **效益：** 預防硬體降頻，維持推論效能穩定於峰值。
 
-- [ ] **Task 19: 藍牙連線生命週期自動保活 (Bluetooth Link Keep-Alive & Auto-Reconnect Daemon)**
+- [x] **Task 19: 藍牙連線生命週期自動保活 (Bluetooth Link Keep-Alive & Auto-Reconnect Daemon)** ✅ *(已實裝 - Bluetooth Hub / pw-dump / D-Bus Auto-Connect)*
   - **現狀問題：** 耳麥閒置過久或短暫離身可能自動休眠斷線，重連時常需要手動操作。
   - **改良方案：** 撰寫 D-Bus 藍牙守護行程 (Bluetooth Daemon)，偵測配對耳麥廣播時自動秒級連線，並送出無聲保活封包防止耳麥自動關機。
   - **效益：** 拿起耳麥隨時可用，免去重複配對困擾。
@@ -142,7 +142,7 @@
   - **改良方案：** 啟用 Whisper 語言自動偵測 (`language=None`) 或輕量級 FastText 語種分類，支援自動判斷英語、日語、台語並動態雙向互譯。
   - **效益：** 實現真正跨語言隨說隨翻。
 
-- [ ] **Task 25: 對話記憶與滾動式會議摘要 (Conversation Memory & Rolling Summarization)**
+- [x] **Task 25: 對話記憶與滾動式會議摘要 (Conversation Memory & Rolling Summarization)** ✅ *(已實裝 - meeting_minutes.py / Whisper Small / Qwen 3B / 一鍵重新整理)*
   - **現狀問題：** 每次錄音獨立處理，缺乏對話脈絡記憶。
   - **改良方案：** 實作本機滾動式上下文快取 (Rolling Window Buffer)，將多次錄音組織為會議紀錄，並支援「一鍵生成重點摘要與待辦事項」。
   - **效益：** 由單純翻譯工具躍升為個人 AI 邊緣秘書。
@@ -156,7 +156,7 @@
 
 ## 五、 維運、安全與監控 (DevOps, Security & Observability)
 
-- [ ] **Task 27: 核心級封包隔離與安全防護 (Kernel-Level Packet Isolation & nftables Guard)**
+- [x] **Task 27: 核心級封包隔離與安全防護 (Kernel-Level Packet Isolation & Captive Portal Guard)** ✅ *(已實裝 - hotspot.md / Captive Portal / nftables)*
   - **現狀問題：** 手機連上獨立熱點時，背景常有大量 App 嘗試向外連網，佔用 Wi-Fi 空口時間 (Airtime)。
   - **改良方案：** 持續完善 `nftables.hotspot_guard.nft`，針對非 10.20.0.1 請求進行快速 TCP RST / ICMP Unreachable 拒絕，不浪費 Pi 5 CPU 與頻寬。
   - **效益：** 保障熱點連線極致純淨與零頻寬浪費。
@@ -175,3 +175,8 @@
   - **現狀問題：** 包含 Systemd 服務、nftables 設定、Bluetooth Profile 與 Python 虛擬環境分佈於多個路徑，缺乏一體化災難備份。
   - **改良方案：** 撰寫宣告式 (Declarative) 部署與備份腳本 (`backup_restore.sh`)，將系統狀態壓成加密封存檔並支援 3 分鐘全新機器還原。
   - **效益：** 消除單點故障隱憂，提升專案工程標準。
+
+- [ ] **Task 31: AI HAT+ (Hailo-8 NPU 26 TOPS) 硬體加速與端到端串流推論 (Hardware NPU Acceleration & Dual-Engine Pipeline)**
+  - **現狀問題：** 純 CPU 運算在錄音進行中無法雙工推論 (導致藍牙 SCO UART 總線爭搶掉包與音訊打碎)；且長音訊轉錄 CPU 耗時長達數十秒。
+  - **改良方案：** 整合樹莓派官方 AI HAT+ (Hailo-8 M.2 PCIe Gen2/3)，利用純硬體 NPU (26 TOPS) 承接神經網絡推論，徹底釋放 CPU 0/1 頻寬，實現錄音當下「邊說邊出字」的真·即時雙工串流體驗。
+  - **效益：** 推論延遲壓縮至 <0.3s (RTF < 0.1)，達成錄音中零掉包與即時字幕反饋。

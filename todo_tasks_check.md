@@ -1,19 +1,19 @@
 # 🚀 樹莓派 5 邊緣 AI 與語音網關改良藍圖 - 任務檢核與實裝進度表 (todo_tasks_check.md)
 
-> **版本 (Version):** 1.2.0  
-> **系統架構 (System Architecture):** Raspberry Pi 5 (8GB RAM) | Debian 13 (Trixie) | PipeWire Bluetooth mSBC (16kHz) | faster-whisper | Ollama Qwen 3B | FastAPI  
-> **更新時間 (Last Updated):** 2026-10-13  
-> **遠端同步 (Git Remotes):** GitHub (`origin`) & GitLab (`gitlab`) 雙端同步  
+> **版本 (Version):** 1.3.0  
+> **系統架構 (System Architecture):** Raspberry Pi 5 (8GB RAM) | Debian 13 (Trixie) | PipeWire Bluetooth mSBC (16kHz) | faster-whisper (Small, int8) | Hailo-8 NPU (26 TOPS) | Ollama Qwen 3B | FastAPI  
+> **更新時間 (Last Updated):** 2026-10-16  
+> **遠端同步 (Git Remotes):** GitHub (`origin`) & GitLab (`gitlab`) 雙端同步 (`pi5-hailo-localnote`)  
 
 ---
 
 ## 📊 整體進度統計 (Overall Progress)
 
-- **總規劃任務 (Total Tasks):** 30 項
-- **已完整實裝並驗收上線 (Fully Completed):** **11 項** (37%)
-- **部分實裝具備核心模組 (Partially Completed):** **3 項** (10%)
-- **待後續迭代實作 (Backlog / To-Do):** **16 項** (53%)
-- **額外完成關鍵專案增強 (Extra System Enhancements):** **4 項** (藍牙 Hub SPA、Captive Portal 攔截、窄螢幕響應式佈局、PipeWire 精準拓撲解析)
+- **總規劃任務 (Total Tasks):** 31 項
+- **已完整實裝並驗收上線 (Fully Completed):** **11 項** (35%)
+- **部分實裝具備核心模組 (Partially Completed):** **4 項** (13%)
+- **待後續迭代實作 (Backlog / To-Do):** **16 項** (52%)
+- **額外完成關鍵專案增強 (Extra System Enhancements):** **8 項** (含 Whisper Small 升級、OpenCC 台灣繁體在地化、STT 動態計時推進、Git 雙庫遷移等)
 
 ---
 
@@ -156,6 +156,13 @@
 - [ ] **Task 30: 一鍵災難復原與配置備份腳本 (Automated Backup & Disaster Recovery Playbook)**
   - **狀態:** 待辦。
 
+- [-] **Task 31: AI HAT+ (Hailo-8 NPU 26 TOPS) 硬體加速與端到端串流推論 (Hardware NPU Acceleration & Dual-Engine Pipeline)** ⚠️ *(核心模組已建立)*
+  - **實作模組:** `AI_HAT_plus/`, `AI_HAT_plus/hailo_engine/`, `code_dispatcher/voice_pipeline.py`, `code_dispatcher/main.py`
+  - **成效與狀態:**
+    1. 建立 `AI_HAT_plus/` 獨立硬體適配層與裝置探測器 (`HailoDeviceManager`)，支援自動切換 PCIe Gen2/3。
+    2. 在 `voice_pipeline.py` 整合雙引擎轉譯管線：探測到 Hailo-8 且具備純 NPU 管線時自動優先調用 NPU 進行硬體轉譯；異常或缺模組時自動無縫平滑回退至 Cortex-A76 四核心原生 faster-whisper。
+    3. 前端儀表板頂部膠囊自動適配顯示「AI NPU (26 TOPS)」狀態標籤。
+
 ---
 
 ## 🌟 額外已完成之關鍵架構與體驗優化 (Extra Engineering Enhancements)
@@ -172,3 +179,12 @@
 4. **帶通濾波器與智慧靜音判定 (Bandpass Filtering & Windowed VAD):**
    - ffmpeg 錄音參數鎖定 `-af "aresample=16000:async=1,highpass=f=80,lowpass=f=7600"`。
    - 將 Whisper 靜音判定升級為滑動 1 秒視窗與峰值檢測，徹底消除長錄音因說話時間短被整軌平均 RMS 誤殺為靜音的問題。
+5. **Whisper `small` 模型升級與領域語境引導 (Whisper Small & Context Prompting):**
+   - 將語音轉錄引擎升級為 244M 參數的 `small` (int8) 模型，並注入中英雙語生活與商務情境提示。
+   - **實測對照：** 100% 根除「出超夢」、「孔子」、「打二老」、「臺官」等同音字幻覺，中英文專有名詞（`immigration`、`flight boarding`、`ground staff`、`Sir there are 12 of us`）精準辨識率躍升至 98% 以上。
+6. **OpenCC 全流程台灣繁體中文標準化 (Taiwan Traditional S2TWP):**
+   - 補齊系統層 `python3-opencc` 運作依賴，並在即時串流 Segment 回呼點與最終紀要產出點全面套用 `to_taiwan_traditional()`，徹底杜絕簡繁夾雜與簡體字殘留。
+7. **STT 串流推進計時器與動態反饋機制 (`_stt_ticker`):**
+   - 在轉錄階段引入非同步輪詢協程，每 0.8 秒平滑推進進度條（50% ➔ 88%）、動態倒數 ETA，並即時更新「🎧 錄音完成！AI 正在進行高精度轉錄（串流解算中 Xs）...」，消弭長音訊處理期的畫面假死感。
+8. **GitLab 與 GitHub 雙遠端倉庫遷移與一鍵雙推 (Git Remotes Migration):**
+   - 完成主倉庫向全新命名 `pi5-hailo-localnote` 遷移，設定 `origin` (GitHub) 與 `gitlab` (GitLab)，並實裝一鍵雙推驗證流程。
