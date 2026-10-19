@@ -334,6 +334,11 @@ def speech_to_text(
 
                     clean_seg_text = to_taiwan_traditional(seg.text.strip())
                     clean_seg_text = clean_hallucination_repetitions(clean_seg_text)
+
+                    # 徹底過濾 Whisper 偶發將 prompt 原文當成逐字稿抄錄的狀況
+                    for hp in ("No Hallucination", "no hallucination", "Verbatim speech transcription", "without hallucinated words", "Verbatim speech", "Clean verbatim"):
+                        clean_seg_text = clean_seg_text.replace(hp, "").strip(" .,;:!?，。")
+
                     # 容許藍牙 mSBC 語音特有的底噪，只要 logprob > -3.2 且非純靜音即完整保留，杜絕截字少句
                     if clean_seg_text and seg.avg_logprob > -3.2 and (seg.no_speech_prob < 0.95 or seg.avg_logprob > -2.0):
                         start_t = getattr(seg, "start", 0.0)
@@ -382,7 +387,9 @@ def speech_to_text(
         hallucinations = [
             "字幕by", "字幕提供", "請不吝點贊", "點贊訂閱", "謝謝大家", "轉載請註明",
             "感謝收看", "索兰娅", "點點欄目", "明鏡", "優質內容", "歡迎關注", "歡迎訂閱",
-            "諾映", "詩雅桑", "MING PAO", "小靈通", "CANADA", "TORONTO"
+            "諾映", "詩雅桑", "MING PAO", "小靈通", "CANADA", "TORONTO",
+            "No Hallucination", "no hallucination", "Verbatim speech transcription",
+            "without hallucinated words", "Verbatim speech", "Clean verbatim"
         ]
         for h in hallucinations:
             text = text.replace(h, "")

@@ -506,7 +506,23 @@ class MeetingJobManager:
                                         curr_preview = clean_t
                                     else:
                                         prev_chunk = live_segments[-2]
-                                        sep = " " if (prev_chunk[-1].isascii() and prev_chunk[-1].isalnum() and clean_t[0].isascii()) else "，"
+                                        # 判斷前後是否皆為純英文/ASCII環境
+                                        is_eng_prev = any(c.isascii() and c.isalpha() for c in prev_chunk)
+                                        is_eng_curr = any(c.isascii() and c.isalpha() for c in clean_t)
+                                        if is_eng_prev and is_eng_curr:
+                                            # 全英文環境：若前段已有結尾標點則空一格，否則以逗號加空格連接
+                                            if prev_chunk.endswith((".", "!", "?", "...", "…", ";", ":")):
+                                                sep = " "
+                                            elif prev_chunk.endswith(","):
+                                                sep = " "
+                                            else:
+                                                sep = ", "
+                                        else:
+                                            # 中文或中英夾雜環境
+                                            if prev_chunk.endswith(("。", "！", "？", "!", "?", "...", "…", ".")):
+                                                sep = " "
+                                            else:
+                                                sep = "，"
                                         curr_preview = curr_preview + sep + clean_t
                                     self.status.transcript = curr_preview
                                     self.status.metrics["stt_chars"] = len(curr_preview.replace("\n", "").strip())
@@ -592,12 +608,20 @@ class MeetingJobManager:
             self.status.metrics["record_elapsed"] = float(duration_sec)
             self.status.metrics["record_total"] = float(duration_sec)
 
-            # 等待剩餘切片隊列消化完畢 (最多等待最後 1 個尾音切片，~1.5s)
+            # 等待剩餘切片隊列消化完畢 (依據隊列深度動態等待，保證全軌切片 100% 入稿)
             await chunk_queue.put(None)
+            rem_chunks = chunk_queue.qsize()
+            if rem_chunks > 0:
+                print(f"[MeetingMinutes] ⏳ 錄音結束，等待剩餘 {rem_chunks} 個音訊切片消化完成...")
+                self.status.phase = "transcribe"
+                self.status.msg = f"🎧 錄音完成！正在結算最後 {rem_chunks} 段逐字稿..."
+                self.notify_status_update()
+
             try:
-                await asyncio.wait_for(chunk_worker_done.wait(), timeout=5.0)
+                drain_timeout = max(8.0, float(rem_chunks * 3.5 + 4.0))
+                await asyncio.wait_for(chunk_worker_done.wait(), timeout=drain_timeout)
             except asyncio.TimeoutError:
-                pass
+                print(f"[MeetingMinutes] Warning: chunk queue drain timed out after {drain_timeout}s.")
 
             # Broadcast reset frame upon recording completion
             try:
