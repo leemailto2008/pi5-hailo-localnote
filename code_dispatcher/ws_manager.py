@@ -19,12 +19,14 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
         self.subscriptions: Dict[WebSocket, Set[str]] = {}
+        self._send_locks: Dict[WebSocket, asyncio.Lock] = {}
         self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         async with self._lock:
             self.active_connections.add(websocket)
+            self._send_locks[websocket] = asyncio.Lock()
             self.subscriptions[websocket] = {
                 "*", "system", "status", "bt", "vu",
                 "audio_ready", "transcript_stream", "transcript_ready", "summary_stream"
@@ -34,6 +36,7 @@ class ConnectionManager:
     async def disconnect(self, websocket: WebSocket):
         async with self._lock:
             self.active_connections.discard(websocket)
+            self._send_locks.pop(websocket, None)
             self.subscriptions.pop(websocket, None)
         logger.info(f"[WS] Client disconnected. Active clients: {len(self.active_connections)}")
 
@@ -45,14 +48,19 @@ class ConnectionManager:
                 self.subscriptions[websocket].discard(topic)
 
     async def send_personal(self, websocket: WebSocket, event_type: str, data: Any):
+        lock = self._send_locks.get(websocket)
         try:
             payload = json.dumps({"type": event_type, "data": data}, ensure_ascii=False)
-            await websocket.send_text(payload)
+            if lock:
+                async with lock:
+                    await websocket.send_text(payload)
+            else:
+                await websocket.send_text(payload)
         except Exception as e:
             logger.warning(f"[WS] Failed to send to single client: {e}")
 
     async def broadcast(self, event_type: str, data: Any, topic: Optional[str] = None):
-        """Broadcast payload to all subscribed connected clients non-blockingly."""
+        """Broadcast payload to all subscribed connected clients serialized non-blockingly."""
         if not self.active_connections:
             return
 
@@ -71,8 +79,13 @@ class ConnectionManager:
 
         dead_connections = []
         for ws in targets:
+            lock = self._send_locks.get(ws)
             try:
-                await ws.send_text(payload)
+                if lock:
+                    async with lock:
+                        await ws.send_text(payload)
+                else:
+                    await ws.send_text(payload)
             except Exception:
                 dead_connections.append(ws)
 
@@ -80,6 +93,7 @@ class ConnectionManager:
             async with self._lock:
                 for ws in dead_connections:
                     self.active_connections.discard(ws)
+                    self._send_locks.pop(ws, None)
                     self.subscriptions.pop(ws, None)
 
 

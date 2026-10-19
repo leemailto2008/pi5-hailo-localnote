@@ -445,49 +445,53 @@ class MeetingJobManager:
 
             async def _chunk_stt_worker():
                 """背景即時解算滑動切片 PCM 音訊"""
-                while True:
-                    item = await chunk_queue.get()
-                    if item is None:
+                try:
+                    while True:
+                        item = await chunk_queue.get()
+                        if item is None:
+                            chunk_queue.task_done()
+                            break
+                        pcm_bytes, is_final = item
+                        if pcm_bytes and len(pcm_bytes) >= 16000 and not self._cancellation_token.is_set():
+                            try:
+                                # 轉為 16kHz float32 PCM numpy 陣列
+                                pcm_np = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+
+                                # VAD 靜音快篩：若切片為停頓或微弱環境音，0秒直接跳過，杜絕佇列堆疊
+                                peak = float(np.max(np.abs(pcm_np)))
+                                rms = float(np.sqrt(np.mean(pcm_np**2)))
+                                if peak < 0.035 and rms < 0.0025:
+                                    chunk_queue.task_done()
+                                    continue
+
+                                seg_text = await asyncio.to_thread(
+                                    speech_to_text,
+                                    pcm_np,
+                                    self._thread_cancellation_token
+                                )
+                                if seg_text and seg_text.strip():
+                                    clean_t = seg_text.strip()
+                                    live_segments.append(clean_t)
+                                    curr_preview = "，".join(live_segments)
+                                    self.status.transcript = curr_preview
+                                    self.status.metrics["stt_chars"] = len(curr_preview.replace("\n", "").strip())
+                                    self.status.metrics["stt_paragraphs"] = len(live_segments)
+                                    self.notify_status_update()
+                                    # 即時向前端手機推送打字機事件
+                                    from ws_manager import ws_manager
+                                    await ws_manager.broadcast("transcript_stream", {
+                                        "job_id": job_id,
+                                        "transcript": curr_preview,
+                                        "segment": clean_t,
+                                        "is_final": is_final
+                                    })
+                            except Exception as c_err:
+                                print(f"[MeetingMinutes] Live chunk STT error: {c_err}")
                         chunk_queue.task_done()
-                        break
-                    pcm_bytes, is_final = item
-                    if pcm_bytes and len(pcm_bytes) >= 16000 and not self._cancellation_token.is_set():
-                        try:
-                            # 轉為 16kHz float32 PCM numpy 陣列
-                            pcm_np = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-
-                            # VAD 靜音快篩：若切片為停頓或微弱環境音，0秒直接跳過，杜絕佇列堆疊
-                            peak = float(np.max(np.abs(pcm_np)))
-                            rms = float(np.sqrt(np.mean(pcm_np**2)))
-                            if peak < 0.035 and rms < 0.0025:
-                                chunk_queue.task_done()
-                                continue
-
-                            seg_text = await asyncio.to_thread(
-                                speech_to_text,
-                                pcm_np,
-                                self._thread_cancellation_token
-                            )
-                            if seg_text and seg_text.strip():
-                                clean_t = seg_text.strip()
-                                live_segments.append(clean_t)
-                                curr_preview = "，".join(live_segments)
-                                self.status.transcript = curr_preview
-                                self.status.metrics["stt_chars"] = len(curr_preview.replace("\n", "").strip())
-                                self.status.metrics["stt_paragraphs"] = len(live_segments)
-                                self.notify_status_update()
-                                # 即時向前端手機推送打字機事件
-                                from ws_manager import ws_manager
-                                await ws_manager.broadcast("transcript_stream", {
-                                    "job_id": job_id,
-                                    "transcript": curr_preview,
-                                    "segment": clean_t,
-                                    "is_final": is_final
-                                })
-                        except Exception as c_err:
-                            print(f"[MeetingMinutes] Live chunk STT error: {c_err}")
-                    chunk_queue.task_done()
-                chunk_worker_done.set()
+                except Exception as worker_err:
+                    print(f"[MeetingMinutes] chunk_stt_worker loop error: {worker_err}")
+                finally:
+                    chunk_worker_done.set()
 
             chunk_worker_task = asyncio.create_task(_chunk_stt_worker())
 
