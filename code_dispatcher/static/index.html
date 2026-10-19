@@ -214,6 +214,10 @@ details[open] summary::after{content:"收起 ▴"}
                 <option value="90" selected>1 分 30 秒（演示）</option>
                 <option value="120">2 分鐘</option>
                 <option value="180">3 分鐘</option>
+                <option value="300">5 分鐘</option>
+                <option value="600">10 分鐘</option>
+                <option value="900">15 分鐘</option>
+                <option value="1800">30 分鐘（完整會議）</option>
               </select>
             </div>
             <div class="row" style="margin-top:6px;padding:6px 10px;background:var(--set-bg);border-radius:8px;justify-content:space-between;align-items:center;">
@@ -240,6 +244,7 @@ details[open] summary::after{content:"收起 ▴"}
               <b id="pTitle">—</b>
               <span class="spacer"></span>
               <span id="pEta"></span>
+              <button class="btn primary" id="btnFinishEarly" onclick="finishRecordingEarly()" style="padding:3px 9px;font-size:12px;margin-left:6px;background:var(--accent);color:#fff;" title="說完了！提早結束錄音並立即整理會議紀要" hidden>⏹️ 立即整理</button>
               <button class="btn ghost danger" id="btnCancelJob" onclick="cancelActiveJob()" style="padding:3px 8px;font-size:12px;margin-left:6px;border-color:var(--rec);color:var(--rec);" title="立即終止錄音或背景推論">⛔ 取消</button>
             </div>
             <div class="bar"><i id="pBar"></i></div>
@@ -500,6 +505,7 @@ const API = {
   result: '/api/result', regenerate: '/api/regenerate', translate: '/api/translate',
   tts: '/api/tts', netSwitch: '/api/net/switch',
   cancelJob: '/api/record/cancel', transcribeRegion: '/api/transcribe/region',
+  finishRecord: '/api/record/finish',
   latestAudio: '/api/audio/latest'
 };
 const POLL_MS = 1500;
@@ -512,7 +518,7 @@ const el = {
   viewMain: $('viewMain'), viewBt: $('viewBt'),
   netPill: $('netPill'), netText: $('netText'), npuPill: $('npuPill'), sysPill: $('sysPill'), btChip: $('btChip'), btText: $('btText'), btDetail: $('btDetail'),
   recBtn: $('recBtn'), recLabel: $('recLabel'), recSub: $('recSub'), dur: $('dur'), hint: $('hint'),
-  progress: $('progress'), pTitle: $('pTitle'), pEta: $('pEta'), pBar: $('pBar'), pSteps: $('pSteps'),
+  progress: $('progress'), pTitle: $('pTitle'), pEta: $('pEta'), pBar: $('pBar'), pSteps: $('pSteps'), btnFinishEarly: $('btnFinishEarly'),
   minutes: $('minutes'), transcriptBox: $('transcriptBox'), transcript: $('transcript'),
   regenBtn: $('regenBtn'), copyBtn: $('copyBtn'), toEnBtn: $('toEnBtn'), toZhBtn: $('toZhBtn'), ttsBtn: $('ttsBtn'), enBox: $('enBox'),
   ssid: $('ssid'), host: $('host'), qr: $('qr'), netSwitch: $('netSwitch'), toast: $('toast'),
@@ -993,22 +999,25 @@ function renderProgress(st) {
   const p = el.progress;
   if (st.state === 'idle') {
     p.hidden = true;
+    if (el.btnFinishEarly) el.btnFinishEarly.hidden = true;
     handledDoneJob = null;
     updateVuMeter({ active: false });
     return;
   }
   if (st.state === 'recording') {
     p.hidden = false; p.className = 'progress rec';
+    if (el.btnFinishEarly) { el.btnFinishEarly.hidden = false; el.btnFinishEarly.disabled = false; }
     el.pTitle.textContent = '🎙️ 藍牙收音中 (背景同步聽寫中 ⚡)';
     const recRemain = Math.max(0, (st.total || 90) - (st.elapsed || 0));
     el.pEta.textContent = `已錄 ${fmt(st.elapsed || 0)} · 倒數 ${fmt(recRemain)}`;
     el.pBar.style.width = Math.min(100, 100 * (st.elapsed || 0) / Math.max(1, (st.total || 90))) + '%';
-    el.pSteps.textContent = 'AI 正邊聽邊切片轉錄，說完可按取消或等時間到自動收音...';
+    el.pSteps.textContent = 'AI 正邊聽邊切片轉錄，說完可按「立即整理」或等時間到自動收音...';
     el.recSub.textContent = `剩 ${fmt(recRemain)}`;
     handledDoneJob = null;
     clearTimeout(doneHideTimer);
   } else if (st.state === 'processing') {
     updateVuMeter({ active: false });
+    if (el.btnFinishEarly) el.btnFinishEarly.hidden = true;
     p.hidden = false; p.className = 'progress busy';
     if (st.phase === 'transcribe') {
       el.pTitle.textContent = '⚡ 錄音完成！AI 正彙整最後尾音';
@@ -1029,6 +1038,7 @@ function renderProgress(st) {
     }
   } else if (st.state === 'done') {
     updateVuMeter({ active: false });
+    if (el.btnFinishEarly) el.btnFinishEarly.hidden = true;
     const currentJobKey = st.job || 'done';
     if (handledDoneJob !== currentJobKey) {
       handledDoneJob = currentJobKey;
@@ -1396,6 +1406,17 @@ async function cancelActiveJob() {
   }
 }
 
+async function finishRecordingEarly() {
+  try {
+    toast('⏹️ 收到提前結束指令，正在整理會議紀要...');
+    if (el.btnFinishEarly) el.btnFinishEarly.disabled = true;
+    await api(API.finishRecord, {});
+  } catch (e) {
+    toast('提前結算失敗：' + e.message);
+    if (el.btnFinishEarly) el.btnFinishEarly.disabled = false;
+  }
+}
+
 /* ---------- Task 12: Wavesurfer 音訊波形試聽與區間剪輯 ---------- */
 let wavesurfer = null;
 let wsRegions = null;
@@ -1614,6 +1635,7 @@ async function loadAudioWaveform(jobId, precomputedPeaks, directAudioUrl) {
 }
 
 window.cancelActiveJob = cancelActiveJob;
+window.finishRecordingEarly = finishRecordingEarly;
 window.toggleWavePlay = toggleWavePlay;
 window.stopWavePlay = stopWavePlay;
 window.playSelectedRegion = playSelectedRegion;

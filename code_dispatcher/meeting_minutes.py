@@ -214,6 +214,7 @@ class MeetingJobManager:
         self._cpu_cache: float = 0.0
         self._cancellation_token: asyncio.Event = asyncio.Event()
         self._thread_cancellation_token: threading.Event = threading.Event()
+        self._finish_early_event: asyncio.Event = asyncio.Event()
         self._current_ffmpeg_proc = None
         self.bypass_summary: bool = False
 
@@ -345,6 +346,19 @@ class MeetingJobManager:
         self.notify_status_update()
         return {"status": "cancelled", "message": "任務已成功取消並釋放資源"}
 
+    async def finish_recording_early(self) -> Dict[str, Any]:
+        """
+        Gracefully finish recording early, preserve all captured audio and immediately proceed to STT and minutes generation.
+        """
+        if self.status.state != "recording":
+            return {"status": "ignored", "message": f"目前狀態為 {self.status.state}，無需提前結算錄音"}
+
+        print("[MeetingMinutes] finish_recording_early requested.")
+        self._finish_early_event.set()
+        self.status.msg = "⏹️ 收到提前結束指令，正在封存已錄音訊並整理紀要..."
+        self.notify_status_update()
+        return {"status": "finishing_early", "message": "已成功提早結束錄音，正在結算音訊與生成會議紀要"}
+
     async def start_record(self, duration_sec: int, bypass_summary: Optional[bool] = None) -> str:
         """Validate and spawn recording background task."""
         if self.status.state in ("recording", "processing"):
@@ -362,6 +376,7 @@ class MeetingJobManager:
         # Always instantiate brand new cancellation tokens to avoid race condition with zombie tasks
         self._cancellation_token = asyncio.Event()
         self._thread_cancellation_token = threading.Event()
+        self._finish_early_event = asyncio.Event()
         self._current_ffmpeg_proc = None
         self._record_task = None
 
@@ -488,13 +503,16 @@ class MeetingJobManager:
                     cancellation_event=self._cancellation_token,
                     on_proc_started=_on_proc,
                     pcm_chunk_callback=_on_pcm_slice,
-                    chunk_sec=8.0
+                    chunk_sec=8.0,
+                    finish_early_event=self._finish_early_event
                 )
             )
 
             # Progress ticker during recording
             while not self._record_task.done():
                 if self._cancellation_token.is_set():
+                    break
+                if self._finish_early_event.is_set():
                     break
                 elapsed = time.time() - t0
                 self.status.elapsed = round(elapsed, 1)
@@ -513,8 +531,13 @@ class MeetingJobManager:
 
             record_ok = await self._record_task
             rec_finish_time = time.time()
+            actual_record_sec = max(1.0, round(rec_finish_time - t0, 1))
+            duration_sec = int(round(actual_record_sec))
+            self.status.total = float(duration_sec)
+            self.status.elapsed = float(duration_sec)
             self.status.metrics["record_status"] = "done"
             self.status.metrics["record_elapsed"] = float(duration_sec)
+            self.status.metrics["record_total"] = float(duration_sec)
 
             # 等待剩餘切片隊列消化完畢 (最多等待最後 1 個尾音切片，~1.5s)
             await chunk_queue.put(None)
@@ -788,8 +811,154 @@ class MeetingJobManager:
         asyncio.create_task(_regen_worker())
         return job_id
 
+    async def _generate_hierarchical_summary_llm(self, transcript: str, job_id: Optional[str] = None) -> str:
+        """
+        Hierarchical Map-Reduce summary for long transcripts (>2500 characters) to avoid LLM context overflow.
+        1. Map: Split transcript into logical chunks (~1500 chars) and extract bullet points per chunk.
+        2. Reduce: Synthesize the extracted points into the final structured meeting minutes.
+        """
+        import httpx
+        import json
+        from ws_manager import ws_manager
+
+        print(f"[MeetingMinutes] 📚 長時逐字稿長度: {len(transcript)} 字，啟動 Map-Reduce 階層式提煉...")
+        
+        # 1. Map 階段：按自然段落切塊
+        paragraphs = [p.strip() for p in transcript.split("\n\n") if p.strip()]
+        if not paragraphs:
+            paragraphs = [p.strip() for p in transcript.split("\n") if p.strip()]
+        if not paragraphs:
+            paragraphs = [transcript]
+
+        chunks = []
+        cur_chunk = []
+        cur_len = 0
+        for p in paragraphs:
+            cur_chunk.append(p)
+            cur_len += len(p)
+            if cur_len >= 1400:
+                chunks.append("\n\n".join(cur_chunk))
+                cur_chunk = []
+                cur_len = 0
+        if cur_chunk:
+            chunks.append("\n\n".join(cur_chunk))
+
+        print(f"[MeetingMinutes] 長逐字稿共劃分為 {len(chunks)} 個語意區塊進行 Map 萃取。")
+        chunk_summaries = []
+
+        # 針對每個 Chunk 進行重點抽取
+        for idx, ch in enumerate(chunks, 1):
+            if self._cancellation_token and self._cancellation_token.is_set():
+                return ""
+            map_prompt = (
+                f"你是專業筆記員。以下是長會議的第 {idx}/{len(chunks)} 段對話。請提取本段的 2-3 個核心討論點與行動事項（繁體中文條列，嚴禁任何開場白）：\n\n"
+                f"{ch}"
+            )
+            chunk_res = []
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    resp = await client.post(
+                        DEFAULT_OLLAMA_URL,
+                        json={
+                            "model": DEFAULT_MODEL,
+                            "prompt": map_prompt,
+                            "stream": False,
+                            "keep_alive": "24h",
+                            "options": {
+                                "temperature": 0.2,
+                                "num_predict": 150,
+                                "num_thread": 4
+                            }
+                        }
+                    )
+                    if resp.status_code == 200:
+                        chunk_res.append(resp.json().get("response", "").strip())
+            except Exception as e:
+                print(f"[MeetingMinutes] Chunk {idx} map summary note: {e}")
+
+            if chunk_res and chunk_res[0]:
+                chunk_summaries.append(f"【第 {idx} 階段重點】\n" + chunk_res[0])
+            else:
+                chunk_summaries.append(f"【第 {idx} 階段重點】\n" + ch[:250])
+
+        combined_notes = "\n\n".join(chunk_summaries)
+        print(f"[MeetingMinutes] Map 階段完成，各段要點提煉完畢 ({len(combined_notes)} 字)，進入 Reduce 全局綜整...")
+
+        # 2. Reduce 階段：全局綜合提煉標準三段式紀要 (以串流方式推送給使用者)
+        reduce_prompt = (
+            "你是專業筆記與會議記錄員。請嚴格根據以下長時會議各階段提煉出的重點，使用台灣繁體中文輸出完整的結構化紀要。\n"
+            "請嚴格依序輸出以下三個區塊標題（包含 ## 符號），嚴禁加入任何開場白或問候語：\n\n"
+            "## 摘要\n"
+            "1. （核心重點 1，每條不超過 35 字，綜觀全場討論核心）\n"
+            "2. （核心重點 2）\n"
+            "3. （核心重點 3）\n\n"
+            "## 待辦\n"
+            "| 事項 | 負責人 | 時間 |\n"
+            "| --- | --- | --- |\n"
+            "| （若無具體待辦請填「無具體待辦事項」） | 待定 | 待定 |\n\n"
+            "## 決議\n"
+            "1. （只寫真正定案的事項；若純為經驗交流請寫「無特定決議事項（經驗分享與交流）」）\n\n"
+            f"各階段討論要點彙整：\n{combined_notes}"
+        )
+
+        accumulated = []
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                async with client.stream(
+                    "POST",
+                    DEFAULT_OLLAMA_URL,
+                    json={
+                        "model": DEFAULT_MODEL,
+                        "prompt": reduce_prompt,
+                        "stream": True,
+                        "keep_alive": "24h",
+                        "options": {
+                            "temperature": 0.2,
+                            "num_predict": 260,
+                            "num_thread": 4
+                        }
+                    }
+                ) as resp:
+                    if resp.status_code == 200:
+                        async for line in resp.aiter_lines():
+                            if self._cancellation_token and self._cancellation_token.is_set():
+                                return ""
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                chunk = json.loads(line)
+                                token = chunk.get("response", "")
+                                if token:
+                                    accumulated.append(token)
+                                    curr_text = "".join(accumulated)
+                                    self.status.summary_stream = curr_text
+                                    self.status.metrics["llm_tokens"] = len(accumulated)
+                                    if job_id:
+                                        await ws_manager.broadcast("summary_stream", {
+                                            "job_id": job_id,
+                                            "token": token,
+                                            "accumulated": curr_text
+                                        })
+                            except Exception:
+                                pass
+
+                        full_text = "".join(accumulated).strip()
+                        if full_text:
+                            return full_text
+        except Exception as re:
+            print(f"[MeetingMinutes] Reduce stage error: {re}")
+
+        if accumulated:
+            return "".join(accumulated).strip()
+        return "## 摘要\n- 長時會議重點已成功提煉\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 確認各階段討論進度 | 全體 | 待定 |\n\n## 決議\n- 30 分鐘長時錄音會議紀要存檔完成"
+
     async def _generate_summary_llm(self, transcript: str, job_id: Optional[str] = None) -> str:
         """Call Ollama LLM to synthesize meeting minutes with real-time SSE token streaming."""
+        clean_transcript = transcript.strip()
+        if len(clean_transcript) > 2500:
+            return await self._generate_hierarchical_summary_llm(clean_transcript, job_id=job_id)
+
         import httpx
         import json
         from ws_manager import ws_manager

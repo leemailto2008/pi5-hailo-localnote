@@ -569,13 +569,14 @@ async def record_audio_from_mic(
     cancellation_event: Optional[asyncio.Event] = None,
     on_proc_started: Optional[Callable[[Any], Any]] = None,
     pcm_chunk_callback: Optional[Callable[[bytes, bool], Any]] = None,
-    chunk_sec: float = 5.0
+    chunk_sec: float = 5.0,
+    finish_early_event: Optional[asyncio.Event] = None
 ) -> bool:
     """
     Record audio from Bluetooth headset mic using ffmpeg with explicit hardware source routing.
     Uses clean 16kHz resampling with highpass filter to eliminate sub-bass rumble and avoid clipping.
     If vu_callback or pcm_chunk_callback is supplied, streams raw 16kHz PCM to stdout for 50ms VU and concurrent streaming STT chunk slicing.
-    Supports cancellation_event token for immediate hardware abort and process cleanup.
+    Supports cancellation_event token for immediate hardware abort and finish_early_event for graceful early wrap-up.
     """
     source_node = await ensure_bluetooth_recording_ready()
 
@@ -640,6 +641,14 @@ async def record_audio_from_mic(
                             pass
                         return False
 
+                    if finish_early_event and finish_early_event.is_set():
+                        print("[VoicePipeline] Microphone recording finishing early upon user request.")
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                        break
+
                     try:
                         chunk = await asyncio.wait_for(proc.stdout.read(chunk_bytes), timeout=0.25)
                     except asyncio.TimeoutError:
@@ -651,6 +660,13 @@ async def record_audio_from_mic(
                             except Exception:
                                 pass
                             return False
+                        if finish_early_event and finish_early_event.is_set():
+                            print("[VoicePipeline] Microphone recording finishing early upon user request (timeout).")
+                            try:
+                                proc.terminate()
+                            except Exception:
+                                pass
+                            break
                         continue
                     if not chunk:
                         break
@@ -725,7 +741,8 @@ async def record_audio_from_mic(
             return False
 
         await proc.wait()
-        if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 500:
+        is_early = bool(finish_early_event and finish_early_event.is_set())
+        if (proc.returncode in (0, 255, -15) or is_early) and os.path.exists(output_path) and os.path.getsize(output_path) > 500:
             return True
 
         # Fallback to default if explicit node failed

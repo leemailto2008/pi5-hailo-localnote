@@ -1230,7 +1230,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # -------------------------------------------------------------
 
 class DemoRecordRequest(BaseModel):
-    seconds: int = Field(default=90, ge=10, le=300, description="錄音秒數")
+    seconds: int = Field(default=90, ge=10, le=1800, description="錄音秒數")
     bypass_summary: Optional[bool] = Field(default=None, description="是否跳過 AI 總結，僅輸出完整逐字稿")
 
 
@@ -1331,6 +1331,13 @@ async def post_demo_cancel() -> Dict[str, Any]:
     """Instantly cancel active recording or inference job and release hardware resources."""
     from meeting_minutes import minutes_manager
     return await minutes_manager.cancel_current_job()
+
+
+@app.post("/api/record/finish", tags=["Demo UI"])
+async def post_demo_finish_record() -> Dict[str, Any]:
+    """Instantly finish recording early, preserve all captured audio and proceed to minutes synthesis."""
+    from meeting_minutes import minutes_manager
+    return await minutes_manager.finish_recording_early()
 
 
 class RegionTranscribeRequest(BaseModel):
