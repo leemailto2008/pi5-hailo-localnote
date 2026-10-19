@@ -7,6 +7,7 @@ Bi-directional Voice Pipeline for Raspberry Pi 5:
 
 import os
 import sys
+import re
 import asyncio
 import subprocess
 from typing import Optional, Any, Callable, Dict, Union
