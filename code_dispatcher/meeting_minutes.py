@@ -501,7 +501,13 @@ class MeetingJobManager:
                                 if seg_text and seg_text.strip():
                                     clean_t = seg_text.strip()
                                     live_segments.append(clean_t)
-                                    curr_preview = "，".join(live_segments)
+                                    # 智慧雙語拼接 (Bilingual live stream preview)
+                                    if len(live_segments) == 1:
+                                        curr_preview = clean_t
+                                    else:
+                                        prev_chunk = live_segments[-2]
+                                        sep = " " if (prev_chunk[-1].isascii() and prev_chunk[-1].isalnum() and clean_t[0].isascii()) else "，"
+                                        curr_preview = curr_preview + sep + clean_t
                                     self.status.transcript = curr_preview
                                     self.status.metrics["stt_chars"] = len(curr_preview.replace("\n", "").strip())
                                     self.status.metrics["stt_paragraphs"] = len(live_segments)

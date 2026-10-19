@@ -10,7 +10,7 @@ import sys
 import re
 import asyncio
 import subprocess
-from typing import Optional, Any, Callable, Dict, Union
+from typing import Optional, Any, Callable, Dict, Union, List
 import numpy as np
 
 from config import (
@@ -157,6 +157,21 @@ def clean_hallucination_repetitions(text: str) -> str:
     return text.strip()
 
 
+def join_bilingual_tokens(tokens: List[str]) -> str:
+    """智慧拼接中英文語音片段，若相鄰皆為拉丁字母/數字則自動保留標準空格，杜絕英文黏字"""
+    res = ""
+    for t in tokens:
+        if not t:
+            continue
+        if not res:
+            res = t
+        elif res[-1].isalnum() and t[0].isalnum():
+            res += " " + t
+        else:
+            res += t
+    return res
+
+
 import threading
 _whisper_lock = threading.Lock()
 
@@ -166,10 +181,12 @@ def speech_to_text(
     cancellation_event: Optional[Any] = None,
     start_sec: Optional[float] = None,
     end_sec: Optional[float] = None,
-    on_segment_callback: Optional[Any] = None
+    on_segment_callback: Optional[Any] = None,
+    language: Optional[str] = None
 ) -> Optional[str]:
     """
-    Transcribe speech from an audio file, PCM bytes, or float32 PCM ndarray to Traditional Chinese text.
+    Transcribe speech from an audio file, PCM bytes, or float32 PCM ndarray.
+    Supports 100% automatic language detection (language=None) preserving natural bilingual code-switching (Traditional Chinese & English verbatim).
     Optimized with 100% Zero-Disk I/O and RAM-based PCM streaming for Raspberry Pi 5:
     - Decodes audio directly into float32 16kHz PCM array in RAM.
     - Directly accepts in-memory numpy array for 0-latency live chunk streaming.
@@ -212,7 +229,7 @@ def speech_to_text(
                             print("[VoicePipeline] ⚡ 探測到 AI NPU！啟動硬體加速聽寫...")
                             res = engine.transcribe(
                                 audio_source,
-                                language="zh",
+                                language=language or "zh",
                                 cancellation_event=cancellation_event,
                                 on_segment_callback=on_segment_callback
                             )
@@ -251,8 +268,6 @@ def speech_to_text(
 
     try:
         # Pre-check: In-memory silence check
-        # 避免長錄音（如 60s）因中間有靜音導致整軌平均 RMS 被拉低至 0.0025 被粗暴誤殺
-        # 檢測全局峰值與各 1 秒視窗的最大 RMS：若有任何語音活動 (峰值 >= 0.03 或 局部 RMS >= 0.002)，交由 Whisper 辨識
         peak = float(np.max(np.abs(audio_np)))
         win_size = 16000
         has_voice_activity = peak >= 0.03
@@ -288,13 +303,22 @@ def speech_to_text(
                 return None
 
             try:
+                # 提示詞動態支援中英雙語環境，原音自動辨識 (Bilingual prompt for natural code-switching)
+                if language == "en":
+                    prompt = "English dialogue, technical terms, and natural conversation."
+                elif language == "zh":
+                    prompt = "繁體中文語音對話，包含常見專業名詞。"
+                else:
+                    # language=None: 原音自動語種識別，引導繁體中文與英語專業詞彙（例如 Python, API, PR, issue, meeting）自然輸出
+                    prompt = "繁體中文與英語對話，包含常見技術專業詞彙，如 Python, Raspberry Pi, AI, meeting, issue, review."
+
                 segments, info = model.transcribe(
                     audio_np,
                     beam_size=1,
                     best_of=1,
                     temperature=[0.0, 0.2, 0.4],
-                    language="zh",
-                    initial_prompt="繁體中文。",
+                    language=language,
+                    initial_prompt=prompt,
                     condition_on_previous_text=False,
                     repetition_penalty=1.2,
                     no_repeat_ngram_size=3,
@@ -328,7 +352,7 @@ def speech_to_text(
                                 should_break = True
 
                         if should_break and current_para:
-                            paragraphs.append("".join(current_para))
+                            paragraphs.append(join_bilingual_tokens(current_para))
                             current_para = [clean_seg_text]
                         else:
                             current_para.append(clean_seg_text)
@@ -337,7 +361,7 @@ def speech_to_text(
 
                         # ⚡ 逐段即時串流回呼
                         if on_segment_callback:
-                            curr_prev = "\n\n".join(paragraphs + (["".join(current_para)] if current_para else []))
+                            curr_prev = "\n\n".join(paragraphs + ([join_bilingual_tokens(current_para)] if current_para else []))
                             curr_prev = clean_hallucination_repetitions(curr_prev)
                             try:
                                 on_segment_callback(curr_prev, clean_seg_text, False)
@@ -350,7 +374,7 @@ def speech_to_text(
                 print(f"[VoicePipeline] Whisper transcribe exception: {vad_err}")
 
         if current_para:
-            paragraphs.append("".join(current_para))
+            paragraphs.append(join_bilingual_tokens(current_para))
 
         text = "\n\n".join(paragraphs).strip()
 

@@ -173,7 +173,7 @@ def speech_to_text(audio_path: str) -> Optional[str]:
                     wav_path,
                     beam_size=1,
                     best_of=1,
-                    language="zh",
+                    language=None,
                     initial_prompt=domain_prompt,
                     condition_on_previous_text=False,
                     vad_filter=True,
