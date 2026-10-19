@@ -357,17 +357,20 @@ def transcribe_chunk_isolated(chunk_wav_path: str) -> str:
         return speech_to_text(chunk_wav_path)
 
     try:
-        from voice_pipeline import to_taiwan_traditional
+        from voice_pipeline import to_taiwan_traditional, clean_hallucination_repetitions
         segments, _ = model.transcribe(
             chunk_wav_path,
             language="zh",
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=400),
             condition_on_previous_text=False,
+            repetition_penalty=1.2,
+            no_repeat_ngram_size=3,
+            hallucination_silence_threshold=2.0,
             beam_size=1
         )
         texts = [s.text.strip() for s in segments if s.text.strip()]
-        combined = "".join(texts)
+        combined = clean_hallucination_repetitions("".join(texts))
         return to_taiwan_traditional(combined)
     except Exception as e:
         print(f"[TwoLayerAudio] Error transcribing isolated chunk: {e}")

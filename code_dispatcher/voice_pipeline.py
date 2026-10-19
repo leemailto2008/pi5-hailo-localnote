@@ -129,6 +129,33 @@ def convert_oga_to_wav(input_oga_path: str, output_wav_path: str) -> bool:
         return False
 
 
+def clean_hallucination_repetitions(text: str) -> str:
+    """
+    抑制 Whisper 偶發之自回歸解碼重複迴圈 (Hallucination Repetition Loops)。
+    例如: '在這裡,我們會在這裡,我們會在這裡,...我們' -> '在這裡,我們會在這裡'
+    保留自然口語疊字 (如 '看看'、'好好')，只過濾重複 2 次以上的長度 >= 2 片語。
+    """
+    if not text:
+        return text
+
+    # 針對包含逗號、頓號、空白或無標點的連續重複片語進行壓縮 (短語長度 2~30)
+    for _ in range(3):
+        def repl(match):
+            phrase = match.group(1)
+            sep = match.group(2)
+            return phrase + (sep if sep else "")
+        text = re.sub(r'([^\s，,。！？!?]{2,30})([，,、\s]?)(?:\1\2){2,}', repl, text)
+
+    # 清理結尾殘缺的重複片段（例如最後被 token limit 截斷剩下的殘字，如 "，我們"）
+    m = re.search(r'([^\s，,。！？!?]{2,20})[，,、\s]*([^\s，,。！？!?]{1,10})$', text)
+    if m:
+        full_word, tail = m.group(1), m.group(2)
+        if full_word.startswith(tail) and len(tail) < len(full_word):
+            text = text[:-len(tail)].rstrip("，,、 ")
+
+    return text.strip()
+
+
 import threading
 _whisper_lock = threading.Lock()
 
@@ -264,11 +291,14 @@ def speech_to_text(
                     audio_np,
                     beam_size=1,
                     best_of=1,
-                    temperature=0.0,
+                    temperature=[0.0, 0.2, 0.4],
                     language="zh",
                     initial_prompt="繁體中文。",
                     condition_on_previous_text=False,
+                    repetition_penalty=1.2,
+                    no_repeat_ngram_size=3,
                     compression_ratio_threshold=2.4,
+                    hallucination_silence_threshold=2.0,
                     vad_filter=True,
                     vad_parameters=dict(threshold=0.30, min_silence_duration_ms=350, speech_pad_ms=150)
                 )
@@ -278,6 +308,7 @@ def speech_to_text(
                         return None
 
                     clean_seg_text = to_taiwan_traditional(seg.text.strip())
+                    clean_seg_text = clean_hallucination_repetitions(clean_seg_text)
                     # 容許藍牙 mSBC 語音特有的底噪，只要 logprob > -3.2 且非純靜音即完整保留，杜絕截字少句
                     if clean_seg_text and seg.avg_logprob > -3.2 and (seg.no_speech_prob < 0.95 or seg.avg_logprob > -2.0):
                         start_t = getattr(seg, "start", 0.0)
@@ -306,6 +337,7 @@ def speech_to_text(
                         # ⚡ 逐段即時串流回呼
                         if on_segment_callback:
                             curr_prev = "\n\n".join(paragraphs + (["".join(current_para)] if current_para else []))
+                            curr_prev = clean_hallucination_repetitions(curr_prev)
                             try:
                                 on_segment_callback(curr_prev, clean_seg_text, False)
                             except Exception:
@@ -330,6 +362,9 @@ def speech_to_text(
         for h in hallucinations:
             text = text.replace(h, "")
         text = text.strip()
+
+        # 杜絕自回歸重複迴圈 (Deduplicate hallucination repetition loops)
+        text = clean_hallucination_repetitions(text)
 
         # Normalize to pure Taiwan Traditional Chinese
         if text:
@@ -758,12 +793,16 @@ def transcribe_pcm_chunk(pcm_bytes: bytes) -> Optional[str]:
                     samples,
                     beam_size=1,
                     language="zh",
+                    repetition_penalty=1.2,
+                    no_repeat_ngram_size=3,
+                    hallucination_silence_threshold=2.0,
                     vad_filter=True,
                     initial_prompt="繁體中文"
                 )
                 texts = [s.text.strip() for s in segments if s.text.strip()]
                 if texts:
-                    return to_taiwan_traditional("".join(texts)).strip()
+                    clean_res = clean_hallucination_repetitions("".join(texts))
+                    return to_taiwan_traditional(clean_res).strip()
     except Exception as e:
         print(f"[VoicePipeline] transcribe_pcm_chunk error: {e}")
     return None
