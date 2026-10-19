@@ -1102,12 +1102,19 @@ async function poll() {
   try {
     const st = await api(API.status);
     await handleStatusUpdate(st);
-    if (!wsConnected) {
-      if (st.state === 'recording' || st.state === 'processing') pollTimer = setTimeout(poll, POLL_MS);
-      else pollTimer = setTimeout(poll, POLL_MS * 3);
+    // 雙軌保險機制：在 recording 或 processing 期間，即使 WebSocket 已連線，
+    // 依然每 2.5 秒定時執行一次 HTTP 輪詢校驗，杜絕因手機休眠或網路毛刺錯過 done 事件
+    if (st.state === 'recording' || st.state === 'processing') {
+      pollTimer = setTimeout(poll, 2500);
+    } else if (!wsConnected) {
+      pollTimer = setTimeout(poll, POLL_MS * 3);
     }
   } catch (e) {
-    if (!wsConnected) pollTimer = setTimeout(poll, POLL_MS * 2);
+    if (state === 'recording' || state === 'processing') {
+      pollTimer = setTimeout(poll, 2500);
+    } else if (!wsConnected) {
+      pollTimer = setTimeout(poll, POLL_MS * 2);
+    }
   }
 }
 
@@ -1271,55 +1278,81 @@ function updateMetricsUI(m) {
       elSttStatus.textContent = '已出稿 🟢';
       elSttStatus.style.color = '#34d399';
     } else {
-      elSttStatus.textContent = '等待';
-      elSttStatus.style.color = '#94a3b8';
+      elSttStatus.textContent = '即時解算';
+      elSttStatus.style.color = '#38bdf8';
     }
   }
   if (elSttTime) {
-    const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : m.stt_duration;
-    if (waitSec != null) {
-      elSttTime.textContent = `等待: ${waitSec.toFixed(1)} 秒`;
+    if (m.stt_status === 'done') {
+      const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : (m.stt_duration || 0);
+      if (waitSec <= 0.5) {
+        elSttTime.textContent = '即時 0 延遲 (秒出)';
+        elSttTime.style.color = '#34d399';
+      } else {
+        elSttTime.textContent = `等待: ${waitSec.toFixed(1)} 秒`;
+      }
+    } else if (m.record_status === 'running') {
+      elSttTime.textContent = '邊錄邊轉中 (延遲<1s)';
+      elSttTime.style.color = '#38bdf8';
     } else if (m.stt_status === 'running') {
-      elSttTime.textContent = '收尾彙整中...';
+      elSttTime.textContent = '尾端整合中...';
+      elSttTime.style.color = '#fbbf24';
     } else {
       elSttTime.textContent = '等待: --';
     }
   }
   if (elSttDesc) {
     if (m.stt_status === 'done') {
-      const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : m.stt_duration;
-      elSttDesc.textContent = `錄音停止後僅等 ${waitSec.toFixed(1)}s 🚀`;
+      const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : (m.stt_duration || 0);
+      elSttDesc.textContent = `⚡ 錄音結束僅等 ${waitSec.toFixed(1)}s (快取直出)`;
+    } else if (m.record_status === 'running') {
+      elSttDesc.textContent = '🎙️ 人聲即時轉字中 · 無延遲堆積';
     }
   }
 
-  // 3. 總完工時間 (錄音 + STT)
+  // 3. 總完工時間 (錄音 + STT，門檻動態計算為 錄音目標 + 30 秒)
+  const recTarget = m.record_total || m.record_duration || 90;
+  const targetThreshold = Math.round(recTarget + 30);
   const totalSec = m.total_stt_time || (m.record_duration ? m.record_duration + (m.stt_duration || 0) : null);
+
   if (elTotalTime) {
-    if (totalSec != null) {
+    if (totalSec != null && m.stt_status === 'done') {
       elTotalTime.textContent = `總時長: ${totalSec.toFixed(1)} 秒 (${fmt(Math.round(totalSec))})`;
-      if (totalSec <= 210.0) {
+      if (totalSec <= targetThreshold) {
         elTotalTime.style.color = '#34d399';
       } else {
         elTotalTime.style.color = '#f87171';
       }
     } else if (m.record_status === 'running') {
-      elTotalTime.textContent = '計時中...';
+      const curRec = m.record_elapsed || 0;
+      elTotalTime.textContent = `錄音中: ${fmt(Math.round(curRec))}`;
+      elTotalTime.style.color = '#38bdf8';
     } else {
       elTotalTime.textContent = '總耗時: --';
     }
   }
-  if (elTotalGoal && totalSec != null) {
-    if (totalSec <= 210.0) {
-      elTotalGoal.textContent = '目標 <= 210s ✅ 達標';
-      elTotalGoal.style.color = '#34d399';
+  if (elTotalGoal) {
+    if (totalSec != null && m.stt_status === 'done') {
+      if (totalSec <= targetThreshold) {
+        elTotalGoal.textContent = `目標 <= ${targetThreshold}s ✅ 達標`;
+        elTotalGoal.style.color = '#34d399';
+      } else {
+        elTotalGoal.textContent = `門檻 ${targetThreshold}s ⚠️ 超時`;
+        elTotalGoal.style.color = '#f87171';
+      }
     } else {
-      elTotalGoal.textContent = '門檻 210s ⚠️ 超時';
-      elTotalGoal.style.color = '#f87171';
+      elTotalGoal.textContent = `目標 <= ${targetThreshold}s`;
+      elTotalGoal.style.color = '#94a3b8';
     }
   }
-  if (elTargetStatus && totalSec != null) {
-    elTargetStatus.textContent = totalSec <= 210.0 ? '🎉 極速達標！總耗時 <= 210 秒' : '⚠️ 總耗時超過 210 秒';
-    elTargetStatus.style.color = totalSec <= 210.0 ? '#34d399' : '#f87171';
+  if (elTargetStatus) {
+    if (totalSec != null && m.stt_status === 'done') {
+      elTargetStatus.textContent = totalSec <= targetThreshold ? `🎉 極速達標！總耗時 <= ${targetThreshold} 秒` : `⚠️ 總耗時超過 ${targetThreshold} 秒`;
+      elTargetStatus.style.color = totalSec <= targetThreshold ? '#34d399' : '#f87171';
+    } else {
+      elTargetStatus.textContent = `門檻: 總耗時 <= ${targetThreshold}s`;
+      elTargetStatus.style.color = '#38bdf8';
+    }
   }
 
   // 4. 成果與字數

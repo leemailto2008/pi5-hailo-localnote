@@ -700,16 +700,20 @@ class MeetingJobManager:
             llm_done_event = asyncio.Event()
             llm_start = time.time()
 
+            is_long_hierarchical = bool(len(transcript.strip()) > 2500)
+            est_total_llm_sec = max(25.0, float(len(transcript.strip()) / 1400.0) * 16.0)
+
             async def _llm_ticker():
                 while not llm_done_event.is_set() and not self._cancellation_token.is_set():
                     await asyncio.sleep(0.8)
                     elapsed_llm = time.time() - llm_start
-                    pct = min(96, int(65 + (elapsed_llm / 25.0) * 30))
-                    rem_eta = max(1.0, 25.0 - elapsed_llm)
-                    self.status.progress = pct
+                    pct = min(96, int(65 + (elapsed_llm / est_total_llm_sec) * 30))
+                    rem_eta = max(1.0, est_total_llm_sec - elapsed_llm)
+                    if not is_long_hierarchical:
+                        self.status.progress = pct
+                        self.status.msg = f"🎧 逐字稿已就緒！AI 正在提煉紀要（串流打字中 {int(elapsed_llm)}s）..."
                     self.status.eta = round(rem_eta, 1)
                     self.status.metrics["llm_elapsed"] = round(elapsed_llm, 1)
-                    self.status.msg = f"🎧 逐字稿已就緒！AI 正在提煉紀要（串流打字中 {int(elapsed_llm)}s）..."
                     self.notify_status_update()
 
             llm_ticker_task = asyncio.create_task(_llm_ticker())
@@ -854,6 +858,12 @@ class MeetingJobManager:
         for idx, ch in enumerate(chunks, 1):
             if self._cancellation_token and self._cancellation_token.is_set():
                 return ""
+            
+            map_pct = int(60 + (idx / max(1, len(chunks))) * 28)
+            self.status.progress = map_pct
+            self.status.msg = f"📝 長會議階層提煉中：正在提煉第 {idx}/{len(chunks)} 階段核心重點 ({int((idx-1)/len(chunks)*100)}%)..."
+            self.notify_status_update()
+
             map_prompt = (
                 f"你是專業筆記員。以下是長會議的第 {idx}/{len(chunks)} 段對話。請提取本段的 2-3 個核心討論點與行動事項（繁體中文條列，嚴禁任何開場白）：\n\n"
                 f"{ch}"
@@ -887,6 +897,9 @@ class MeetingJobManager:
 
         combined_notes = "\n\n".join(chunk_summaries)
         print(f"[MeetingMinutes] Map 階段完成，各段要點提煉完畢 ({len(combined_notes)} 字)，進入 Reduce 全局綜整...")
+        self.status.progress = 90
+        self.status.msg = "📝 各階段要點提煉完畢！正在全局綜合產出標準會議紀要..."
+        self.notify_status_update()
 
         # 2. Reduce 階段：全局綜合提煉標準三段式紀要 (以串流方式推送給使用者)
         reduce_prompt = (
