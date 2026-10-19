@@ -162,8 +162,8 @@ def speech_to_text(audio_path: str) -> Optional[str]:
                 return None
 
             domain_prompt = (
-                "以下為台灣繁體中文語音對話，常見詞彙包括：樹莓派、Raspberry Pi、語音助理、"
-                "就緒、記憶體、向量庫、模型部署、人工智慧、繁體中文、Python、代碼、狀態查詢、藍牙耳機、測試。"
+                "No Hallucination. Verbatim speech transcription. "
+                "常見詞彙包括：樹莓派、Raspberry Pi、Python、AI、meeting、issue。"
             )
 
             valid_segments = []

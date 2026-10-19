@@ -303,27 +303,27 @@ def speech_to_text(
                 return None
 
             try:
-                # 提示詞動態支援中英雙語環境，原音自動辨識 (Bilingual prompt for natural code-switching)
+                # 依使用者指示加入 No Hallucination，消除 Whisper 幻覺補字與語言偏置
                 if language == "en":
-                    prompt = "English dialogue, technical terms, and natural conversation."
+                    prompt = "No Hallucination. Clean verbatim English speech."
                 elif language == "zh":
-                    prompt = "繁體中文語音對話，包含常見專業名詞。"
+                    prompt = "No Hallucination. 繁體中文語音對話。"
                 else:
-                    # language=None: 原音自動語種識別，引導繁體中文與英語專業詞彙（例如 Python, API, PR, issue, meeting）自然輸出
-                    prompt = "繁體中文與英語對話，包含常見技術專業詞彙，如 Python, Raspberry Pi, AI, meeting, issue, review."
+                    # 原音自動語言識別：全英文無中文前綴干擾，杜絕停頓處被誘發中文幻覺
+                    prompt = "No Hallucination. Verbatim speech transcription without hallucinated words."
 
                 segments, info = model.transcribe(
                     audio_np,
                     beam_size=1,
                     best_of=1,
-                    temperature=[0.0, 0.2, 0.4],
+                    temperature=0.0,  # 嚴格貪婪解碼，杜絕 fallback 升溫產生的隨機補字
                     language=language,
                     initial_prompt=prompt,
                     condition_on_previous_text=False,
                     repetition_penalty=1.2,
                     no_repeat_ngram_size=3,
-                    compression_ratio_threshold=2.4,
-                    hallucination_silence_threshold=2.0,
+                    compression_ratio_threshold=2.2,
+                    hallucination_silence_threshold=1.5,
                     vad_filter=True,
                     vad_parameters=dict(threshold=0.30, min_silence_duration_ms=350, speech_pad_ms=150)
                 )
