@@ -403,6 +403,11 @@ class MeetingJobManager:
         try:
             # --- PHASE 1: Recording ---
             t0 = time.time()
+            first_chunk_ready_time: Optional[float] = None
+            first_stt_output_time: Optional[float] = None
+            first_stt_latency: Optional[float] = None
+            last_processed_audio_sec: float = 0.0
+
             self.status.metrics = {
                 "job_id": job_id,
                 "record_status": "running",
@@ -416,6 +421,10 @@ class MeetingJobManager:
                 "stt_chars": 0,
                 "stt_paragraphs": 0,
                 "stt_engine": "AI NPU",
+                "first_chunk_time": None,
+                "first_stt_time": None,
+                "first_stt_latency": None,
+                "stt_audio_delay": None,
                 "llm_status": "waiting",
                 "llm_elapsed": 0.0,
                 "llm_duration": None,
@@ -436,7 +445,7 @@ class MeetingJobManager:
 
             # -------------------------------------------------------------
             # 🚀 邊錄音邊轉譯流水線 (In-Recording Realtime Streaming STT)
-            # 依賴底層 PCM 滑動切片，每 4 秒即時送交 Whisper small 模型推論，
+            # 依賴底層 PCM 滑動切片，每 8 秒即時送交 Whisper small 模型推論，
             # 確保錄音結束當下已完成 95% 以上文字轉錄，尾端延遲 < 1.5 秒！
             # -------------------------------------------------------------
             chunk_queue: asyncio.Queue = asyncio.Queue()
@@ -445,15 +454,21 @@ class MeetingJobManager:
 
             async def _chunk_stt_worker():
                 """背景即時解算滑動切片 PCM 音訊"""
+                nonlocal first_chunk_ready_time, first_stt_output_time, first_stt_latency, last_processed_audio_sec
                 try:
                     while True:
                         item = await chunk_queue.get()
                         if item is None:
                             chunk_queue.task_done()
                             break
-                        pcm_bytes, is_final = item
+                        pcm_bytes = item[0]
+                        is_final = item[1]
+
                         if pcm_bytes and len(pcm_bytes) >= 16000 and not self._cancellation_token.is_set():
                             try:
+                                slice_sec = len(pcm_bytes) / 32000.0
+                                last_processed_audio_sec += slice_sec
+
                                 # 轉為 16kHz float32 PCM numpy 陣列
                                 pcm_np = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
 
@@ -461,6 +476,8 @@ class MeetingJobManager:
                                 peak = float(np.max(np.abs(pcm_np)))
                                 rms = float(np.sqrt(np.mean(pcm_np**2)))
                                 if peak < 0.035 and rms < 0.0025:
+                                    now_elapsed = time.time() - t0
+                                    self.status.metrics["stt_audio_delay"] = max(0.0, round(now_elapsed - last_processed_audio_sec, 1))
                                     chunk_queue.task_done()
                                     continue
 
@@ -469,6 +486,18 @@ class MeetingJobManager:
                                     pcm_np,
                                     self._thread_cancellation_token
                                 )
+                                now_t = time.time()
+                                now_elapsed = round(now_t - t0, 1)
+
+                                # 🚀 首塊切片 STT 完成：無論是否有識別出文字，推論耗時皆已精確計算
+                                if first_stt_output_time is None:
+                                    first_stt_output_time = now_elapsed
+                                    c_time = first_chunk_ready_time if first_chunk_ready_time is not None else now_elapsed
+                                    first_stt_latency = max(0.1, round(first_stt_output_time - c_time, 1))
+                                    self.status.metrics["first_stt_time"] = first_stt_output_time
+                                    self.status.metrics["first_stt_latency"] = first_stt_latency
+                                    print(f"[MeetingMinutes] 🎯 首切片 STT 完成！首進STT: {c_time}s, 首算完: {first_stt_output_time}s, 推論時差: {first_stt_latency}s")
+
                                 if seg_text and seg_text.strip():
                                     clean_t = seg_text.strip()
                                     live_segments.append(clean_t)
@@ -476,7 +505,12 @@ class MeetingJobManager:
                                     self.status.transcript = curr_preview
                                     self.status.metrics["stt_chars"] = len(curr_preview.replace("\n", "").strip())
                                     self.status.metrics["stt_paragraphs"] = len(live_segments)
-                                    self.notify_status_update()
+                                    self.status.metrics["first_stt_text_time"] = now_elapsed
+
+                                self.status.metrics["stt_audio_delay"] = max(0.0, round(now_elapsed - last_processed_audio_sec, 1))
+                                self.notify_status_update()
+
+                                if seg_text and seg_text.strip():
                                     # 即時向前端手機推送打字機事件
                                     from ws_manager import ws_manager
                                     await ws_manager.broadcast("transcript_stream", {
@@ -497,7 +531,14 @@ class MeetingJobManager:
 
             async def _on_pcm_slice(slice_data: bytes, is_final: bool):
                 """PCM 滑動切片即時投遞至隊列"""
-                await chunk_queue.put((slice_data, is_final))
+                nonlocal first_chunk_ready_time
+                if first_chunk_ready_time is None and not is_final:
+                    first_chunk_ready_time = round(time.time() - t0, 1)
+                    self.status.metrics["first_chunk_time"] = first_chunk_ready_time
+                    self.status.metrics["stt_status"] = "ingesting"
+                    print(f"[MeetingMinutes] 🚀 首切片成形進 STT！時間: {first_chunk_ready_time}s")
+                    self.notify_status_update()
+                await chunk_queue.put((slice_data, is_final, time.time()))
 
             self._record_task = asyncio.create_task(
                 record_audio_from_mic(
@@ -523,6 +564,8 @@ class MeetingJobManager:
                 self.status.progress = min(100, int((elapsed / duration_sec) * 100))
                 self.status.eta = max(0.0, float(duration_sec - elapsed))
                 self.status.metrics["record_elapsed"] = round(elapsed, 1)
+                if last_processed_audio_sec > 0:
+                    self.status.metrics["stt_audio_delay"] = max(0.0, round(elapsed - last_processed_audio_sec, 1))
                 self.notify_status_update()
                 await asyncio.sleep(0.5)
 

@@ -1269,44 +1269,82 @@ function updateMetricsUI(m) {
     elRecTime.textContent = `${fmt(recSec)} / ${fmt(totSec)}`;
   }
 
-  // 2. 逐字稿等待時間 (Tail Latency)
+  // 2. 逐字稿等待時間 (Tail Latency & Realtime STT Lag)
   if (elSttStatus) {
-    if (m.stt_status === 'running') {
-      elSttStatus.textContent = '收尾中 ⚡';
-      elSttStatus.style.color = '#38bdf8';
-    } else if (m.stt_status === 'done') {
+    if (m.stt_status === 'done') {
       elSttStatus.textContent = '已出稿 🟢';
       elSttStatus.style.color = '#34d399';
+    } else if (m.first_stt_time != null) {
+      elSttStatus.textContent = '邊錄邊轉 ⚡';
+      elSttStatus.style.color = '#34d399';
+    } else if (m.first_chunk_time != null) {
+      elSttStatus.textContent = '首片推論中 🔄';
+      elSttStatus.style.color = '#fbbf24';
+    } else if (m.record_status === 'running') {
+      elSttStatus.textContent = '採集中 ⏳';
+      elSttStatus.style.color = '#38bdf8';
+    } else if (m.stt_status === 'running') {
+      elSttStatus.textContent = '收尾中 ⚡';
+      elSttStatus.style.color = '#38bdf8';
     } else {
       elSttStatus.textContent = '即時解算';
       elSttStatus.style.color = '#38bdf8';
     }
   }
   if (elSttTime) {
+    const fc = m.first_chunk_time; // 第一次進 STT 時間點 (秒)
+    const fs = m.first_stt_time;   // 第一次 STT 出字時間點 (秒)
+    const fl = m.first_stt_latency != null ? m.first_stt_latency : (fc != null && fs != null ? Math.max(0.1, +(fs - fc).toFixed(1)) : null);
+
     if (m.stt_status === 'done') {
       const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : (m.stt_duration || 0);
-      if (waitSec <= 0.5) {
-        elSttTime.textContent = '即時 0 延遲 (秒出)';
-        elSttTime.style.color = '#34d399';
+      if (fs != null && fl != null) {
+        elSttTime.textContent = `首字 ${fs.toFixed(1)}s (差 ${fl.toFixed(1)}s) · 尾端 ${waitSec <= 0.5 ? '0s' : waitSec.toFixed(1) + 's'}`;
       } else {
-        elSttTime.textContent = `等待: ${waitSec.toFixed(1)} 秒`;
+        elSttTime.textContent = waitSec <= 0.5 ? '即時 0 延遲 (秒出)' : `等待: ${waitSec.toFixed(1)} 秒`;
       }
+      elSttTime.style.color = '#34d399';
     } else if (m.record_status === 'running') {
-      elSttTime.textContent = '邊錄邊轉中 (延遲<1s)';
-      elSttTime.style.color = '#38bdf8';
+      if (fs != null && fl != null) {
+        const audioDelay = m.stt_audio_delay != null ? ` · 即時差 ${m.stt_audio_delay.toFixed(1)}s` : '';
+        elSttTime.textContent = `首字 ${fs.toFixed(1)}s (時差 ${fl.toFixed(1)}s)${audioDelay}`;
+        elSttTime.style.color = '#34d399';
+      } else if (fc != null) {
+        elSttTime.textContent = `進 STT: ${fc.toFixed(1)}s (首字解算中...)`;
+        elSttTime.style.color = '#fbbf24';
+      } else {
+        const recSec = m.record_elapsed || 0;
+        elSttTime.textContent = `採集中: ${recSec.toFixed(0)}s (首片 8s 入隊)`;
+        elSttTime.style.color = '#38bdf8';
+      }
     } else if (m.stt_status === 'running') {
       elSttTime.textContent = '尾端整合中...';
       elSttTime.style.color = '#fbbf24';
     } else {
       elSttTime.textContent = '等待: --';
+      elSttTime.style.color = '#94a3b8';
     }
   }
   if (elSttDesc) {
+    const fc = m.first_chunk_time;
+    const fs = m.first_stt_time;
+    const fl = m.first_stt_latency != null ? m.first_stt_latency : (fc != null && fs != null ? Math.max(0.1, +(fs - fc).toFixed(1)) : null);
+
     if (m.stt_status === 'done') {
       const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : (m.stt_duration || 0);
-      elSttDesc.textContent = `⚡ 錄音結束僅等 ${waitSec.toFixed(1)}s (快取直出)`;
+      if (fc != null && fs != null) {
+        elSttDesc.textContent = `⚡ 首進 STT: ${fc.toFixed(1)}s → 首出字: ${fs.toFixed(1)}s (推論時差 ${fl.toFixed(1)}s) · 停錄秒出`;
+      } else {
+        elSttDesc.textContent = `⚡ 錄音結束僅等 ${waitSec.toFixed(1)}s (快取直出)`;
+      }
     } else if (m.record_status === 'running') {
-      elSttDesc.textContent = '🎙️ 人聲即時轉字中 · 無延遲堆積';
+      if (fc != null && fs != null) {
+        elSttDesc.textContent = `🎙️ 首進 STT: ${fc.toFixed(1)}s → 首出字: ${fs.toFixed(1)}s (推論時差 ${fl.toFixed(1)}s)`;
+      } else if (fc != null) {
+        elSttDesc.textContent = `⏳ 首切片已於 ${fc.toFixed(1)}s 送入 STT 隊列，正在解算首句...`;
+      } else {
+        elSttDesc.textContent = '🎙️ 正在緩衝首段 8s 音訊，切片後立即啟動 STT';
+      }
     }
   }
 
