@@ -209,6 +209,31 @@ def speech_to_text(
             return None
 
         # ---------------------------------------------------------
+        # 🚀 Hailo-10H NPU (40 TOPS) 優先硬體加速探測
+        # ---------------------------------------------------------
+        if start_sec is None and end_sec is None:
+            try:
+                root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+                if root_path not in sys.path:
+                    sys.path.append(root_path)
+
+                from hailo_whisper.engine import get_whisper_engine
+                h10_engine = get_whisper_engine(preferred_backend="hailo")
+                if h10_engine.is_hardware_accelerated():
+                    print("[VoicePipeline] ⚡ 探測到 Hailo-10H NPU (40 TOPS)！啟動硬體聽寫加速...")
+                    h10_res = h10_engine.transcribe(
+                        audio_source,
+                        language=language,
+                        initial_prompt="No Hallucination. Verbatim speech transcription.",
+                        temperature=0.0
+                    )
+                    if h10_res and h10_res.get("text"):
+                        print(f"[VoicePipeline] ⚡ Hailo-10H 轉錄完成: '{h10_res['text']}' (耗時: {h10_res.get('inference_time_ms', 0)}ms)")
+                        return h10_res["text"]
+            except Exception as h10_err:
+                print(f"[VoicePipeline] Hailo-10H 轉錄探測異常，平滑降級: {h10_err}")
+
+        # ---------------------------------------------------------
         # 🚀 AI HAT+ (Hailo-8 NPU 26 TOPS) 硬體加速與自動探測切換
         # ---------------------------------------------------------
         if start_sec is None and end_sec is None:
