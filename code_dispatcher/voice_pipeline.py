@@ -213,7 +213,10 @@ def speech_to_text(
         # ---------------------------------------------------------
         if start_sec is None and end_sec is None:
             try:
-                root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+                curr_dir = os.path.dirname(os.path.abspath(__file__))
+                if curr_dir not in sys.path:
+                    sys.path.append(curr_dir)
+                root_path = os.path.abspath(os.path.join(curr_dir, ".."))
                 if root_path not in sys.path:
                     sys.path.append(root_path)
 

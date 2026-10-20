@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import logging
+import numpy as np
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, List
 
@@ -125,65 +126,143 @@ class CpuFallbackWhisperEngine(WhisperEngineInterface):
 class HailoWhisperEngine(WhisperEngineInterface):
     """
     Hailo-10H NPU (40 TOPS) Accelerated Whisper Inference Engine.
-    Leverages PCIe Gen3 x1 DMA and on-board 8GB LPDDR4X for sub-100ms chunk processing.
+    Leverages native hailo_platform.genai.Speech2Text and on-board 8GB LPDDR4X
+    for sub-300ms chunk processing.
     """
 
-    DEFAULT_HEF_PATH = "/home/pi/models/whisper_small_h10h.hef"
+    CANDIDATE_HEF_PATHS = [
+        "/home/pi/models/hailo10h/Whisper-Base.hef",
+        "/usr/local/hailo/resources/models/Whisper-Base.hef",
+        "/home/pi/models/whisper_small_h10h.hef",
+    ]
 
     def __init__(self, hef_path: Optional[str] = None):
-        self.hef_path = hef_path or self.DEFAULT_HEF_PATH
+        self.hef_path = hef_path
         self._vdevice = None
-        self._network_group = None
+        self._s2t = None
         self._initialized = False
         self._probe_and_init()
 
+    def _resolve_hef_path(self) -> Optional[str]:
+        if self.hef_path and os.path.exists(self.hef_path):
+            return self.hef_path
+        for p in self.CANDIDATE_HEF_PATHS:
+            if os.path.exists(p):
+                return p
+        return None
+
     def _probe_and_init(self):
-        """Probe HailoRT runtime and load Whisper HEF if present."""
+        """Probe HailoRT runtime, VDevice and Speech2Text engine."""
         try:
-            import hailo_platform as hp  # pyhailort
-            logger.info(f"[HailoWhisper] Probing HailoRT and HEF at {self.hef_path}...")
+            from hailo_platform import VDevice
+            from hailo_platform.genai import Speech2Text
+            resolved_path = self._resolve_hef_path()
+            if not resolved_path:
+                logger.warning("[HailoWhisper] No compatible Whisper HEF model found. Fallback recommended.")
+                self._initialized = False
+                return
 
-            if not os.path.exists(self.hef_path):
-                raise FileNotFoundError(f"HEF model file not found: {self.hef_path}")
-
-            # Initialize VDevice & NetworkGroup
-            params = hp.VDevice.create_params()
-            self._vdevice = hp.VDevice(params)
-            self._hef = hp.Hef(self.hef_path)
-            self._configure_network()
+            self.hef_path = resolved_path
+            logger.info(f"[HailoWhisper] Initializing VDevice with HEF: {self.hef_path}...")
+            self._vdevice = VDevice()
+            self._s2t = Speech2Text(self._vdevice, self.hef_path)
             self._initialized = True
-            logger.info("[HailoWhisper] Hailo-10H NPU initialized successfully.")
+            logger.info("✅ [HailoWhisper] Hailo-10H NPU Speech2Text Engine ready!")
         except Exception as e:
-            logger.warning(f"[HailoWhisper] Hailo-10H hardware or HEF not ready: {e}. Fallback recommended.")
+            logger.warning(f"[HailoWhisper] Hailo-10H initialization failed: {e}. Fallback recommended.")
             self._initialized = False
 
-    def _configure_network(self):
-        """Configure input/output streams for Hailo-10H DMA."""
-        configure_params = self._hef.create_configure_params()
-        network_groups = self._vdevice.configure(self._hef, configure_params)
-        if network_groups:
-            self._network_group = network_groups[0]
-
     def is_hardware_accelerated(self) -> bool:
-        return self._initialized
+        return self._initialized and self._s2t is not None
+
+    def _load_audio_to_pcm_float(self, audio_source: Any) -> Optional[np.ndarray]:
+        """Convert audio file or memory buffer to 16kHz float32 [-1.0, 1.0) mono numpy array."""
+        import numpy as np
+        if isinstance(audio_source, np.ndarray):
+            audio = audio_source.astype(np.float32)
+            if audio.ndim > 1:
+                audio = audio.flatten()
+            return np.clip(audio, -1.0, 0.999999)
+
+        if isinstance(audio_source, bytes):
+            audio = np.frombuffer(audio_source, dtype=np.int16).astype(np.float32) / 32768.0
+            return np.clip(audio, -1.0, 0.999999)
+
+        if isinstance(audio_source, str) and os.path.exists(audio_source):
+            try:
+                import wave
+                with wave.open(audio_source, "rb") as wf:
+                    framerate = wf.getframerate()
+                    n_channels = wf.getnchannels()
+                    frames = wf.readframes(wf.getnframes())
+                    audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+                    if n_channels > 1:
+                        audio = audio[::n_channels]
+                    return np.clip(audio, -1.0, 0.999999)
+            except Exception:
+                pass
+
+            # ffmpeg fallback
+            try:
+                import subprocess
+                cmd = [
+                    "ffmpeg", "-nostdin", "-threads", "1",
+                    "-i", audio_source,
+                    "-f", "s16le", "-ac", "1", "-acodec", "pcm_s16le", "-ar", "16000", "-"
+                ]
+                out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+                audio = np.frombuffer(out, dtype=np.int16).astype(np.float32) / 32768.0
+                return np.clip(audio, -1.0, 0.999999)
+            except Exception as e:
+                logger.error(f"[HailoWhisper] Failed to load audio via ffmpeg: {e}")
+                return None
+
+        return None
 
     def transcribe(
         self,
-        audio_path: str,
+        audio_path: Any,
         language: Optional[str] = None,
         initial_prompt: Optional[str] = None,
         temperature: float = 0.0,
     ) -> Dict[str, Any]:
-        if not self._initialized:
+        if not self.is_hardware_accelerated():
             raise RuntimeError("Hailo-10H Engine not initialized. Please use CPU fallback.")
 
         t0 = time.perf_counter()
-        # TODO: Full DMA stream inference via hailo_platform
-        # Mel preprocessing -> PCIe DMA transfer -> NPU execution -> Token decoding
+        audio_data = self._load_audio_to_pcm_float(audio_path)
+        if audio_data is None or len(audio_data) < 1600:
+            return {
+                "text": "",
+                "language": language or "en",
+                "inference_time_ms": 0.0,
+                "backend": "hailo-10h",
+            }
+
+        from hailo_platform.genai import Speech2TextTask
+        # Hailo Speech2Text API accepts task and language code ("en", "zh", etc.)
+        lang_code = language.lower() if language else "en"
+        raw_text = self._s2t.generate_all_text(
+            task=Speech2TextTask.TRANSCRIBE,
+            language=lang_code,
+            audio_data=audio_data,
+            timeout_ms=15000
+        )
+
+        final_text = (raw_text or "").strip()
+        # Filter prompt bleeding if present
+        for filter_word in ("No Hallucination.", "Verbatim speech transcription", "no hallucination"):
+            if filter_word in final_text:
+                final_text = final_text.replace(filter_word, "").strip()
+
+        # Traditional Chinese conversion
+        if _OPENCC and lang_code in ("zh", "chinese"):
+            final_text = _OPENCC.convert(final_text)
+
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         return {
-            "text": "",
-            "language": language or "en",
+            "text": final_text,
+            "language": lang_code,
             "inference_time_ms": round(elapsed_ms, 2),
             "backend": "hailo-10h",
         }
