@@ -134,6 +134,44 @@ async def startup_event():
     except Exception as e:
         print(f"[Startup] WebSocket telemetry task error: {e}")
 
+    try:
+        async def start_port_8000_proxy():
+            async def handle_client(reader, writer):
+                try:
+                    remote_reader, remote_writer = await asyncio.open_connection("127.0.0.1", 80)
+                    async def forward(r, w):
+                        try:
+                            while True:
+                                data = await r.read(16384)
+                                if not data:
+                                    break
+                                w.write(data)
+                                await w.drain()
+                        except Exception:
+                            pass
+                        finally:
+                            try:
+                                w.close()
+                                await w.wait_closed()
+                            except Exception:
+                                pass
+                    await asyncio.gather(forward(reader, remote_writer), forward(remote_reader, writer))
+                except Exception:
+                    try:
+                        writer.close()
+                    except Exception:
+                        pass
+
+            try:
+                server = await asyncio.start_server(handle_client, "0.0.0.0", 8000)
+                print("[Startup] Port 8000 -> Port 80 TCP proxy started successfully on 0.0.0.0:8000.")
+            except Exception as e:
+                print(f"[Startup] Port 8000 proxy notice: {e}")
+
+        asyncio.create_task(start_port_8000_proxy())
+    except Exception as e:
+        print(f"[Startup] Error launching port 8000 proxy: {e}")
+
 redis_conn = Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
 task_queue = Queue(QUEUE_NAME, connection=redis_conn)
 
@@ -774,6 +812,19 @@ def connect_bt_device(req: Optional[BTConnectRequest] = None) -> Dict[str, Any]:
 
         target_mac_upper = target_mac.upper()
 
+        # 0. 查詢目標設備目前狀態，若已經是連線中，直接確保 PipeWire sink 並回傳成功
+        res_target_check = subprocess.run(["bluetoothctl", "info", target_mac_upper], capture_output=True, text=True, timeout=3)
+        if "Connected: yes" in res_target_check.stdout:
+            m_target_name = re.search(r"Name:\s*(.+)", res_target_check.stdout)
+            dname = m_target_name.group(1).strip() if m_target_name else "耳麥"
+            _switch_pipewire_default_sink(dname)
+            return {
+                "status": "success",
+                "ok": True,
+                "msg": f"🎧 耳麥 {dname} ({target_mac_upper}) 已處於連線狀態",
+                "message": f"🎧 耳麥 {dname} ({target_mac_upper}) 已處於連線狀態"
+            }
+
         # 1. 偵測目前所有連線中的藍牙設備，若存在非目標設備則先自動中斷 (Auto-Disconnect)
         res_conn = subprocess.run(["bluetoothctl", "devices", "Connected"], capture_output=True, text=True, timeout=4)
         connected_macs = []
@@ -786,36 +837,52 @@ def connect_bt_device(req: Optional[BTConnectRequest] = None) -> Dict[str, Any]:
             if curr_mac != target_mac_upper:
                 print(f"[BT Handover] 自動中斷已連線設備 {curr_mac}，以準備切換至 {target_mac}")
                 subprocess.run(["bluetoothctl", "disconnect", curr_mac], capture_output=True, text=True, timeout=5)
-                time.sleep(0.5)
+                # 等待確認斷開，避免 BlueZ 狀態競爭
+                for _ in range(5):
+                    time.sleep(0.3)
+                    chk = subprocess.run(["bluetoothctl", "info", curr_mac], capture_output=True, text=True, timeout=2)
+                    if "Connected: yes" not in chk.stdout:
+                        break
 
-        # 2. 連線到目標 MAC
-        res = subprocess.run(["bluetoothctl", "connect", target_mac], capture_output=True, text=True, timeout=10)
-        res_info = subprocess.run(["bluetoothctl", "info", target_mac], capture_output=True, text=True, timeout=3)
+        # 2. 連線到目標 MAC (提供 12 秒交握逾時)
+        res = subprocess.run(["bluetoothctl", "connect", target_mac_upper], capture_output=True, text=True, timeout=12)
+        res_info = subprocess.run(["bluetoothctl", "info", target_mac_upper], capture_output=True, text=True, timeout=3)
         dev_name = "耳麥"
         m = re.search(r"Name:\s*(.+)", res_info.stdout)
         if m:
             dev_name = m.group(1).strip()
 
-        if "Connected: yes" in res_info.stdout or "Connection successful" in res.stdout:
-            _switch_pipewire_default_sink(dev_name)
-            ok = True
-            msg = f"🎧 已成功連線至耳麥：{dev_name} ({target_mac})"
-        else:
-            ok = False
-            msg = f"連線至 {dev_name} ({target_mac}) 失敗，請確認耳麥處於待連線或開機狀態。"
+        is_conn_now = ("Connected: yes" in res_info.stdout) or ("Connection successful" in res.stdout)
+        
+        # 3. 若初次連線因交握競態失敗，嘗試第二次快速重試
+        if not is_conn_now:
+            time.sleep(0.8)
+            res2 = subprocess.run(["bluetoothctl", "connect", target_mac_upper], capture_output=True, text=True, timeout=8)
+            res_info2 = subprocess.run(["bluetoothctl", "info", target_mac_upper], capture_output=True, text=True, timeout=3)
+            is_conn_now = ("Connected: yes" in res_info2.stdout) or ("Connection successful" in res2.stdout)
 
         # Invalidate cache
         global _last_bt_status_time
         _last_bt_status_time = 0.0
 
-        if not ok:
-            raise HTTPException(status_code=400, detail=msg)
-        return {
-            "status": "success",
-            "ok": ok,
-            "msg": msg,
-            "message": msg
-        }
+        if is_conn_now:
+            _switch_pipewire_default_sink(dev_name)
+            return {
+                "status": "success",
+                "ok": True,
+                "msg": f"🎧 已成功連線至耳麥：{dev_name} ({target_mac_upper})",
+                "message": f"🎧 已成功連線至耳麥：{dev_name} ({target_mac_upper})"
+            }
+        else:
+            # 分析具體錯誤原因回報
+            fail_detail = res.stdout + " " + res.stderr
+            if "page-timeout" in fail_detail.lower():
+                reason = "連線超時 (Page Timeout)。請確認該耳麥已開機、未在充電倉中，且未被其他手機/電腦佔線。"
+            elif "not available" in fail_detail.lower():
+                reason = "藍牙控制器回報設備不可用。請確認耳麥處於靠近樹莓派的有效距離內。"
+            else:
+                reason = "請確認耳麥處於開機或待連線狀態後重試。"
+            raise HTTPException(status_code=400, detail=f"連線至 {dev_name} ({target_mac_upper}) 失敗：{reason}")
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e

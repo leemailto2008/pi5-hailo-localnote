@@ -15,7 +15,7 @@ import json
 import time
 import logging
 import subprocess
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 
 logger = logging.getLogger("Pi5Bluetooth")
 
@@ -84,60 +84,107 @@ def get_controller_status() -> Tuple[bool, str]:
         return False, f"藍牙控制器異常: {e}"
 
 
-def scan_devices(timeout_sec: int = 10) -> List[Dict[str, str]]:
+def scan_devices(timeout_sec: int = 8) -> List[Dict[str, Any]]:
     """
     Scan for nearby Bluetooth devices for a given duration.
     Filters and formats devices, caching them for convenient selection.
+    Uses 'scan on' to capture both Dual-Mode BR/EDR and BLE Audio devices in real time.
     """
     get_controller_status()
     logger.info(f"Starting Bluetooth scan for {timeout_sec} seconds...")
+    discovered_map: Dict[str, str] = {}
+
     try:
+        # 1. 執行全域掃描 (scan on)，捕獲即時發現的設備 (包含 BLE 與傳統藍牙雙模設備)
         proc = subprocess.Popen(
-            ["bluetoothctl", "--timeout", str(timeout_sec), "scan", "bredr"],
+            ["bluetoothctl", "--timeout", str(timeout_sec), "scan", "on"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
         )
-        proc.wait(timeout=timeout_sec + 2)
+        try:
+            stdout_data, _ = proc.communicate(timeout=timeout_sec + 3)
+            EXCLUDE_PROPS = ("RSSI:", "ManufacturerData", "TxPower:", "UUID", "ServicesResolved:", "Connected:", "Paired:", "Trusted:", "Modalias:", "Class:", "Icon:", "Blocked:", "LegacyPairing:", "Adapter:")
+            for line in stdout_data.splitlines():
+                if "[NEW] Device" in line:
+                    m_new = re.search(r"Device\s+([0-9A-Fa-f:]{17})\s+(.+)$", line)
+                    if m_new:
+                        mac = m_new.group(1).upper()
+                        name = m_new.group(2).strip()
+                        if name and not any(name.startswith(p) for p in EXCLUDE_PROPS) and not re.match(r"^[0-9A-Fa-f:-]{17}$", name):
+                            discovered_map[mac] = name
+                elif "Name:" in line or "Alias:" in line:
+                    m_name = re.search(r"Device\s+([0-9A-Fa-f:]{17})\s+(?:Name|Alias):\s*(.+)$", line)
+                    if m_name:
+                        mac = m_name.group(1).upper()
+                        name = m_name.group(2).strip()
+                        if name and not any(name.startswith(p) for p in EXCLUDE_PROPS):
+                            discovered_map[mac] = name
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
     except Exception as e:
         logger.warning(f"Bluetooth scan timeout/interrupted: {e}")
 
-    # Read discovered devices
-    devices: List[Dict[str, str]] = []
+    # 2. 結合 bluetoothctl devices 中的所有設備 (含已配對/記憶之裝置)
     try:
         res = subprocess.run(["bluetoothctl", "devices"], capture_output=True, text=True, timeout=5)
-        lines = res.stdout.strip().split("\n")
-        seen_macs = set()
-        for line in lines:
+        for line in res.stdout.strip().split("\n"):
             match = re.match(r"^Device\s+([0-9A-Fa-f:]{17})\s+(.*)$", line.strip())
             if match:
                 mac = match.group(1).upper()
                 name = match.group(2).strip()
-                if mac not in seen_macs and name:
-                    seen_macs.add(mac)
-                    info_res = subprocess.run(["bluetoothctl", "info", mac], capture_output=True, text=True, timeout=3)
-                    is_connected = "Connected: yes" in info_res.stdout
-                    is_paired = "Paired: yes" in info_res.stdout
-                    is_trusted = "Trusted: yes" in info_res.stdout
-
-                    # 提取 RSSI 訊號強度與電池電量
-                    rssi_m = re.search(r"RSSI:\s*(-?\d+)", info_res.stdout)
-                    rssi = int(rssi_m.group(1)) if rssi_m else None
-
-                    bat_m = re.search(r"Battery Percentage:\s*.*\((\d+)\)", info_res.stdout) or re.search(r"Battery Percentage:\s*(\d+)", info_res.stdout)
-                    battery = int(bat_m.group(1)) if bat_m else None
-
-                    devices.append({
-                        "mac": mac,
-                        "name": name,
-                        "connected": is_connected,
-                        "paired": is_paired,
-                        "trusted": is_trusted,
-                        "rssi": rssi,
-                        "battery_level": battery
-                    })
+                if mac not in discovered_map or not discovered_map[mac]:
+                    discovered_map[mac] = name
     except Exception as e:
-        logger.error(f"Error querying scanned devices: {e}")
+        logger.error(f"Error querying bluetoothctl devices: {e}")
+
+    # 3. 逐一查詢設備詳情並過濾有效名稱
+    devices: List[Dict[str, Any]] = []
+    seen_macs = set()
+    for mac, name in discovered_map.items():
+        if mac in seen_macs:
+            continue
+        seen_macs.add(mac)
+
+        info_res = subprocess.run(["bluetoothctl", "info", mac], capture_output=True, text=True, timeout=3)
+        info_out = info_res.stdout
+        is_connected = "Connected: yes" in info_out
+        is_paired = "Paired: yes" in info_out
+        is_trusted = "Trusted: yes" in info_out
+
+        # 設備真實名稱修正
+        m_real_name = re.search(r"Name:\s*(.+)", info_out) or re.search(r"Alias:\s*(.+)", info_out)
+        if m_real_name:
+            resolved_name = m_real_name.group(1).strip()
+            if resolved_name and not re.match(r"^[0-9A-Fa-f:-]{17}$", resolved_name):
+                name = resolved_name
+
+        # 提取 RSSI 與電量
+        rssi_m = re.search(r"RSSI:\s*(-?\d+)", info_out)
+        rssi = int(rssi_m.group(1)) if rssi_m else None
+        bat_m = re.search(r"Battery Percentage:\s*.*\((\d+)\)", info_out) or re.search(r"Battery Percentage:\s*(\d+)", info_out)
+        battery = int(bat_m.group(1)) if bat_m else None
+
+        # 僅保留具有可讀名稱之音訊相關設備或已配對/連線設備
+        # 排除純隨機 MAC 廣播（無名稱且未配對未連線者）
+        has_readable_name = bool(name and not re.match(r"^[0-9A-Fa-f:-]{17}$", name))
+        if is_paired or is_connected or has_readable_name:
+            devices.append({
+                "mac": mac,
+                "name": name if name else "未知音訊設備",
+                "connected": is_connected,
+                "paired": is_paired,
+                "trusted": is_trusted,
+                "rssi": rssi,
+                "battery_level": battery
+            })
+
+    # 排序：連線中 > 已配對 > 訊號強度由強到弱
+    devices.sort(key=lambda d: (
+        1 if d["connected"] else (2 if d["paired"] else 3),
+        -(d["rssi"] if d["rssi"] is not None else -999)
+    ))
 
     save_scan_cache(devices)
     return devices
@@ -194,8 +241,8 @@ def pair_and_trust(target: str) -> Tuple[bool, str]:
         # Step 2: Ensure device is discovered in BlueZ BR/EDR
         dev_check = subprocess.run(["bluetoothctl", "info", target_mac], capture_output=True, text=True, timeout=3)
         if "Device " not in dev_check.stdout:
-            logger.info(f"Target {target_mac} not in BlueZ cache, performing 4s bredr scan...")
-            subprocess.run(["bluetoothctl", "--timeout", "4", "scan", "bredr"], capture_output=True, text=True, timeout=6)
+            logger.info(f"Target {target_mac} not in BlueZ cache, performing 4s scan...")
+            subprocess.run(["bluetoothctl", "--timeout", "4", "scan", "on"], capture_output=True, text=True, timeout=6)
 
         # Step 3: Trust, Pair and Connect in sequence
         subprocess.run(["bluetoothctl", "trust", target_mac], capture_output=True, text=True, timeout=5)
