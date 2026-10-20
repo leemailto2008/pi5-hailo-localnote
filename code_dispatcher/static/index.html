@@ -1012,12 +1012,13 @@ function setState(s) {
   state = s;
   el.recBtn.classList.toggle('recording', s === 'recording');
   el.recBtn.classList.toggle('busy', s === 'processing');
-  el.recBtn.disabled = s !== 'idle' && s !== 'done' && s !== 'error';
+  const isFinished = (s === 'idle' || s === 'done' || s === 'completed' || s === 'error');
+  el.recBtn.disabled = !isFinished;
   el.dur.disabled = s === 'recording' || s === 'processing';
-  if (s === 'idle' || s === 'done' || s === 'error') { el.recLabel.textContent = '開始錄音'; el.recSub.textContent = ''; }
+  if (isFinished) { el.recLabel.textContent = '開始錄音'; el.recSub.textContent = ''; }
   if (s === 'recording') el.recLabel.textContent = '錄音中';
   if (s === 'processing') { el.recLabel.textContent = '整理中'; el.recSub.textContent = '請稍等'; }
-  el.regenBtn.disabled = !(result && (s === 'done' || s === 'idle' || s === 'error'));
+  el.regenBtn.disabled = !(result && isFinished);
   if (lastSystemData) updateSystemUI(lastSystemData);
   else refreshSystem();
 }
@@ -1058,6 +1059,10 @@ function renderProgress(st) {
       el.pTitle.textContent = '⚡ 錄音完成！AI 正彙整最後尾音';
       el.pEta.textContent = '即將產出逐字稿 (約數秒)...';
       el.pSteps.textContent = st.msg || '前段 90% 音訊已在錄音中轉出，正在整合母帶...';
+    } else if (bypassSummary || st.phase === 'done') {
+      el.pTitle.textContent = '🎉 逐字稿已就緒！(調校模式)';
+      el.pEta.textContent = '跳過 AI 總結，直出全稿...';
+      el.pSteps.textContent = st.msg || '逐字稿已出爐於下方...';
     } else {
       el.pTitle.textContent = '📝 逐字稿已就緒！AI 正提煉會議重點';
       el.pEta.textContent = '正在結構化會議決議與待辦...';
@@ -1071,7 +1076,7 @@ function renderProgress(st) {
     if (!wavesurfer || (waveCard && waveCard.hidden)) {
       loadAudioWaveform(st.job);
     }
-  } else if (st.state === 'done') {
+  } else if (st.state === 'done' || st.state === 'completed') {
     updateVuMeter({ active: false });
     if (el.btnFinishEarly) el.btnFinishEarly.hidden = true;
     const currentJobKey = st.job || 'done';
@@ -1127,7 +1132,7 @@ async function handleStatusUpdate(st) {
     renderStreamingMinutes(st.summary_stream);
   }
 
-  if (st.state === 'done' && st.job && st.job !== lastJob) {
+  if ((st.state === 'done' || st.state === 'completed') && st.job && st.job !== lastJob) {
     lastJob = st.job;
     await loadResult();
   }
@@ -1318,6 +1323,9 @@ function updateMetricsUI(m) {
     } else if (m.record_status === 'running') {
       elSttStatus.textContent = '採集中 ⏳';
       elSttStatus.style.color = '#38bdf8';
+    } else if (m.record_status === 'done' && m.stt_status === 'running') {
+      elSttStatus.textContent = '尾端結算中 ⏳';
+      elSttStatus.style.color = '#fbbf24';
     } else if (m.stt_status === 'running') {
       elSttStatus.textContent = '收尾中 ⚡';
       elSttStatus.style.color = '#38bdf8';
@@ -1339,6 +1347,10 @@ function updateMetricsUI(m) {
         elSttTime.textContent = waitSec <= 0.5 ? '即時 0 延遲 (秒出)' : `等待: ${waitSec.toFixed(1)} 秒`;
       }
       elSttTime.style.color = '#34d399';
+    } else if (m.record_status === 'done' && m.stt_status === 'running') {
+      const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : 0;
+      elSttTime.textContent = `尾端等待: ${waitSec.toFixed(1)}s (出字中...)`;
+      elSttTime.style.color = '#fbbf24';
     } else if (m.record_status === 'running') {
       if (fs != null && fl != null) {
         const audioDelay = m.stt_audio_delay != null ? ` · 即時差 ${m.stt_audio_delay.toFixed(1)}s` : '';
@@ -1353,7 +1365,8 @@ function updateMetricsUI(m) {
         elSttTime.style.color = '#38bdf8';
       }
     } else if (m.stt_status === 'running') {
-      elSttTime.textContent = '尾端整合中...';
+      const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : 0;
+      elSttTime.textContent = `尾端等待: ${waitSec.toFixed(1)}s...`;
       elSttTime.style.color = '#fbbf24';
     } else {
       elSttTime.textContent = '等待: --';
@@ -1368,10 +1381,12 @@ function updateMetricsUI(m) {
     if (m.stt_status === 'done') {
       const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : (m.stt_duration || 0);
       if (fc != null && fs != null) {
-        elSttDesc.textContent = `⚡ 首進 STT: ${fc.toFixed(1)}s → 首出字: ${fs.toFixed(1)}s (推論時差 ${fl.toFixed(1)}s) · 停錄秒出`;
+        elSttDesc.textContent = `⚡ 首進 STT: ${fc.toFixed(1)}s → 首出字: ${fs.toFixed(1)}s (推論時差 ${fl.toFixed(1)}s) · 尾端整合 ${waitSec.toFixed(1)}s`;
       } else {
         elSttDesc.textContent = `⚡ 錄音結束僅等 ${waitSec.toFixed(1)}s (快取直出)`;
       }
+    } else if (m.record_status === 'done' && m.stt_status === 'running') {
+      elSttDesc.textContent = '⏳ 錄音結束，正在依序解算剩餘音訊切片入稿...';
     } else if (m.record_status === 'running') {
       if (fc != null && fs != null) {
         elSttDesc.textContent = `🎙️ 首進 STT: ${fc.toFixed(1)}s → 首出字: ${fs.toFixed(1)}s (推論時差 ${fl.toFixed(1)}s)`;
@@ -1386,7 +1401,7 @@ function updateMetricsUI(m) {
   // 3. 總完工時間 (錄音 + STT，門檻動態計算為 錄音目標 + 30 秒)
   const recTarget = m.record_total || m.record_duration || 90;
   const targetThreshold = Math.round(recTarget + 30);
-  const totalSec = m.total_stt_time || (m.record_duration ? m.record_duration + (m.stt_duration || 0) : null);
+  const totalSec = m.total_stt_time || m.total_elapsed || (m.record_duration ? m.record_duration + (m.stt_duration || 0) : null);
 
   if (elTotalTime) {
     if (totalSec != null && m.stt_status === 'done') {
@@ -1396,6 +1411,11 @@ function updateMetricsUI(m) {
       } else {
         elTotalTime.style.color = '#f87171';
       }
+    } else if (m.record_status === 'done' && m.stt_status === 'running') {
+      const curTotal = totalSec || (m.record_elapsed || 0);
+      const tailWait = m.stt_tail_wait != null ? ` (尾端 ${m.stt_tail_wait.toFixed(1)}s)` : '';
+      elTotalTime.textContent = `尾端收尾中: ${curTotal.toFixed(1)}s${tailWait}`;
+      elTotalTime.style.color = '#fbbf24';
     } else if (m.record_status === 'running') {
       const curRec = m.record_elapsed || 0;
       elTotalTime.textContent = `錄音中: ${fmt(Math.round(curRec))}`;
@@ -1413,6 +1433,9 @@ function updateMetricsUI(m) {
         elTotalGoal.textContent = `門檻 ${targetThreshold}s ⚠️ 超時`;
         elTotalGoal.style.color = '#f87171';
       }
+    } else if (m.record_status === 'done' && m.stt_status === 'running') {
+      elTotalGoal.textContent = `消化最後切片中...`;
+      elTotalGoal.style.color = '#fbbf24';
     } else {
       elTotalGoal.textContent = `目標 <= ${targetThreshold}s`;
       elTotalGoal.style.color = '#94a3b8';
@@ -1422,6 +1445,9 @@ function updateMetricsUI(m) {
     if (totalSec != null && m.stt_status === 'done') {
       elTargetStatus.textContent = totalSec <= targetThreshold ? `🎉 極速達標！總耗時 <= ${targetThreshold} 秒` : `⚠️ 總耗時超過 ${targetThreshold} 秒`;
       elTargetStatus.style.color = totalSec <= targetThreshold ? '#34d399' : '#f87171';
+    } else if (m.record_status === 'done' && m.stt_status === 'running') {
+      elTargetStatus.textContent = `⏳ 錄音結束，正在即時消化尾端切片...`;
+      elTargetStatus.style.color = '#fbbf24';
     } else {
       elTargetStatus.textContent = `門檻: 總耗時 <= ${targetThreshold}s`;
       elTargetStatus.style.color = '#38bdf8';

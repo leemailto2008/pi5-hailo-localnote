@@ -614,14 +614,30 @@ class MeetingJobManager:
             if rem_chunks > 0:
                 print(f"[MeetingMinutes] ⏳ 錄音結束，等待剩餘 {rem_chunks} 個音訊切片消化完成...")
                 self.status.phase = "transcribe"
+                self.status.state = "processing"
+                self.status.metrics["stt_status"] = "running"
                 self.status.msg = f"🎧 錄音完成！正在結算最後 {rem_chunks} 段逐字稿..."
                 self.notify_status_update()
 
-            try:
-                drain_timeout = max(8.0, float(rem_chunks * 3.5 + 4.0))
-                await asyncio.wait_for(chunk_worker_done.wait(), timeout=drain_timeout)
-            except asyncio.TimeoutError:
-                print(f"[MeetingMinutes] Warning: chunk queue drain timed out after {drain_timeout}s.")
+            drain_timeout = max(8.0, float(rem_chunks * 3.5 + 4.0))
+            drain_deadline = time.time() + drain_timeout
+            while not chunk_worker_done.is_set():
+                if time.time() > drain_deadline:
+                    print(f"[MeetingMinutes] Warning: chunk queue drain timed out after {drain_timeout}s.")
+                    break
+                now_t = time.time()
+                cur_tail_wait = round(now_t - rec_finish_time, 1)
+                cur_total = round(now_t - t0, 1)
+                cur_rem = chunk_queue.qsize()
+                self.status.phase = "transcribe"
+                self.status.state = "processing"
+                self.status.metrics["stt_status"] = "running"
+                self.status.metrics["stt_tail_wait"] = cur_tail_wait
+                self.status.metrics["total_stt_time"] = cur_total
+                self.status.metrics["total_elapsed"] = cur_total
+                self.status.msg = f"🎧 錄音完成！正在結算最後 {cur_rem} 段逐字稿 (尾端已等 {cur_tail_wait}s)..."
+                self.notify_status_update()
+                await asyncio.sleep(0.5)
 
             # Broadcast reset frame upon recording completion
             try:
@@ -661,20 +677,10 @@ class MeetingJobManager:
             if self._cancellation_token.is_set():
                 return
 
-            self.status.state = "processing"
-            self.status.phase = "transcribe"
-            self.status.progress = 60
-            self.status.metrics["stt_status"] = "running"
-            self.status.eta = 2.0
-            self.status.msg = "🎧 錄音完成！AI 正在彙整逐字稿..."
-            self.notify_status_update()
-
-            stt_start = time.time()
-
             # 優先採用錄音期間已並行完成的即時逐字稿
             if live_segments and len("".join(live_segments)) >= 10:
                 transcript = "\n\n".join(live_segments)
-                print(f"[MeetingMinutes] ⚡ 成功命中即時切片串流 STT！段落數: {len(live_segments)}, 耗時近乎 0 秒！")
+                print(f"[MeetingMinutes] ⚡ 成功命中即時切片串流 STT！段落數: {len(live_segments)}！")
             else:
                 # 保底：若錄音極短或未命中切片，快速執行一次母帶轉錄
                 transcript = await asyncio.to_thread(
@@ -683,9 +689,6 @@ class MeetingJobManager:
                     self._thread_cancellation_token
                 )
 
-            stt_dur = round(time.time() - stt_start, 2)
-            stt_rtf = round(stt_dur / max(1.0, float(duration_sec)), 2)
-
             if self._cancellation_token.is_set():
                 print("[MeetingMinutes] Transcribe aborted by cancellation token.")
                 return
@@ -693,29 +696,29 @@ class MeetingJobManager:
             if not transcript or not transcript.strip():
                 transcript = "（錄音結束，未能從耳麥中辨識出清晰人聲語音）"
 
+            # 精確計算真實尾端等待秒數與全鏈路總耗時 (從按下開始到全稿出爐)
+            final_stt_time = time.time()
+            stt_tail_wait = max(0.1, round(final_stt_time - rec_finish_time, 1))
+            total_stt_sec = round(final_stt_time - t0, 1)
+            stt_rtf = round(stt_tail_wait / max(1.0, float(duration_sec)), 2)
+
             paras_count = len([p for p in transcript.split("\n\n") if p.strip()])
             chars_count = len(transcript.replace("\n", "").strip())
-            total_stt_sec = round(float(duration_sec) + stt_dur, 1)
 
             self.status.metrics["stt_status"] = "done"
-            self.status.metrics["stt_duration"] = stt_dur
-            self.status.metrics["stt_tail_wait"] = stt_dur
+            self.status.metrics["stt_duration"] = stt_tail_wait
+            self.status.metrics["stt_tail_wait"] = stt_tail_wait
             self.status.metrics["record_duration"] = float(duration_sec)
             self.status.metrics["total_stt_time"] = total_stt_sec
-            self.status.metrics["is_under_210s"] = bool(total_stt_sec <= 210.0)
+            self.status.metrics["total_elapsed"] = total_stt_sec
+            self.status.metrics["is_under_210s"] = bool(total_stt_sec <= (duration_sec + 30))
             self.status.metrics["stt_rtf"] = stt_rtf
             self.status.metrics["stt_chars"] = chars_count
             self.status.metrics["stt_paragraphs"] = paras_count
             self.status.metrics["stt_chars_per_sec"] = round(chars_count / max(1.0, total_stt_sec), 1)
 
-            # Intermediate result update: frontend can immediately inspect transcript
             self.status.transcript = transcript
             self.status.audio_url = f"/audio/{job_id}.ogg"
-            self.status.phase = "summarize"
-            self.status.progress = 65
-            self.status.eta = 20.0
-            self.status.msg = "🎧 逐字稿已出爐！AI 正在即時提煉會議紀要..."
-            self.notify_status_update()
 
             self.result = MeetingResult(
                 job=job_id,
@@ -740,15 +743,15 @@ class MeetingJobManager:
 
             # ⚡ 快速調校開關：若開啟 bypass_summary，跳過最後 AI 總結，直出完整逐字稿！
             if bypass_summary:
-                print(f"[MeetingMinutes] ⚡ 啟用快速調校模式 (Bypass Summary)，跳過 LLM 總結，直接完成！STT 耗時: {stt_dur}s")
-                self.status.state = "completed"
+                print(f"[MeetingMinutes] ⚡ 啟用快速調校模式 (Bypass Summary)，跳過 LLM 總結，直接完成！尾端耗時: {stt_tail_wait}s, 總耗時: {total_stt_sec}s")
+                self.status.state = "done"
                 self.status.phase = "done"
                 self.status.progress = 100
                 self.status.eta = 0.0
-                self.status.msg = f"🎉 逐字稿產出完成！（已啟用調校模式，跳過 AI 總結，STT: {stt_dur}s）"
+                self.status.msg = f"🎉 逐字稿產出完成！（已啟用調校模式，跳過 AI 總結，尾端整理: {stt_tail_wait}s，總時長: {total_stt_sec}s）"
                 self.status.metrics["llm_status"] = "skipped"
                 self.status.metrics["llm_duration"] = 0.0
-                self.status.metrics["total_elapsed"] = round(time.time() - t0, 1)
+                self.status.metrics["total_elapsed"] = total_stt_sec
                 self.notify_status_update()
 
                 try:
@@ -756,6 +759,7 @@ class MeetingJobManager:
                     await ws_manager.broadcast("completed", {
                         "job_id": job_id,
                         "status": "completed",
+                        "state": "done",
                         "transcript": transcript,
                         "markdown": self.result.markdown,
                         "audio_url": f"/audio/{job_id}.ogg",
@@ -764,6 +768,13 @@ class MeetingJobManager:
                 except Exception as c_err:
                     print(f"[MeetingMinutes] Notice broadcasting completed: {c_err}")
                 return
+
+            # Intermediate result update: frontend can immediately inspect transcript while AI summarizes
+            self.status.phase = "summarize"
+            self.status.progress = 65
+            self.status.eta = 20.0
+            self.status.msg = "🎧 逐字稿已出爐！AI 正在即時提煉會議紀要..."
+            self.notify_status_update()
 
             # --- PHASE 3: Summarize (Ollama Meeting Minutes LLM with Token Streaming) ---
             if self._cancellation_token.is_set():
