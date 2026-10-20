@@ -131,6 +131,7 @@ class HailoWhisperEngine(WhisperEngineInterface):
     """
 
     CANDIDATE_HEF_PATHS = [
+        "/home/pi/models/hailo10h/Whisper-Small.hef",
         "/home/pi/models/hailo10h/Whisper-Base.hef",
         "/usr/local/hailo/resources/models/Whisper-Base.hef",
         "/home/pi/models/whisper_small_h10h.hef",
