@@ -713,7 +713,11 @@ function updateSystemUI(s) {
   if (el.npuPill) {
     if (s.npu && s.npu.detected) {
       el.npuPill.style.display = 'inline-flex';
-      el.npuPill.textContent = '⚡ AI NPU';
+      const devName = s.npu.device || 'Hailo NPU';
+      const tempStr = s.npu.temp_c != null ? ` · ${Math.round(s.npu.temp_c)}°C` : '';
+      const utilStr = s.npu.nnc_util_pct != null ? ` (${Math.round(s.npu.nnc_util_pct)}%)` : '';
+      el.npuPill.textContent = `⚡ ${devName}${utilStr}${tempStr}`;
+      el.npuPill.title = `NPU: ${devName} (${s.npu.tops || 40} TOPS) | 核心負載: ${s.npu.nnc_util_pct ?? 0}% | 晶片溫度: ${s.npu.temp_c ?? '--'}°C | RAM: ${s.npu.ram_usage_mb || '--'}`;
     } else {
       el.npuPill.style.display = 'none';
     }

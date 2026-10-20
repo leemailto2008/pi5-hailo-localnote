@@ -198,43 +198,46 @@ def speech_to_text(
     """
     audio_np: Optional[np.ndarray] = None
 
+    if isinstance(audio_source, str):
+        if not os.path.exists(audio_source) or os.path.getsize(audio_source) == 0:
+            print(f"[VoicePipeline] Audio file missing or empty: {audio_source}")
+            return None
+
+    # ---------------------------------------------------------
+    # 🚀 Hailo-10H NPU (40 TOPS) 優先硬體加速探測 (支援 np.ndarray, bytes, str)
+    # ---------------------------------------------------------
+    if start_sec is None and end_sec is None:
+        try:
+            curr_dir = os.path.dirname(os.path.abspath(__file__))
+            if curr_dir not in sys.path:
+                sys.path.append(curr_dir)
+            root_path = os.path.abspath(os.path.join(curr_dir, ".."))
+            if root_path not in sys.path:
+                sys.path.append(root_path)
+
+            from hailo_whisper.engine import get_whisper_engine
+            h10_engine = get_whisper_engine(preferred_backend="hailo")
+            if h10_engine.is_hardware_accelerated():
+                h10_res = h10_engine.transcribe(
+                    audio_source,
+                    language=language,
+                    initial_prompt="No Hallucination. Verbatim speech transcription.",
+                    temperature=0.0
+                )
+                if h10_res is not None and "text" in h10_res:
+                    txt = h10_res.get("text", "")
+                    if txt:
+                        print(f"[VoicePipeline] ⚡ Hailo-10H 轉錄完成: '{txt}' (耗時: {h10_res.get('inference_time_ms', 0)}ms)")
+                    return txt
+        except Exception as h10_err:
+            print(f"[VoicePipeline] Hailo-10H 轉錄探測異常，平滑降級: {h10_err}")
+
     if isinstance(audio_source, np.ndarray):
         audio_np = audio_source
     elif isinstance(audio_source, bytes):
         if len(audio_source) >= 2:
             audio_np = np.frombuffer(audio_source, dtype=np.int16).astype(np.float32) / 32768.0
     elif isinstance(audio_source, str):
-        if not os.path.exists(audio_source) or os.path.getsize(audio_source) == 0:
-            print(f"[VoicePipeline] Audio file missing or empty: {audio_source}")
-            return None
-
-        # ---------------------------------------------------------
-        # 🚀 Hailo-10H NPU (40 TOPS) 優先硬體加速探測
-        # ---------------------------------------------------------
-        if start_sec is None and end_sec is None:
-            try:
-                curr_dir = os.path.dirname(os.path.abspath(__file__))
-                if curr_dir not in sys.path:
-                    sys.path.append(curr_dir)
-                root_path = os.path.abspath(os.path.join(curr_dir, ".."))
-                if root_path not in sys.path:
-                    sys.path.append(root_path)
-
-                from hailo_whisper.engine import get_whisper_engine
-                h10_engine = get_whisper_engine(preferred_backend="hailo")
-                if h10_engine.is_hardware_accelerated():
-                    print("[VoicePipeline] ⚡ 探測到 Hailo-10H NPU (40 TOPS)！啟動硬體聽寫加速...")
-                    h10_res = h10_engine.transcribe(
-                        audio_source,
-                        language=language,
-                        initial_prompt="No Hallucination. Verbatim speech transcription.",
-                        temperature=0.0
-                    )
-                    if h10_res and h10_res.get("text"):
-                        print(f"[VoicePipeline] ⚡ Hailo-10H 轉錄完成: '{h10_res['text']}' (耗時: {h10_res.get('inference_time_ms', 0)}ms)")
-                        return h10_res["text"]
-            except Exception as h10_err:
-                print(f"[VoicePipeline] Hailo-10H 轉錄探測異常，平滑降級: {h10_err}")
 
         # ---------------------------------------------------------
         # 🚀 AI HAT+ (Hailo-8 NPU 26 TOPS) 硬體加速與自動探測切換

@@ -1384,29 +1384,105 @@ async def get_bypass_summary_config() -> Dict[str, Any]:
     return {"bypass_summary": getattr(minutes_manager, "bypass_summary", False)}
 
 
+_hailo_cache = {"time": 0.0, "data": None}
+
+
+def get_hailo10_stats() -> Dict[str, Any]:
+    """Retrieve Hailo-10H NPU live stats (temperature, NNC load, RAM usage) via hailortcli monitor."""
+    global _hailo_cache
+    now = time.time()
+    if _hailo_cache["data"] is not None and (now - _hailo_cache["time"]) < 2.0:
+        return _hailo_cache["data"]
+
+    stats = {"detected": False}
+    try:
+        p = subprocess.Popen(
+            ["hailortcli", "monitor"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        data_line = ""
+        for _ in range(10):
+            line = p.stdout.readline()
+            if not line:
+                break
+            line_str = line.strip()
+            if "pci/" in line_str:
+                data_line = line_str
+                break
+        p.terminate()
+        try:
+            p.wait(timeout=1.0)
+        except Exception:
+            p.kill()
+
+        if data_line:
+            parts = re.split(r"\s{2,}", data_line)
+            if len(parts) >= 8:
+                stats = {
+                    "detected": True,
+                    "device": "Hailo-10H",
+                    "tops": 40,
+                    "device_id": parts[0],
+                    "arch": parts[1],
+                    "nnc_util_pct": float(parts[2]),
+                    "cpu_util_pct": float(parts[3]),
+                    "ram_util_pct": float(parts[4]),
+                    "ram_usage_mb": parts[5],
+                    "temp_c": float(parts[6]),
+                    "voltage_mv": int(parts[7])
+                }
+    except Exception as e:
+        stats = {"detected": False, "error": str(e)}
+
+    _hailo_cache["time"] = now
+    _hailo_cache["data"] = stats
+    return stats
+
+
+@app.get("/api/system/hailo", tags=["System"])
+def get_hailo_system_status() -> Dict[str, Any]:
+    """Live Hailo-10H NPU metrics (temperature, NNC load, RAM utilization)."""
+    return get_hailo10_stats()
+
+
 @app.get("/api/system", tags=["Demo UI"])
 def get_demo_system() -> Dict[str, Any]:
     """Retrieve simplified system status for LocalNote client dashboard."""
     from meeting_minutes import minutes_manager
     qr_path = os.path.join(STATIC_DIR, "wifi.png")
 
-    # 探測 Hailo-8 NPU 狀態
+    # 探測 Hailo-10H 或 Hailo-8 NPU 狀態
     npu_info = {"detected": False, "device": "CPU ARM Cortex-A76", "tops": 0}
-    try:
-        hailo_adapter_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "AI_HAT_plus"))
-        if os.path.exists(hailo_adapter_path) and hailo_adapter_path not in sys.path:
-            sys.path.append(hailo_adapter_path)
-        from hailo_engine.device_manager import is_hailo_available, HailoDeviceManager
-        if is_hailo_available():
-            info = HailoDeviceManager().get_info()
-            npu_info = {
-                "detected": True,
-                "device": "AI NPU",
-                "tops": 26,
-                "detail": "AI NPU"
-            }
-    except Exception:
-        pass
+    hailo10 = get_hailo10_stats()
+    if hailo10.get("detected"):
+        npu_info = {
+            "detected": True,
+            "device": "Hailo-10H",
+            "tops": 40,
+            "detail": "Hailo-10H (40 TOPS)",
+            "temp_c": hailo10.get("temp_c"),
+            "nnc_util_pct": hailo10.get("nnc_util_pct"),
+            "ram_usage_mb": hailo10.get("ram_usage_mb"),
+            "ram_util_pct": hailo10.get("ram_util_pct")
+        }
+    else:
+        try:
+            hailo_adapter_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "AI_HAT_plus"))
+            if os.path.exists(hailo_adapter_path) and hailo_adapter_path not in sys.path:
+                sys.path.append(hailo_adapter_path)
+            from hailo_engine.device_manager import is_hailo_available, HailoDeviceManager
+            if is_hailo_available():
+                info = HailoDeviceManager().get_info()
+                npu_info = {
+                    "detected": True,
+                    "device": "AI NPU",
+                    "tops": 26,
+                    "detail": "AI NPU"
+                }
+        except Exception:
+            pass
 
     return {
         "offline": minutes_manager.offline_detector.is_offline,
@@ -1418,6 +1494,7 @@ def get_demo_system() -> Dict[str, Any]:
         "host": f"{SYSTEM_HOSTNAME}.local",
         "wifi_qr": "/static/wifi.png" if os.path.exists(qr_path) else None,
         "npu": npu_info,
+        "hailo": hailo10,
         "bypass_summary": getattr(minutes_manager, "bypass_summary", False)
     }
 
