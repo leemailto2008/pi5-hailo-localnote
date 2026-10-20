@@ -535,6 +535,12 @@ const el = {
 
 let state = 'idle', result = null, pollTimer = null, lastJob = null;
 let handledDoneJob = null, doneHideTimer = null;
+let ws = null;
+let wsConnected = false;
+let wsReconnectDelay = 1000;
+let wsReconnectTimer = null;
+let httpSystemInterval = null;
+let httpBtInterval = null;
 
 /* ---------- Task 09: 即時音量與頻譜視覺化更新 ---------- */
 function updateVuMeter(data) {
@@ -1905,13 +1911,6 @@ el.netSwitch.addEventListener('click', async () => {
 });
 
 /* ---------- WebSocket 即時雙向推播 ---------- */
-let ws = null;
-let wsConnected = false;
-let wsReconnectDelay = 1000;
-let wsReconnectTimer = null;
-let httpSystemInterval = null;
-let httpBtInterval = null;
-
 function sendWsMessage(obj) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(obj));
