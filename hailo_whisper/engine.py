@@ -153,24 +153,34 @@ class HailoWhisperEngine(WhisperEngineInterface):
         return None
 
     def _probe_and_init(self):
-        """Probe HailoRT runtime, VDevice and Speech2Text engine."""
+        """Probe HailoRT runtime, VDevice and Speech2Text engine across candidate HEF models."""
         try:
             from hailo_platform import VDevice
             from hailo_platform.genai import Speech2Text
-            resolved_path = self._resolve_hef_path()
-            if not resolved_path:
+            
+            candidates = [self.hef_path] if self.hef_path else self.CANDIDATE_HEF_PATHS
+            existing_candidates = [p for p in candidates if p and os.path.exists(p)]
+            if not existing_candidates:
                 logger.warning("[HailoWhisper] No compatible Whisper HEF model found. Fallback recommended.")
                 self._initialized = False
                 return
 
-            self.hef_path = resolved_path
-            logger.info(f"[HailoWhisper] Initializing VDevice with HEF: {self.hef_path}...")
             self._vdevice = VDevice()
-            self._s2t = Speech2Text(self._vdevice, self.hef_path)
-            self._initialized = True
-            logger.info("✅ [HailoWhisper] Hailo-10H NPU Speech2Text Engine ready!")
+            for cand_path in existing_candidates:
+                try:
+                    logger.info(f"[HailoWhisper] Attempting Speech2Text initialization with: {cand_path}...")
+                    self._s2t = Speech2Text(self._vdevice, cand_path)
+                    self.hef_path = cand_path
+                    self._initialized = True
+                    logger.info(f"✅ [HailoWhisper] Hailo-10H NPU Speech2Text Engine ready with {os.path.basename(cand_path)}!")
+                    return
+                except Exception as init_err:
+                    logger.warning(f"[HailoWhisper] Candidate {cand_path} failed Speech2Text initialization: {init_err}")
+            
+            self._initialized = False
+            logger.warning("[HailoWhisper] All candidate HEF models failed Speech2Text initialization. Fallback recommended.")
         except Exception as e:
-            logger.warning(f"[HailoWhisper] Hailo-10H initialization failed: {e}. Fallback recommended.")
+            logger.warning(f"[HailoWhisper] Hailo-10H runtime initialization failed: {e}. Fallback recommended.")
             self._initialized = False
 
     def is_hardware_accelerated(self) -> bool:
