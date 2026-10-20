@@ -488,21 +488,37 @@ def auto_reconnect_tick() -> Optional[str]:
     config = load_bt_config()
     default_mac = config.get("default_mac")
     auto_reconn = config.get("auto_reconnect", True)
+    auto_map = config.get("auto_connect_devices", {})
 
-    if not default_mac:
-        return None
+    # Check if ANY device is currently connected
+    res_conn = subprocess.run(["bluetoothctl", "devices", "Connected"], capture_output=True, text=True, timeout=3)
+    currently_connected_mac = None
+    for line in res_conn.stdout.strip().split("\n"):
+        m_c = re.match(r"^Device\s+([0-9A-Fa-f:]{17})", line.strip())
+        if m_c:
+            currently_connected_mac = m_c.group(1).upper()
+            break
 
-    # Check current active connection state
-    is_connected = is_device_connected(default_mac)
+    # If no device connected and auto reconnect is enabled:
+    if not currently_connected_mac and auto_reconn:
+        candidates = []
+        if default_mac and auto_map.get(default_mac.upper(), True):
+            candidates.append(default_mac.upper())
+        for mac, enabled in auto_map.items():
+            mac_u = mac.upper()
+            if enabled and mac_u not in candidates:
+                candidates.append(mac_u)
 
-    # If disconnected and auto_reconnect enabled, try connecting
-    if not is_connected and auto_reconn:
-        try:
-            res = subprocess.run(["bluetoothctl", "connect", default_mac], capture_output=True, text=True, timeout=6)
-            if "Connection successful" in res.stdout or is_device_connected(default_mac):
-                is_connected = True
-        except Exception:
-            pass
+        for cand_mac in candidates:
+            try:
+                res = subprocess.run(["bluetoothctl", "connect", cand_mac], capture_output=True, text=True, timeout=6)
+                if "Connection successful" in res.stdout or is_device_connected(cand_mac):
+                    currently_connected_mac = cand_mac
+                    break
+            except Exception:
+                pass
+
+    is_connected = bool(currently_connected_mac)
 
     # Initialize baseline state on first run
     if _last_connection_state is None:

@@ -501,6 +501,7 @@ const API = {
   system: '/api/system', bt: '/api/bt', btStatus: '/api/bt/status', btScan: '/api/bt/scan',
   btPair: '/api/bt/pair', btConnect: '/api/bt/connect', btDisconnect: '/api/bt/disconnect',
   btAuto: '/api/bt/trusted/auto_connect',
+  btRemove: '/api/bt/remove',
   record: '/api/record', status: '/api/status',
   result: '/api/result', regenerate: '/api/regenerate', translate: '/api/translate',
   tts: '/api/tts', netSwitch: '/api/net/switch',
@@ -850,6 +851,9 @@ function renderTrustedDevices(list) {
           <button class="toggle-btn ${autoConn ? 'active' : ''}" data-action="toggle-auto" data-mac="${esc(dev.mac)}" data-name="${esc(dev.name || dev.mac)}" data-curr="${autoConn}">
             ${autoConn ? '✓ 自動連線: 開' : '✕ 自動連線: 關'}
           </button>
+          <button class="btn sm ghost" data-action="remove" data-mac="${esc(dev.mac)}" data-name="${esc(dev.name || dev.mac)}" style="color:#ef4444;border-color:rgba(239,68,68,0.3)" title="取消配對並從信任清單中刪除">
+            🗑️ 刪除
+          </button>
         </div>
       </div>
     `;
@@ -884,10 +888,21 @@ function renderTrustedDevices(list) {
           await refreshBtHub(true);
         } else if (act === 'toggle-auto') {
           const nextVal = btn.dataset.curr !== 'true';
+          btn.innerHTML = '<span class="spinner"></span> 更新中...';
           await api(API.btAuto, { mac: mac, auto_connect: nextVal, set_default: false });
           toast(`已更新 ${devName} 自動連線設定為 ${nextVal ? '開' : '關'}`);
           lastBtHubStateJson = '';
           await refreshBtHub(true);
+        } else if (act === 'remove') {
+          if (!confirm(`確定要取消配對並從清單中移除耳麥「${devName}」嗎？`)) {
+            return;
+          }
+          btn.innerHTML = '<span class="spinner"></span> 移除中...';
+          const r = await api(API.btRemove, { mac: mac });
+          toast(r.message || `已移除設備 ${devName}`);
+          lastBtHubStateJson = '';
+          await refreshBtHub(true);
+          await refreshBt();
         }
       } catch (err) {
         toast('操作失敗：' + err.message);

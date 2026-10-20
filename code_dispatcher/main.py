@@ -135,6 +135,12 @@ async def startup_event():
         print(f"[Startup] WebSocket telemetry task error: {e}")
 
     try:
+        asyncio.create_task(bt_auto_reconnect_loop())
+        print("[Startup] Bluetooth auto-reconnect background daemon started.")
+    except Exception as e:
+        print(f"[Startup] Bluetooth auto-reconnect task error: {e}")
+
+    try:
         async def start_port_8000_proxy():
             async def handle_client(reader, writer):
                 try:
@@ -571,6 +577,10 @@ class BTAutoConnectRequest(BaseModel):
     set_default: Optional[bool] = Field(default=False, description="Whether to set as primary default device")
 
 
+class BTRemoveRequest(BaseModel):
+    mac: str = Field(..., description="Device MAC address to untrust and remove")
+
+
 class VoiceRecordRequest(BaseModel):
     duration_sec: int = Field(default=5, ge=2, le=120, description="Recording duration in seconds")
 
@@ -784,8 +794,9 @@ def set_bt_device_auto_connect(req: BTAutoConnectRequest) -> Dict[str, Any]:
         save_bt_config(config)
 
         # Invalidate status cache
-        global _last_bt_status_time
+        global _last_bt_status_time, _last_bt_status_cache
         _last_bt_status_time = 0.0
+        _last_bt_status_cache = {}
 
         return {
             "status": "success",
@@ -794,6 +805,46 @@ def set_bt_device_auto_connect(req: BTAutoConnectRequest) -> Dict[str, Any]:
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"設定失敗: {str(e)}")
+
+
+@app.post("/api/bt/remove", tags=["Bluetooth"])
+@app.post("/api/bt/untrust", tags=["Bluetooth"], include_in_schema=False)
+def remove_bt_device(req: BTRemoveRequest) -> Dict[str, Any]:
+    """Untrust and remove a paired Bluetooth device."""
+    try:
+        from bluetooth_manager import load_bt_config, save_bt_config
+        target_mac = req.mac.upper()
+
+        # 1. If currently connected, disconnect first
+        subprocess.run(["bluetoothctl", "disconnect", target_mac], capture_output=True, text=True, timeout=5)
+
+        # 2. Untrust & Remove from BlueZ
+        subprocess.run(["bluetoothctl", "untrust", target_mac], capture_output=True, text=True, timeout=5)
+        res_rm = subprocess.run(["bluetoothctl", "remove", target_mac], capture_output=True, text=True, timeout=5)
+
+        # 3. Clean up config (auto_connect_devices & default_mac)
+        config = load_bt_config()
+        if "auto_connect_devices" in config and isinstance(config["auto_connect_devices"], dict):
+            if target_mac in config["auto_connect_devices"]:
+                del config["auto_connect_devices"][target_mac]
+        if (config.get("default_mac") or "").upper() == target_mac:
+            config["default_mac"] = None
+            config["default_name"] = None
+        save_bt_config(config)
+
+        # Invalidate status cache
+        global _last_bt_status_time, _last_bt_status_cache
+        _last_bt_status_time = 0.0
+        _last_bt_status_cache = {}
+
+        return {
+            "status": "success",
+            "ok": True,
+            "message": f"已成功移除耳麥設備 {target_mac}",
+            "mac": target_mac
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"移除設備失敗: {str(e)}")
 
 
 @app.post("/api/bt/connect", tags=["Bluetooth"])
@@ -1591,6 +1642,26 @@ async def ws_telemetry_loop():
             break
         except Exception:
             await asyncio.sleep(2.0)
+
+
+async def bt_auto_reconnect_loop():
+    """Background loop to auto-reconnect trusted Bluetooth headsets when disconnected."""
+    logger.info("[Startup] Bluetooth auto-reconnect daemon started.")
+    while True:
+        try:
+            await asyncio.sleep(12)
+            # Strict AGENTS.md rule: Zero HCI or contention during recording
+            from voice_streaming import is_any_recording_active
+            if is_any_recording_active():
+                continue
+
+            from bluetooth_manager import auto_reconnect_tick
+            await asyncio.to_thread(auto_reconnect_tick)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.debug(f"[BT AutoReconnect Loop] Notice: {e}")
+            await asyncio.sleep(5)
 
 
 @app.websocket("/ws/status")
