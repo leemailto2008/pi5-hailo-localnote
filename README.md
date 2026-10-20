@@ -1,23 +1,30 @@
-﻿# 🎙️ Pi 5 Edge AI Local Note & Bluetooth Voice Gateway
+# 🎙️ Pi 5 Edge AI Local Note & Bluetooth Voice Gateway
 ### 樹莓派 5 邊緣雙語口譯、語音筆記與藍牙智慧網關系統
 
 [![Hardware](https://img.shields.io/badge/Hardware-Raspberry%20Pi%205%208GB-red.svg)](https://www.raspberrypi.com/)
+[![NPU](https://img.shields.io/badge/NPU-Hailo--10H%2040%20TOPS-success.svg)](https://hailo.ai/)
 [![OS](https://img.shields.io/badge/OS-Debian%2013%20Trixie-blue.svg)](https://www.debian.org/)
 [![Audio](https://img.shields.io/badge/Audio-PipeWire%20mSBC%2016kHz-green.svg)](https://pipewire.org/)
-[![STT](https://img.shields.io/badge/STT-faster--whisper%20int8-orange.svg)](https://github.com/SYSTRAN/faster-whisper)
-[![LLM](https://img.shields.io/badge/LLM-Ollama%20Qwen%203B-purple.svg)](https://ollama.com/)
+[![STT](https://img.shields.io/badge/STT-Hailo%20Whisper--Small-orange.svg)](https://hailo.ai/)
+[![LLM](https://img.shields.io/badge/LLM-Hailo--Ollama%20Qwen%201.7B-purple.svg)](https://hailo.ai/)
 
 ---
 
 ## 一、 專案架構概覽 (Architecture Overview)
 
-`pi5-llm-localnote` 是一套專為樹莓派 5 (Raspberry Pi 5) 打造的低延遲、高隱私邊緣 AI 語音處理中樞。整合藍牙耳麥硬體串流、本機端神經網絡語音辨識 (STT)、即時大語言模型口譯 (LLM Streaming) 以及獨立離網熱點 (AP Mode)：
+`pi5-hailo-localnote` 是一套專為樹莓派 5 (Raspberry Pi 5) 與 Hailo-10H NPU (40 TOPS) 打造的低延遲、高隱私邊緣 AI 語音處理中樞。整合藍牙耳麥硬體串流、本機端硬體加速語音辨識 (STT)、即時大語言模型口譯 (LLM Streaming) 以及獨立離網熱點 (AP Mode)：
+
+### 系統架構與資料流拓撲圖 (System Architecture & Datapath Topology)
+
+<p align="center">
+  <img src="./ARCHITECTURE_AND_DATAPATH_20261019.jpg" alt="系統架構與資料流拓撲圖 (System Architecture & Datapath Topology)" width="100%">
+</p>
 
 ```mermaid
 graph TD
     BT[🎧 Bluetooth Headset mSBC] -->|PipeWire 16kHz| CAP[🎙️ Zero-Disk /dev/shm Buffer]
-    CAP -->|Zero-Contention| STT[⚡ faster-whisper int8 NEON]
-    STT -->|SSE Stream| LLM[🌐 Ollama Qwen 3B-opt]
+    CAP -->|Zero-Contention| STT[⚡ Hailo-10H NPU Whisper-Small 40 TOPS]
+    STT -->|SSE Stream / WebSocket| LLM[🌐 Hailo-Ollama Qwen 1.7B / Ollama 3B]
     LLM -->|Typewriter SSE| WEB[📱 Mobile Responsive Web UI]
     LLM -->|Dual-Audio Playback| TTS[🔊 Edge-TTS Neural Voice]
     KEY[🔘 GPIO Physical Key] -->|Hardware Event| CAP
