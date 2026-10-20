@@ -580,18 +580,32 @@ function updateVuMeter(data) {
 }
 
 /* ---------- 工具 ---------- */
-async function api(path, body) {
+async function api(path, body, timeoutMs = 15000) {
   if (MOCK) return mock(path, body);
-  const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
-  if (!r.ok) {
-    let detail = '';
-    try {
-      const errData = await r.json();
-      detail = errData.detail || errData.msg || errData.message || '';
-    } catch (_) {}
-    throw new Error(detail || (path + ' ' + r.status));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const opts = body
+      ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal }
+      : { signal: controller.signal };
+    const r = await fetch(path, opts);
+    clearTimeout(timer);
+    if (!r.ok) {
+      let detail = '';
+      try {
+        const errData = await r.json();
+        detail = errData.detail || errData.msg || errData.message || '';
+      } catch (_) {}
+      throw new Error(detail || (path + ' ' + r.status));
+    }
+    return await r.json();
+  } catch (err) {
+    clearTimeout(timer);
+    if (err.name === 'AbortError') {
+      throw new Error(`請求逾時 (${timeoutMs / 1000}s)`);
+    }
+    throw err;
   }
-  return r.json();
 }
 function toast(msg, ms = 1800) { el.toast.textContent = msg; el.toast.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.toast.classList.remove('show'), ms); }
 function fmt(s) { s = Math.max(0, Math.round(s)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }

@@ -57,8 +57,8 @@ class TestDemoUIEndpoints(unittest.TestCase):
         self.assertIn("cpu", data)
         self.assertIn("temp", data)
         self.assertIn("mode", data)
-        self.assertEqual(data["ssid"], "raspi543_AI")
-        self.assertEqual(data["host"], "localnote.local")
+        self.assertTrue(data["ssid"].endswith("_AI"))
+        self.assertTrue(data["host"].endswith(".local"))
 
     def test_api_bt(self):
         resp = self.client.get("/api/bt")

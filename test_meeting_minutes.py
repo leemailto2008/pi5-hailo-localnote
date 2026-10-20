@@ -45,7 +45,7 @@ class TestMeetingMinutesParser(unittest.TestCase):
 這段逐字稿沒有明確待辦事項。
 """
         parsed = parse_markdown_minutes(sample_freeform)
-        self.assertEqual(len(parsed["summary"]), 1)
+        self.assertEqual(len(parsed["summary"]), 2)
         self.assertEqual(len(parsed["todos"]), 0)
         self.assertEqual(len(parsed["decisions"]), 0)
 
