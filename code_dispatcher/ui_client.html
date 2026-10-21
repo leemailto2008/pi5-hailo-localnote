@@ -184,8 +184,8 @@ details[open] summary::after{content:"收起 ▴"}
   <span class="spacer"></span>
   <div class="topbar-pills" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
     <span class="pill net" id="netPill"><span class="dot"></span><span id="netText">檢查連線狀態…</span></span>
-    <span class="pill npu" id="npuPill" style="display:inline-flex;background:linear-gradient(135deg,#0284c7 0%,#0369a1 100%);color:#fff;font-weight:700;box-shadow:0 2px 6px rgba(2,132,199,0.3);border:1px solid #38bdf8;cursor:help" title="Hailo-10H (40 TOPS) 邊緣 AI 加速晶片">⚡ Hailo-10H: --°C</span>
     <span class="pill sys" id="sysPill">盒子：—</span>
+    <span class="pill npu" id="npuPill" style="display:inline-flex;background:linear-gradient(135deg,#0284c7 0%,#0369a1 100%);color:#fff;font-weight:700;box-shadow:0 2px 6px rgba(2,132,199,0.3);border:1px solid #38bdf8;cursor:help" title="Hailo-10H (40 TOPS) 邊緣 AI 加速晶片">⚡ Hailo-10H：負載 0% · --°C</span>
     <button class="pill" id="btnToggleMetrics" style="cursor:pointer;background:var(--card);border:1px solid var(--line);font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;" title="點擊切換顯示/隱藏核心效能與耗時指標（預設隱藏，Demo 給客戶時不露餡）">📊 效能指標</button>
   </div>
 </header>
@@ -785,7 +785,11 @@ function updateSystemUI(s) {
       const devName = npu.device || 'Hailo-10H';
       const tempVal = npu.temp_c != null ? `${Math.round(npu.temp_c)}°C` : '--';
       const utilVal = npu.nnc_util_pct != null ? `${Math.round(npu.nnc_util_pct)}%` : '0%';
-      el.npuPill.textContent = `⚡ ${devName}: ${tempVal} · 負載 ${utilVal}`;
+      if (isNarrow) {
+        el.npuPill.textContent = `⚡ NPU ${utilVal} · ${tempVal}`;
+      } else {
+        el.npuPill.textContent = `⚡ ${devName}：負載 ${utilVal} · ${tempVal}`;
+      }
       el.npuPill.title = `NPU: ${devName} (${npu.tops || 40} TOPS)\n核心負載: ${utilVal}\n晶片溫度: ${npu.temp_c ?? '--'}°C\nRAM: ${npu.ram_usage_mb || '--'}\n電壓: ${npu.voltage_mv || '--'} mV`;
     }
     const tDisp = $('hailoTempDisplay');
