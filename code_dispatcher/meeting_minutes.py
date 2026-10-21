@@ -677,17 +677,29 @@ class MeetingJobManager:
             if self._cancellation_token.is_set():
                 return
 
-            # 優先採用錄音期間已並行完成的即時逐字稿
-            if live_segments and len("".join(live_segments)) >= 10:
-                transcript = "\n\n".join(live_segments)
-                print(f"[MeetingMinutes] ⚡ 成功命中即時切片串流 STT！段落數: {len(live_segments)}！")
+            # 優先執行全軌母帶高精度轉錄，確保跨句語境連貫、無切片雜音與中斷
+            print(f"[MeetingMinutes] 🚀 錄音結束，正在使用 Hailo-10H 全軌母帶進行高精度全局 STT...")
+            self.status.phase = "transcribe"
+            self.status.state = "processing"
+            self.status.metrics["stt_status"] = "running"
+            self.status.msg = "🎧 錄音完成！正在使用 Hailo-10H 進行全軌母帶高精度轉錄..."
+            self.notify_status_update()
+
+            master_transcript = await asyncio.to_thread(
+                speech_to_text,
+                raw_ogg,
+                self._thread_cancellation_token
+            )
+
+            if master_transcript and len(master_transcript.strip()) >= 5:
+                transcript = master_transcript.strip()
+                print(f"[MeetingMinutes] ⚡ 成功完成全軌母帶 STT (長度: {len(transcript)} 字)！")
+            elif live_segments and len("".join(live_segments)) >= 5:
+                # 保底降級：若母帶轉錄異常，採用即時切片拼接
+                transcript = "，".join([s.strip() for s in live_segments if s.strip() and s.strip() != "-"])
+                print(f"[MeetingMinutes] ⚠️ 母帶轉錄為空，採用即時切片拼接 (段落數: {len(live_segments)})")
             else:
-                # 保底：若錄音極短或未命中切片，快速執行一次母帶轉錄
-                transcript = await asyncio.to_thread(
-                    speech_to_text,
-                    raw_ogg,
-                    self._thread_cancellation_token
-                )
+                transcript = "（錄音結束，未能從耳麥中辨識出清晰人聲語音）"
 
             if self._cancellation_token.is_set():
                 print("[MeetingMinutes] Transcribe aborted by cancellation token.")

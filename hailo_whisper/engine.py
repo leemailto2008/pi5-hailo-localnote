@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import logging
+import re
 import numpy as np
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, List
@@ -123,6 +124,13 @@ class CpuFallbackWhisperEngine(WhisperEngineInterface):
         }
 
 
+_hailo_inferring: bool = False
+
+def is_hailo_inference_active() -> bool:
+    """Return True if Hailo-10H NPU is currently executing Whisper speech-to-text inference."""
+    return _hailo_inferring
+
+
 class HailoWhisperEngine(WhisperEngineInterface):
     """
     Hailo-10H NPU (40 TOPS) Accelerated Whisper Inference Engine.
@@ -228,7 +236,18 @@ class HailoWhisperEngine(WhisperEngineInterface):
                 logger.error(f"[HailoWhisper] Failed to load audio via ffmpeg: {e}")
                 return None
 
-        return None
+    def _trim_leading_silence(self, audio: np.ndarray, sr: int = 16000, thresh: float = 0.005) -> np.ndarray:
+        """Trim leading silence/background noise to prevent Whisper acoustic hallucination loops."""
+        if audio is None or len(audio) < sr:
+            return audio
+        frame_len = int(sr * 0.1)  # 100ms frames
+        max_scan = min(len(audio) - frame_len, sr * 8)  # scan up to first 8 seconds
+        for i in range(0, max_scan, frame_len):
+            rms = np.sqrt(np.mean(audio[i : i + frame_len] ** 2))
+            if rms > thresh:
+                lead_idx = max(0, i - int(sr * 0.2))  # preserve 200ms lead-in
+                return audio[lead_idx:]
+        return audio
 
     def transcribe(
         self,
@@ -240,52 +259,64 @@ class HailoWhisperEngine(WhisperEngineInterface):
         if not self.is_hardware_accelerated():
             raise RuntimeError("Hailo-10H Engine not initialized. Please use CPU fallback.")
 
+        global _hailo_inferring
+        _hailo_inferring = True
         t0 = time.perf_counter()
-        audio_data = self._load_audio_to_pcm_float(audio_path)
-        if audio_data is None or len(audio_data) < 1600:
+        try:
+            audio_data = self._load_audio_to_pcm_float(audio_path)
+            if audio_data is not None:
+                audio_data = self._trim_leading_silence(audio_data)
+
+            if audio_data is None or len(audio_data) < 1600:
+                return {
+                    "text": "",
+                    "language": language or "en",
+                    "inference_time_ms": 0.0,
+                    "backend": "hailo-10h",
+                }
+
+            from hailo_platform.genai import Speech2TextTask
+            # Hailo Speech2Text API accepts task and language code ("en", "zh", etc.)
+            # Default to None so Whisper auto-detects bilingual Chinese/English without forced English translation
+            lang_code = language.lower() if language else None
+
+            # Calculate dynamic timeout: minimum 30s, or 1.5x audio duration + 10s
+            audio_dur_sec = len(audio_data) / 16000.0
+            calc_timeout_ms = max(30000, int((audio_dur_sec * 1.5 + 10.0) * 1000))
+
+            raw_text = self._s2t.generate_all_text(
+                audio_data=audio_data,
+                task=Speech2TextTask.TRANSCRIBE,
+                language=lang_code,
+                timeout_ms=calc_timeout_ms
+            )
+
+            final_text = (raw_text or "").strip()
+            # Filter prompt bleeding if present
+            for filter_word in ("No Hallucination.", "Verbatim speech transcription", "no hallucination", "繁體中文逐字稿", "無幻覺"):
+                if filter_word in final_text:
+                    final_text = final_text.replace(filter_word, "").strip()
+
+            # Clean leading/trailing punctuation artifacts (dashes, commas, dots)
+            final_text = re.sub(r"^[\s\-,\.，。]+", "", final_text)
+            final_text = re.sub(r"[\s\-]+$", "", final_text)
+
+            # Traditional Chinese conversion (Taiwan standard)
+            if _OPENCC and final_text:
+                try:
+                    final_text = _OPENCC.convert(final_text)
+                except Exception as cc_err:
+                    logger.warning(f"[HailoWhisper] OpenCC conversion warning: {cc_err}")
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
             return {
-                "text": "",
-                "language": language or "en",
-                "inference_time_ms": 0.0,
+                "text": final_text,
+                "language": lang_code or "auto",
+                "inference_time_ms": round(elapsed_ms, 2),
                 "backend": "hailo-10h",
             }
-
-        from hailo_platform.genai import Speech2TextTask
-        # Hailo Speech2Text API accepts task and language code ("en", "zh", etc.)
-        # Default to None so Whisper auto-detects bilingual Chinese/English without forced English translation
-        lang_code = language.lower() if language else None
-
-        # Calculate dynamic timeout: minimum 30s, or 1.5x audio duration + 10s
-        audio_dur_sec = len(audio_data) / 16000.0
-        calc_timeout_ms = max(30000, int((audio_dur_sec * 1.5 + 10.0) * 1000))
-
-        raw_text = self._s2t.generate_all_text(
-            audio_data=audio_data,
-            task=Speech2TextTask.TRANSCRIBE,
-            language=lang_code,
-            timeout_ms=calc_timeout_ms
-        )
-
-        final_text = (raw_text or "").strip()
-        # Filter prompt bleeding if present
-        for filter_word in ("No Hallucination.", "Verbatim speech transcription", "no hallucination", "繁體中文逐字稿", "無幻覺"):
-            if filter_word in final_text:
-                final_text = final_text.replace(filter_word, "").strip()
-
-        # Traditional Chinese conversion (Taiwan standard)
-        if _OPENCC and final_text:
-            try:
-                final_text = _OPENCC.convert(final_text)
-            except Exception as cc_err:
-                logger.warning(f"[HailoWhisper] OpenCC conversion warning: {cc_err}")
-
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        return {
-            "text": final_text,
-            "language": lang_code or "auto",
-            "inference_time_ms": round(elapsed_ms, 2),
-            "backend": "hailo-10h",
-        }
+        finally:
+            _hailo_inferring = False
 
 
 def get_whisper_engine(preferred_backend: str = "auto", hef_path: Optional[str] = None) -> WhisperEngineInterface:
