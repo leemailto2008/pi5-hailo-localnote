@@ -276,9 +276,8 @@ class HailoWhisperEngine(WhisperEngineInterface):
                 }
 
             from hailo_platform.genai import Speech2TextTask
-            # Hailo Speech2Text API accepts task and language code ("en", "zh", etc.)
-            # Default to None so Whisper auto-detects bilingual Chinese/English without forced English translation
-            lang_code = language.lower() if language else None
+            # Set default language to "zh" (Chinese) for clean multi-byte token decoding without byte-splitting errors
+            lang_code = language.lower() if language else "zh"
 
             # Calculate dynamic timeout: minimum 30s, or 1.5x audio duration + 10s
             audio_dur_sec = len(audio_data) / 16000.0
@@ -296,6 +295,12 @@ class HailoWhisperEngine(WhisperEngineInterface):
             for filter_word in ("No Hallucination.", "Verbatim speech transcription", "no hallucination", "繁體中文逐字稿", "無幻覺"):
                 if filter_word in final_text:
                     final_text = final_text.replace(filter_word, "").strip()
+
+            # Clean Unicode replacement character (\ufffd) and repeated pause noise artifacts
+            final_text = final_text.replace("\ufffd", "").replace("\uFFFD", "")
+            final_text = re.sub(r"([,\-\s]{2,})+", "，", final_text)
+            final_text = re.sub(r"(，\s*){2,}", "，", final_text)
+            final_text = re.sub(r"\b(\w)\1{3,}\b", r"\1", final_text)
 
             # Clean leading/trailing punctuation artifacts (dashes, commas, dots)
             final_text = re.sub(r"^[\s\-,\.，。]+", "", final_text)

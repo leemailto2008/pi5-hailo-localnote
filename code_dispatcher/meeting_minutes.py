@@ -500,6 +500,15 @@ class MeetingJobManager:
 
                                 if seg_text and seg_text.strip():
                                     clean_t = seg_text.strip()
+                                    clean_t = clean_t.replace("\ufffd", "").replace("\uFFFD", "")
+                                    clean_t = re.sub(r"([,\-\s]{2,})+", "，", clean_t)
+                                    clean_t = re.sub(r"^[\s\-,\.，。]+", "", clean_t)
+                                    clean_t = re.sub(r"[\s\-]+$", "", clean_t)
+
+                                    if not clean_t or clean_t in ("-", ",", "，", "。", "、"):
+                                        chunk_queue.task_done()
+                                        continue
+
                                     live_segments.append(clean_t)
                                     # 智慧雙語拼接 (Bilingual live stream preview)
                                     if len(live_segments) == 1:
@@ -677,29 +686,21 @@ class MeetingJobManager:
             if self._cancellation_token.is_set():
                 return
 
-            # 優先執行全軌母帶高精度轉錄，確保跨句語境連貫、無切片雜音與中斷
-            print(f"[MeetingMinutes] 🚀 錄音結束，正在使用 Hailo-10H 全軌母帶進行高精度全局 STT...")
-            self.status.phase = "transcribe"
-            self.status.state = "processing"
-            self.status.metrics["stt_status"] = "running"
-            self.status.msg = "🎧 錄音完成！正在使用 Hailo-10H 進行全軌母帶高精度轉錄..."
-            self.notify_status_update()
-
-            master_transcript = await asyncio.to_thread(
-                speech_to_text,
-                raw_ogg,
-                self._thread_cancellation_token
-            )
-
-            if master_transcript and len(master_transcript.strip()) >= 5:
-                transcript = master_transcript.strip()
-                print(f"[MeetingMinutes] ⚡ 成功完成全軌母帶 STT (長度: {len(transcript)} 字)！")
-            elif live_segments and len("".join(live_segments)) >= 5:
-                # 保底降級：若母帶轉錄異常，採用即時切片拼接
-                transcript = "，".join([s.strip() for s in live_segments if s.strip() and s.strip() != "-"])
-                print(f"[MeetingMinutes] ⚠️ 母帶轉錄為空，採用即時切片拼接 (段落數: {len(live_segments)})")
+            # ⚡ [0秒尾端極速結算] 錄音期間已並行由 Hailo-10H 完成各切片解算，直接取用已組裝逐字稿
+            if curr_preview and len(curr_preview.strip()) >= 5:
+                transcript = curr_preview.strip()
+                transcript = transcript.replace("\ufffd", "").replace("\uFFFD", "")
+                transcript = re.sub(r"([，、。！？\s]){2,}", r"\1", transcript)
+                print(f"[MeetingMinutes] ⚡ 0秒尾端等待！成功取用即時切片串流 STT (字數: {len(transcript)}，段落數: {len(live_segments)})！")
             else:
-                transcript = "（錄音結束，未能從耳麥中辨識出清晰人聲語音）"
+                # 保底：若即時切片為空，快速執行一次母帶轉錄
+                print(f"[MeetingMinutes] ⚠️ 即時切片為空，降級使用母帶轉錄...")
+                master_res = await asyncio.to_thread(
+                    speech_to_text,
+                    raw_ogg,
+                    self._thread_cancellation_token
+                )
+                transcript = (master_res or "").strip().replace("\ufffd", "").replace("\uFFFD", "") if master_res else "（未能辨識出清晰人聲語音）"
 
             if self._cancellation_token.is_set():
                 print("[MeetingMinutes] Transcribe aborted by cancellation token.")
