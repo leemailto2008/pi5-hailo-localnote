@@ -603,17 +603,31 @@ async def ensure_bluetooth_recording_ready() -> str:
             stdout2, _ = await proc2.communicate()
             nodes = json.loads(stdout2.decode("utf-8", errors="ignore"))
 
-        # 3. 尋找最佳藍牙 Source 節點
+        # 3. 尋找最佳藍牙 Source 節點 (優先鎖定原生 mSBC 16kHz 硬體節點，杜絕虛擬 Loopback 濾波降頻)
         bt_source_node = None
         bt_source_id = None
+
+        # 第一優先：尋找原生硬體 mSBC SCO 節點 (Audio/Source/Internal 且 codec == msbc)
         for n in nodes:
             props = n.get("info", {}).get("props", {})
-            media_class = props.get("media.class", "")
             node_name = props.get("node.name", "")
-            if media_class == "Audio/Source" and ("bluez_input" in node_name or "bluez" in node_name):
+            codec = props.get("api.bluez5.codec", "")
+            if codec == "msbc" or "bluez_input_internal" in node_name:
                 bt_source_node = node_name
                 bt_source_id = n.get("id")
+                print(f"[VoicePipeline] 🎯 鎖定原生 16kHz mSBC 麥克風節點: {node_name} (ID: {bt_source_id}, Codec: {codec})")
                 break
+
+        # 第二優先：若無 internal 節點，則尋找一般藍牙 Source
+        if not bt_source_node:
+            for n in nodes:
+                props = n.get("info", {}).get("props", {})
+                media_class = props.get("media.class", "")
+                node_name = props.get("node.name", "")
+                if "Audio/Source" in media_class and ("bluez_input" in node_name or "bluez" in node_name):
+                    bt_source_node = node_name
+                    bt_source_id = n.get("id")
+                    break
 
         if bt_source_node and bt_source_id:
             set_def = await asyncio.create_subprocess_exec(
