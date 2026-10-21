@@ -349,7 +349,31 @@ def _switch_pipewire_default_sink(device_name_hint: str) -> str:
 
         if target_sink_id:
             subprocess.run(["wpctl", "set-default", target_sink_id], capture_output=True, timeout=3)
-            return "已自動將 PipeWire 音訊輸出切換為該耳麥"
+
+        # 確保藍牙音訊輸入處於 16kHz mSBC 模式 (headset-head-unit)
+        try:
+            import json
+            dump_proc = subprocess.run(["pw-dump"], capture_output=True, text=True, timeout=3)
+            if dump_proc.returncode == 0:
+                nodes = json.loads(dump_proc.stdout)
+                for n in nodes:
+                    props = n.get("info", {}).get("props", {})
+                    if props.get("device.api") == "bluez5" and n.get("type") == "PipeWire:Interface:Device":
+                        dev_id = n.get("id")
+                        params = n.get("info", {}).get("params", {})
+                        active_profiles = params.get("Profile", [])
+                        if not any(p.get("name") == "headset-head-unit" for p in active_profiles):
+                            msbc_idx = 196865
+                            for ep in params.get("EnumProfile", []):
+                                if ep.get("name") == "headset-head-unit":
+                                    msbc_idx = ep.get("index", 196865)
+                                    break
+                            subprocess.run(["wpctl", "set-profile", str(dev_id), str(msbc_idx)], capture_output=True, timeout=3)
+        except Exception:
+            pass
+
+        if target_sink_id:
+            return "已自動將 PipeWire 音訊輸出切換為該耳麥並鎖定 16kHz mSBC"
         return "PipeWire 已識別該藍牙音訊端點"
     except Exception as e:
         return f"音訊輸出切換略過: {e}"

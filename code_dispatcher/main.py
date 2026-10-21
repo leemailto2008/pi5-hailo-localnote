@@ -1410,6 +1410,15 @@ def _hailo_telemetry_loop():
     cmd = ["script", "-q", "-c", "timeout 1.5 hailortcli monitor", "/dev/null"]
     while True:
         try:
+            # Strict AGENTS.md rule: Zero bus contention or PCIe spikes during audio recording
+            from voice_streaming import is_any_recording_active
+            if is_any_recording_active():
+                time.sleep(1.0)
+                continue
+        except Exception:
+            pass
+
+        try:
             # Check if Hailo NPU is currently executing Whisper inference
             from hailo_whisper.engine import is_hailo_inference_active
             is_inferring = is_hailo_inference_active()

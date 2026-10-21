@@ -567,25 +567,54 @@ async def ensure_bluetooth_recording_ready() -> str:
         stdout, _ = await proc.communicate()
         nodes = json.loads(stdout.decode("utf-8", errors="ignore"))
 
+        bt_device_id = None
+        is_msbc_active = False
+        msbc_profile_index = 196865
+
+        # 1. 檢驗藍牙設備節點及其設定檔 (嚴格確保鎖定 16kHz mSBC 寬頻語音)
+        for n in nodes:
+            props = n.get("info", {}).get("props", {})
+            if props.get("device.api") == "bluez5" and n.get("type") == "PipeWire:Interface:Device":
+                bt_device_id = n.get("id")
+                params = n.get("info", {}).get("params", {})
+                active_profiles = params.get("Profile", [])
+                is_msbc_active = any(p.get("name") == "headset-head-unit" for p in active_profiles)
+
+                for ep in params.get("EnumProfile", []):
+                    if ep.get("name") == "headset-head-unit":
+                        msbc_profile_index = ep.get("index", 196865)
+                        break
+                break
+
+        # 2. 若發現藍牙設備但未處於 mSBC 設定檔，立即強制切換至 headset-head-unit (杜絕 CVSD 8kHz 悶音)
+        if bt_device_id and not is_msbc_active:
+            print(f"[VoicePipeline] 強制將藍牙設備 {bt_device_id} 切換為 16kHz mSBC 模式 (Profile {msbc_profile_index})...")
+            set_prof = await asyncio.create_subprocess_exec(
+                "wpctl", "set-profile", str(bt_device_id), str(msbc_profile_index),
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+            )
+            await set_prof.communicate()
+            await asyncio.sleep(0.6)
+
+            # 重新獲取拓撲資訊
+            proc2 = await asyncio.create_subprocess_exec(
+                "pw-dump", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+            )
+            stdout2, _ = await proc2.communicate()
+            nodes = json.loads(stdout2.decode("utf-8", errors="ignore"))
+
+        # 3. 尋找最佳藍牙 Source 節點
         bt_source_node = None
         bt_source_id = None
-        bt_device_id = None
-
         for n in nodes:
             props = n.get("info", {}).get("props", {})
             media_class = props.get("media.class", "")
             node_name = props.get("node.name", "")
-
-            # 尋找藍牙音訊輸入節點 (如 bluez_input.A0_D1_2A_42_12_34.0)
-            if media_class == "Audio/Source" and "bluez_input" in node_name:
+            if media_class == "Audio/Source" and ("bluez_input" in node_name or "bluez" in node_name):
                 bt_source_node = node_name
                 bt_source_id = n.get("id")
+                break
 
-            # 尋找藍牙設備
-            if props.get("device.api") == "bluez5" and n.get("type") == "PipeWire:Interface:Device":
-                bt_device_id = n.get("id")
-
-        # 1. 若藍牙 Source 節點已存在，說明 SCO 語音通道已經就緒，絕對不要重複 set-profile 打斷它！
         if bt_source_node and bt_source_id:
             set_def = await asyncio.create_subprocess_exec(
                 "wpctl", "set-default", str(bt_source_id),
@@ -593,31 +622,6 @@ async def ensure_bluetooth_recording_ready() -> str:
             )
             await set_def.communicate()
             return bt_source_node
-
-        # 2. 若藍牙 Source 不存在但藍牙設備存在，切換 profile 為 headset-head-unit (196865)
-        if bt_device_id:
-            set_prof = await asyncio.create_subprocess_exec(
-                "wpctl", "set-profile", str(bt_device_id), "196865",
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-            )
-            await set_prof.communicate()
-            await asyncio.sleep(0.8)
-
-            # 重新獲取 source 節點
-            proc2 = await asyncio.create_subprocess_exec(
-                "pw-dump", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
-            )
-            stdout2, _ = await proc2.communicate()
-            nodes2 = json.loads(stdout2.decode("utf-8", errors="ignore"))
-            for n in nodes2:
-                props = n.get("info", {}).get("props", {})
-                if props.get("media.class") == "Audio/Source" and "bluez_input" in props.get("node.name", ""):
-                    bt_source_node = props.get("node.name")
-                    await (await asyncio.create_subprocess_exec(
-                        "wpctl", "set-default", str(n.get("id")),
-                        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-                    )).communicate()
-                    return bt_source_node
 
     except Exception as e:
         print(f"[VoicePipeline] Bluetooth readiness resolution error: {e}")
@@ -644,12 +648,18 @@ async def record_audio_from_mic(
     source_node = await ensure_bluetooth_recording_ready()
 
     cmd = [
+        "taskset", "-c", "0,1",
+        "nice", "-n", "-18",
         "ffmpeg", "-y",
-        "-thread_queue_size", "4096",
+        "-thread_queue_size", "16384",
         "-f", "pulse",
+        "-ar", "16000",
+        "-ac", "1",
         "-i", source_node,
         "-t", str(duration_sec),
-        "-af", "aresample=16000:async=1,highpass=f=80,lowpass=f=7600",
+        "-af", "highpass=f=80,lowpass=f=7600",
+        "-ar", "16000",
+        "-ac", "1",
         "-c:a", "libopus",
         "-b:a", "64k",
         output_path

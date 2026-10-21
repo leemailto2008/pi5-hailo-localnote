@@ -32,8 +32,16 @@ _active_sessions: Dict[str, "StreamingVoiceSession"] = {}
 
 
 def is_any_recording_active() -> bool:
-    """Return True if any streaming recording session is currently capturing audio."""
-    return any(s.is_recording for s in _active_sessions.values())
+    """Return True if any recording session (streaming or meeting minutes) is currently capturing audio."""
+    if any(s.is_recording for s in _active_sessions.values()):
+        return True
+    try:
+        from meeting_minutes import minutes_manager
+        if minutes_manager and hasattr(minutes_manager, "status") and minutes_manager.status.state == "recording":
+            return True
+    except Exception:
+        pass
+    return False
 
 
 class StreamingVoiceSession:
