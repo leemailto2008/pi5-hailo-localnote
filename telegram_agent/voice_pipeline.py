@@ -221,7 +221,7 @@ def speech_to_text(
                 h10_res = h10_engine.transcribe(
                     audio_source,
                     language=language,
-                    initial_prompt="No Hallucination. Verbatim speech transcription.",
+                    initial_prompt=None,
                     temperature=0.0
                 )
                 if h10_res is not None and "text" in h10_res:

@@ -3,7 +3,7 @@ sys.path.insert(0, '/home/pi/telegram_agent')
 sys.path.insert(0, '/home/pi/code_dispatcher')
 from voice_pipeline import speech_to_text
 
-audio_path = '/home/pi/hailo-apps/hailo_apps/python/gen_ai_apps/simple_whisper_chat/audio.wav'
+audio_path = '/dev/shm/audio_cache/m_1792547501.ogg'
 print(f"Transcribing {audio_path}...")
 text = speech_to_text(audio_path)
 print("=== TRANSCRIPTION RESULT ===")

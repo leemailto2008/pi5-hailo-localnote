@@ -252,28 +252,37 @@ class HailoWhisperEngine(WhisperEngineInterface):
 
         from hailo_platform.genai import Speech2TextTask
         # Hailo Speech2Text API accepts task and language code ("en", "zh", etc.)
-        lang_code = language.lower() if language else "en"
+        # Default to None so Whisper auto-detects bilingual Chinese/English without forced English translation
+        lang_code = language.lower() if language else None
+
+        # Calculate dynamic timeout: minimum 30s, or 1.5x audio duration + 10s
+        audio_dur_sec = len(audio_data) / 16000.0
+        calc_timeout_ms = max(30000, int((audio_dur_sec * 1.5 + 10.0) * 1000))
+
         raw_text = self._s2t.generate_all_text(
+            audio_data=audio_data,
             task=Speech2TextTask.TRANSCRIBE,
             language=lang_code,
-            audio_data=audio_data,
-            timeout_ms=15000
+            timeout_ms=calc_timeout_ms
         )
 
         final_text = (raw_text or "").strip()
         # Filter prompt bleeding if present
-        for filter_word in ("No Hallucination.", "Verbatim speech transcription", "no hallucination"):
+        for filter_word in ("No Hallucination.", "Verbatim speech transcription", "no hallucination", "繁體中文逐字稿", "無幻覺"):
             if filter_word in final_text:
                 final_text = final_text.replace(filter_word, "").strip()
 
-        # Traditional Chinese conversion
-        if _OPENCC and lang_code in ("zh", "chinese"):
-            final_text = _OPENCC.convert(final_text)
+        # Traditional Chinese conversion (Taiwan standard)
+        if _OPENCC and final_text:
+            try:
+                final_text = _OPENCC.convert(final_text)
+            except Exception as cc_err:
+                logger.warning(f"[HailoWhisper] OpenCC conversion warning: {cc_err}")
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         return {
             "text": final_text,
-            "language": lang_code,
+            "language": lang_code or "auto",
             "inference_time_ms": round(elapsed_ms, 2),
             "backend": "hailo-10h",
         }
