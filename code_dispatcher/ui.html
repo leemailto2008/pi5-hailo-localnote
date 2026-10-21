@@ -535,7 +535,7 @@ details[open] summary::after{content:"收起 ▴"}
             <div style="font-size:13px;color:var(--muted);margin-top:2px">請確保欲配對的耳麥已開機並處於配對狀態 (紅藍燈閃爍或長按配對鍵)</div>
           </div>
           <span class="spacer"></span>
-          <button class="btn primary" id="hubBtnScan">🔍 開始掃描 (8秒)</button>
+          <button class="btn primary" id="hubBtnScan">🔍 開始掃描 (6秒)</button>
         </div>
         <div id="hubScanContainer" style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
           <div class="empty" id="hubScanEmpty">點擊上方「開始掃描」搜尋周圍的藍牙耳麥</div>
@@ -1031,10 +1031,10 @@ function renderTrustedDevices(list) {
 el.hubBtnScan.addEventListener('click', async () => {
   const btn = el.hubBtnScan;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> 正在搜尋周圍耳麥 (8秒)...';
+  btn.innerHTML = '<span class="spinner"></span> 正在搜尋周圍耳麥 (約需 6 秒)...';
   el.hubScanContainer.innerHTML = '<div class="empty">正在掃描周圍藍牙設備，請確保耳麥處於配對狀態...</div>';
   try {
-    const r = await api(API.btScan, {});
+    const r = await api(API.btScan, {}, 25000);
     const devs = r.devices || [];
     if (devs.length === 0) {
       el.hubScanContainer.innerHTML = '<div class="empty">未找到可配對的耳麥。請確認耳麥處於紅藍燈配對狀態後重試。</div>';
@@ -1086,7 +1086,7 @@ el.hubBtnScan.addEventListener('click', async () => {
     el.hubScanContainer.innerHTML = `<div class="empty" style="color:var(--rec)">掃描失敗：${esc(err.message)}</div>`;
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '🔍 開始掃描 (8秒)';
+    btn.innerHTML = '🔍 開始掃描 (6秒)';
   }
 });
 
