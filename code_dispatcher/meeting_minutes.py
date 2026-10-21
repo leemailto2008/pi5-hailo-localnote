@@ -450,11 +450,12 @@ class MeetingJobManager:
             # -------------------------------------------------------------
             chunk_queue: asyncio.Queue = asyncio.Queue()
             live_segments: List[str] = []
+            curr_preview: str = ""
             chunk_worker_done = asyncio.Event()
 
             async def _chunk_stt_worker():
                 """背景即時解算滑動切片 PCM 音訊"""
-                nonlocal first_chunk_ready_time, first_stt_output_time, first_stt_latency, last_processed_audio_sec
+                nonlocal first_chunk_ready_time, first_stt_output_time, first_stt_latency, last_processed_audio_sec, curr_preview
                 try:
                     while True:
                         item = await chunk_queue.get()
@@ -687,8 +688,12 @@ class MeetingJobManager:
                 return
 
             # ⚡ [0秒尾端極速結算] 錄音期間已並行由 Hailo-10H 完成各切片解算，直接取用已組裝逐字稿
-            if curr_preview and len(curr_preview.strip()) >= 5:
-                transcript = curr_preview.strip()
+            final_preview = curr_preview or (self.status.transcript or "")
+            if not final_preview and live_segments:
+                final_preview = "，".join(live_segments)
+
+            if final_preview and len(final_preview.strip()) >= 5:
+                transcript = final_preview.strip()
                 transcript = transcript.replace("\ufffd", "").replace("\uFFFD", "")
                 transcript = re.sub(r"([，、。！？\s]){2,}", r"\1", transcript)
                 print(f"[MeetingMinutes] ⚡ 0秒尾端等待！成功取用即時切片串流 STT (字數: {len(transcript)}，段落數: {len(live_segments)})！")
