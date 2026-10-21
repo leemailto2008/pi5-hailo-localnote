@@ -1,2064 +1,2266 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
+<!doctype html>
+<html lang="zh-Hant">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pi 5 Edge AI Arena & Bluetooth Voice Gateway</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#4f46e5">
-    <link rel="apple-touch-icon" href="https://img.icons8.com/color/192/raspberry-pi.png">
-    <style>
-        :root {
-            --bg-base: #0a0f1d;
-            --bg-surface: #131b2e;
-            --bg-surface-elevated: #1e293b;
-            --border-color: #27354f;
-            --border-focus: #4f46e5;
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-            --accent: #38bdf8;
-            --accent-purple: #818cf8;
-            --accent-glow: rgba(56, 189, 248, 0.15);
-            --success: #10b981;
-            --warning: #f59e0b;
-            --danger: #ef4444;
-            --radius-md: 10px;
-            --radius-lg: 16px;
-        }
-
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background-color: var(--bg-base);
-            color: var(--text-main);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            line-height: 1.6;
-        }
-
-        /* Top Header */
-        header {
-            background-color: rgba(19, 27, 46, 0.85);
-            backdrop-filter: blur(12px);
-            border-bottom: 1px solid var(--border-color);
-            position: sticky;
-            top: 0;
-            z-index: 50;
-            padding: 0.75rem 1.5rem;
-        }
-
-        .header-container {
-            max-width: 1240px;
-            margin: 0 auto;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 0.75rem;
-        }
-
-        .logo-group {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }
-
-        .logo-badge {
-            background: linear-gradient(135deg, #4f46e5, #06b6d4);
-            color: #fff;
-            font-weight: 700;
-            font-size: 0.85rem;
-            padding: 0.25rem 0.6rem;
-            border-radius: 6px;
-            letter-spacing: 0.5px;
-        }
-
-        .logo-title {
-            font-size: 1.15rem;
-            font-weight: 700;
-            color: #fff;
-        }
-
-        .telemetry-bar {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-        }
-
-        .stat-pill {
-            background-color: var(--bg-surface-elevated);
-            border: 1px solid var(--border-color);
-            border-radius: 9999px;
-            padding: 0.25rem 0.7rem;
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            display: flex;
-            align-items: center;
-            gap: 0.4rem;
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        .stat-pill strong {
-            color: var(--text-main);
-        }
-
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background-color: var(--success);
-            box-shadow: 0 0 8px var(--success);
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.2); opacity: 0.7; }
-        }
-
-        /* Network Mode Switch Banner */
-        .network-bar-container {
-            max-width: 1240px;
-            margin: 0.85rem auto 0 auto;
-            padding: 0 1.5rem;
-            width: 100%;
-        }
-
-        .network-bar {
-            background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-md);
-            padding: 0.75rem 1.25rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 1rem;
-            flex-wrap: wrap;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-        }
-
-        .network-info {
-            display: flex;
-            align-items: center;
-            gap: 0.85rem;
-        }
-
-        .net-badge {
-            font-size: 0.75rem;
-            font-weight: 700;
-            padding: 0.3rem 0.65rem;
-            border-radius: 9999px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .net-badge.sta {
-            background-color: rgba(16, 185, 129, 0.2);
-            color: #34d399;
-            border: 1px solid #10b981;
-        }
-
-        .net-badge.ap {
-            background-color: rgba(245, 158, 11, 0.2);
-            color: #fbbf24;
-            border: 1px solid #f59e0b;
-        }
-
-        .net-text {
-            display: flex;
-            flex-direction: column;
-            gap: 0.15rem;
-        }
-
-        .net-text strong {
-            font-size: 0.9rem;
-            color: #fff;
-        }
-
-        .net-text span {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        .btn-net-switch {
-            background: linear-gradient(135deg, #4f46e5, #7c3aed);
-            border: 1px solid #6366f1;
-            color: #fff;
-            padding: 0.45rem 1rem;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            transition: all 0.2s;
-        }
-
-        .btn-net-switch:hover:not(:disabled) {
-            filter: brightness(1.15);
-            transform: translateY(-1px);
-        }
-
-        /* Streaming Typewriter Cursor */
-        .streaming-cursor::after {
-            content: "▋";
-            animation: blinkCursor 0.8s infinite;
-            color: #38bdf8;
-            margin-left: 3px;
-        }
-        @keyframes blinkCursor {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0; }
-        }
-
-        /* Top Navigation Tabs */
-        .tabs-container {
-            max-width: 1240px;
-            margin: 0.85rem auto 0 auto;
-            padding: 0 1.5rem;
-            width: 100%;
-        }
-
-        .tabs-nav {
-            display: flex;
-            gap: 0.6rem;
-            border-bottom: 2px solid var(--border-color);
-            padding-bottom: 0.5rem;
-        }
-
-        .tab-btn {
-            background: transparent;
-            border: none;
-            color: var(--text-muted);
-            font-size: 0.95rem;
-            font-weight: 600;
-            padding: 0.55rem 1.1rem;
-            border-radius: 8px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            transition: all 0.2s;
-        }
-
-        .tab-btn:hover {
-            color: var(--text-main);
-            background-color: rgba(255, 255, 255, 0.05);
-        }
-
-        .tab-btn.active {
-            color: #fff;
-            background: linear-gradient(135deg, rgba(79, 70, 229, 0.4), rgba(6, 182, 212, 0.2));
-            border: 1px solid var(--border-focus);
-            box-shadow: 0 0 12px rgba(99, 102, 241, 0.25);
-        }
-
-        /* Main Workspace Container */
-        main {
-            max-width: 1240px;
-            margin: 1.25rem auto 2rem auto;
-            padding: 0 1.5rem;
-            width: 100%;
-            flex: 1;
-        }
-
-        .tab-content {
-            display: none;
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-
-        /* Grid Layouts */
-        .grid-2col {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1.25rem;
-        }
-
-        @media (max-width: 900px) {
-            .grid-2col {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        /* Glassmorphism Panels */
-        .panel {
-            background-color: var(--bg-surface);
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-lg);
-            padding: 1.25rem;
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-        }
-
-        .panel-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 0.75rem;
-        }
-
-        .panel-title {
-            font-size: 1.05rem;
-            font-weight: 700;
-            color: #fff;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        /* Form elements */
-        .form-group {
-            display: flex;
-            flex-direction: column;
-            gap: 0.4rem;
-        }
-
-        label {
-            font-size: 0.85rem;
-            font-weight: 600;
-            color: var(--text-muted);
-        }
-
-        input[type="text"], select, textarea {
-            background-color: #0b1120;
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-md);
-            color: var(--text-main);
-            padding: 0.65rem 0.85rem;
-            font-size: 0.9rem;
-            font-family: inherit;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-
-        input[type="text"]:focus, select:focus, textarea:focus {
-            border-color: var(--border-focus);
-            box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
-        }
-
-        textarea {
-            resize: vertical;
-            min-height: 90px;
-        }
-
-        /* Buttons */
-        .btn-primary {
-            background: linear-gradient(135deg, #4f46e5, #06b6d4);
-            border: none;
-            border-radius: var(--radius-md);
-            color: #fff;
-            font-size: 0.95rem;
-            font-weight: 600;
-            padding: 0.65rem 1.25rem;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.5rem;
-            transition: all 0.2s;
-        }
-
-        .btn-primary:hover:not(:disabled) {
-            filter: brightness(1.15);
-            transform: translateY(-1px);
-        }
-
-        .btn-secondary {
-            background-color: var(--bg-surface-elevated);
-            border: 1px solid var(--border-color);
-            color: var(--text-main);
-            border-radius: var(--radius-md);
-            font-size: 0.85rem;
-            font-weight: 600;
-            padding: 0.5rem 0.9rem;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 0.4rem;
-            transition: all 0.2s;
-        }
-
-        .btn-secondary:hover:not(:disabled) {
-            border-color: var(--accent);
-            color: var(--accent);
-        }
-
-        /* BT Device Status Card (Collapsible) */
-        .bt-card {
-            background: #0b1120;
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-md);
-            padding: 0.85rem 1rem;
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-            transition: all 0.25s ease;
-        }
-
-        .bt-card-header-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            cursor: pointer;
-            user-select: none;
-            gap: 0.5rem;
-        }
-
-        .bt-header-left {
-            display: flex;
-            align-items: center;
-            gap: 0.65rem;
-            flex: 1;
-            min-width: 0;
-        }
-
-        .bt-header-title-box {
-            display: flex;
-            flex-direction: column;
-            gap: 0.15rem;
-            overflow: hidden;
-        }
-
-        .bt-header-title-box strong {
-            font-size: 0.92rem;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            color: #fff;
-        }
-
-        .bt-header-right {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            flex-shrink: 0;
-        }
-
-        .bt-battery-pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.3rem;
-            background: rgba(16, 185, 129, 0.15);
-            border: 1px solid rgba(16, 185, 129, 0.35);
-            border-radius: 9999px;
-            padding: 0.2rem 0.55rem;
-            font-size: 0.75rem;
-            font-weight: 700;
-            color: #34d399;
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        .btn-toggle-collapse {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--border-color);
-            color: var(--text-muted);
-            border-radius: 6px;
-            padding: 0.25rem 0.55rem;
-            font-size: 0.75rem;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            gap: 0.25rem;
-        }
-
-        .btn-toggle-collapse:hover {
-            color: #fff;
-            border-color: var(--accent);
-            background: rgba(99, 102, 241, 0.2);
-        }
-
-        .bt-card-body {
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-            border-top: 1px solid rgba(255, 255, 255, 0.05);
-            padding-top: 0.75rem;
-        }
-
-        .bt-card-body.collapsed {
-            display: none !important;
-        }
-
-        .bt-badge {
-            font-size: 0.75rem;
-            font-weight: 700;
-            padding: 0.25rem 0.6rem;
-            border-radius: 9999px;
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        .bt-badge.connected {
-            background-color: rgba(16, 185, 129, 0.2);
-            color: #34d399;
-            border: 1px solid #10b981;
-        }
-
-        .bt-badge.disconnected {
-            background-color: rgba(239, 68, 68, 0.2);
-            color: #f87171;
-            border: 1px solid #ef4444;
-        }
-
-        .bt-device-item {
-            background-color: var(--bg-surface-elevated);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 0.65rem 0.85rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 0.5rem;
-        }
-
-        .bt-device-info {
-            display: flex;
-            flex-direction: column;
-            gap: 0.2rem;
-        }
-
-        .bt-device-info strong {
-            font-size: 0.9rem;
-            color: #fff;
-        }
-
-        .bt-device-info span {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        /* Trusted device list & toggle switch */
-        .trusted-dev-list {
-            display: flex;
-            flex-direction: column;
-            gap: 0.45rem;
-            margin-top: 0.35rem;
-        }
-
-        .trusted-dev-item {
-            background: rgba(15, 23, 42, 0.6);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 8px;
-            padding: 0.55rem 0.75rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 0.6rem;
-            flex-wrap: wrap;
-        }
-
-        .trusted-dev-info {
-            display: flex;
-            flex-direction: column;
-            gap: 0.15rem;
-            min-width: 140px;
-        }
-
-        .trusted-dev-actions {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-        }
-
-        .toggle-switch {
-            position: relative;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.4rem;
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            cursor: pointer;
-            user-select: none;
-        }
-
-        .toggle-switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-            position: absolute;
-        }
-
-        .toggle-slider {
-            position: relative;
-            width: 32px;
-            height: 18px;
-            background-color: rgba(255, 255, 255, 0.15);
-            border-radius: 18px;
-            transition: .2s;
-            display: inline-block;
-        }
-
-        .toggle-slider:before {
-            position: absolute;
-            content: "";
-            height: 12px;
-            width: 12px;
-            left: 3px;
-            bottom: 3px;
-            background-color: white;
-            border-radius: 50%;
-            transition: .2s;
-        }
-
-        .toggle-switch input:checked + .toggle-slider {
-            background-color: #10b981;
-        }
-
-        .toggle-switch input:checked + .toggle-slider:before {
-            transform: translateX(14px);
-        }
-
-        /* Voice Recording Box & Waveform */
-        .voice-box {
-            background: linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(6, 182, 212, 0.05));
-            border: 1px solid rgba(99, 102, 241, 0.3);
-            border-radius: var(--radius-md);
-            padding: 1.25rem;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.85rem;
-            text-align: center;
-        }
-
-        .waveform {
-            display: none;
-            align-items: center;
-            gap: 4px;
-            height: 32px;
-            margin: 0.25rem 0;
-        }
-
-        .wave-bar {
-            width: 5px;
-            height: 100%;
-            background: linear-gradient(180deg, #ec4899, #06b6d4);
-            border-radius: 3px;
-            animation: wave 1s infinite ease-in-out;
-        }
-
-        .wave-bar:nth-child(2) { animation-delay: 0.15s; }
-        .wave-bar:nth-child(3) { animation-delay: 0.3s; }
-        .wave-bar:nth-child(4) { animation-delay: 0.45s; }
-        .wave-bar:nth-child(5) { animation-delay: 0.6s; }
-
-        @keyframes wave {
-            0%, 100% { height: 6px; }
-            50% { height: 30px; }
-        }
-
-        /* Live Recording Countdown & Progress */
-        .rec-progress-box {
-            display: none;
-            width: 100%;
-            max-width: 360px;
-            background: rgba(15, 23, 42, 0.7);
-            border: 1px solid rgba(239, 68, 68, 0.4);
-            border-radius: var(--radius-md);
-            padding: 0.85rem;
-            flex-direction: column;
-            gap: 0.6rem;
-            box-shadow: 0 0 16px rgba(239, 68, 68, 0.15);
-            animation: fadeIn 0.2s ease-out;
-        }
-
-        .rec-progress-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 0.85rem;
-            font-weight: 600;
-        }
-
-        .rec-indicator {
-            display: flex;
-            align-items: center;
-            gap: 0.4rem;
-            color: #ef4444;
-            font-size: 0.8rem;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-        }
-
-        .rec-dot {
-            width: 10px;
-            height: 10px;
-            background-color: #ef4444;
-            border-radius: 50%;
-            animation: pulse-dot 1s infinite;
-        }
-
-        @keyframes pulse-dot {
-            0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 8px #ef4444; }
-            50% { opacity: 0.4; transform: scale(0.85); box-shadow: none; }
-        }
-
-        .rec-timer-txt {
-            font-family: 'JetBrains Mono', monospace;
-            color: #f87171;
-            font-size: 0.95rem;
-        }
-
-        .rec-bar-track {
-            width: 100%;
-            height: 6px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 3px;
-            overflow: hidden;
-        }
-
-        .rec-bar-fill {
-            height: 100%;
-            width: 100%;
-            background: linear-gradient(90deg, #ef4444, #f59e0b);
-            border-radius: 3px;
-            transition: width 0.1s linear;
-        }
-
-        /* Audio Playback Card */
-        .playback-box {
-            display: none;
-            width: 100%;
-            background: rgba(15, 23, 42, 0.6);
-            border: 1px solid rgba(6, 182, 212, 0.3);
-            border-radius: var(--radius-md);
-            padding: 0.85rem;
-            flex-direction: column;
-            gap: 0.6rem;
-            animation: fadeIn 0.3s ease-out;
-        }
-
-        .playback-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 0.85rem;
-            font-weight: 700;
-            color: var(--accent);
-        }
-
-        audio {
-            width: 100%;
-            height: 38px;
-            border-radius: 6px;
-            outline: none;
-        }
-
-        /* Bilingual Output Card */
-        .bilingual-card {
-            background: #0b1120;
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-md);
-            padding: 1rem;
-            display: flex;
-            flex-direction: column;
-            gap: 0.85rem;
-        }
-
-        .card-row {
-            display: flex;
-            flex-direction: column;
-            gap: 0.3rem;
-        }
-
-        .card-row-title {
-            font-size: 0.75rem;
-            font-weight: 700;
-            color: var(--accent);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            display: flex;
-            align-items: center;
-            gap: 0.4rem;
-        }
-
-        .card-row-content {
-            font-size: 0.95rem;
-            color: #fff;
-            background: rgba(30, 41, 59, 0.5);
-            padding: 0.65rem 0.85rem;
-            border-radius: 6px;
-            line-height: 1.55;
-            max-height: 165px;
-            overflow-y: auto;
-            word-break: break-word;
-            overflow-wrap: break-word;
-            scroll-behavior: smooth;
-        }
-
-        /* Responsive subtle scrollbar for translation and STT output */
-        .card-row-content::-webkit-scrollbar {
-            width: 5px;
-        }
-        .card-row-content::-webkit-scrollbar-track {
-            background: rgba(15, 23, 42, 0.4);
-            border-radius: 4px;
-        }
-        .card-row-content::-webkit-scrollbar-thumb {
-            background: rgba(99, 102, 241, 0.45);
-            border-radius: 4px;
-        }
-        .card-row-content::-webkit-scrollbar-thumb:hover {
-            background: rgba(99, 102, 241, 0.8);
-        }
-
-        .action-row {
-            display: flex;
-            gap: 0.5rem;
-            margin-top: 0.4rem;
-            flex-wrap: wrap;
-        }
-
-        .spinner {
-            display: inline-block;
-            width: 14px;
-            height: 14px;
-            border: 2px solid rgba(255,255,255,0.3);
-            border-radius: 50%;
-            border-top-color: #fff;
-            animation: spin 0.8s linear infinite;
-        }
-
-        .bt-toast {
-            position: fixed;
-            bottom: 24px;
-            right: 24px;
-            background: rgba(15, 23, 42, 0.95);
-            color: #fff;
-            padding: 0.75rem 1.25rem;
-            border-radius: 8px;
-            border: 1px solid rgba(99, 102, 241, 0.5);
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
-            font-size: 0.875rem;
-            display: flex;
-            align-items: center;
-            gap: 0.6rem;
-            z-index: 9999;
-            transform: translateY(100px);
-            opacity: 0;
-            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-            pointer-events: none;
-        }
-        .bt-toast.show {
-            transform: translateY(0);
-            opacity: 1;
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>LocalNote 聽記盒</title>
+<meta name="theme-color" content="#0f766e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LocalNote">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+<script src="/static/vendor/wavesurfer.min.js"></script>
+<script src="/static/vendor/regions.min.js"></script>
+<style>
+/* ============================================================
+   LocalNote Demo UI · 工程版 (含藍牙音訊設備管理中心)
+   - 純靜態單檔案，離線運作不依賴外網
+   - 網址加 ?mock=1 可脫離後端預覽；加 ?dev=1 顯示開發工具連結
+   - 支援 #bt 或 /bluetooth 直達藍牙設備管理介面
+   ============================================================ */
+:root{
+  --bg:#f3f6f8; --card:#ffffff; --fg:#1f2933; --muted:#627d98; --line:#e3e9ee;
+  --op:#0f766e; --op-soft:#e6f1ef; --out:#1e3a5f; --out-soft:#e8eef7; --set:#4a5d70; --set-bg:#f8fafb; --set-line:#cdd6df;
+  --rec:#d9534f; --rec-soft:#fbe9e8; --busy:#d99a1e; --busy-soft:#fbf4e6; --busy-fg:#8a6d1c; --ok:#0f766e;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei","Heiti TC",system-ui,sans-serif;font-size:15px;line-height:1.6;-webkit-text-size-adjust:100%}
+button,select{font:inherit}
+button{cursor:pointer}
+button:focus-visible,select:focus-visible{outline:2px solid var(--op);outline-offset:2px}
+[hidden]{display:none!important}
+
+.topbar{background:var(--card);border-bottom:1px solid var(--line);padding:12px 20px;padding-top:calc(12px + env(safe-area-inset-top,0px));display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.logo{width:36px;height:36px;border-radius:10px;background:var(--op);color:#fff;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.brand{display:flex;flex-direction:column;line-height:1.25;min-width:0}
+.brand b{font-size:18px}
+.brand span{font-size:12px;color:var(--muted)}
+.spacer{flex-grow:1}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:7px 13px;border-radius:999px;font-size:13px;white-space:nowrap}
+.pill.net{background:var(--op-soft);color:var(--op);font-weight:700}
+.pill.net.online{background:#fdf1e6;color:#9a5b00}
+.pill.sys{background:var(--bg);color:var(--set)}
+.dot{width:9px;height:9px;border-radius:50%;background:currentColor;flex:none}
+
+main{max-width:1200px;margin:0 auto;padding:18px 20px 56px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);grid-template-areas:"op out" "set out";gap:22px;align-items:start}
+.col{min-width:0;display:flex;flex-direction:column;gap:14px}
+.col.op{grid-area:op}.col.out{grid-area:out}.col.set{grid-area:set}
+@media (max-width:700px){.grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"op" "out" "set"}}
+.tag{display:inline-block;font-size:12px;font-weight:700;padding:2px 10px;border-radius:6px;width:max-content}
+.tag.op{background:var(--op);color:#fff}
+.tag.out{background:var(--out);color:#fff}
+.tag.set{background:var(--line);color:var(--set)}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;display:flex;flex-direction:column;gap:14px}
+.card.op{border:2px solid var(--op);box-shadow:0 2px 8px rgba(15,118,110,.10)}
+.card.out{border-left:6px solid var(--out)}
+.card.out.minor{border-left-color:#9db3cf}
+.card.set{background:var(--set-bg);border:1px dashed var(--set-line);padding:14px 18px;color:var(--set);font-size:14px}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+@keyframes pulseGlow{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.4;transform:scale(0.92)}}
+.streaming-cursor{display:inline-block;width:8px;height:16px;background:var(--op);margin-left:3px;vertical-align:middle;animation:blink 0.8s infinite;border-radius:2px}
+.card h2{margin:0;font-size:17px}
+.card.set h2{font-size:15px;color:var(--set)}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding:4px 10px;border-radius:999px;background:var(--op-soft);color:var(--op)}
+.chip.off{background:var(--rec-soft);color:var(--rec)}
+.chip.out{background:var(--out-soft);color:var(--out)}
+.chip.minor{background:#eef2f7;color:var(--set)}
+
+.btn{border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:9px 14px;border-radius:10px;font-size:13px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:all .15s}
+.btn:hover:not(:disabled){filter:brightness(.96)}
+.btn.primary{background:var(--out);color:#fff;border-color:var(--out);font-weight:700}
+.btn.ghost{background:var(--card);color:var(--set);border-color:var(--set-line);font-size:12px}
+.btn.danger{color:#b33a36;border-color:#f3cfcd}
+.btn.danger:hover:not(:disabled){background:var(--rec-soft)}
+.btn.sm{min-height:32px;padding:4px 10px;font-size:12px;border-radius:8px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+.recwrap{display:flex;flex-direction:column;align-items:center;gap:14px;padding:4px 0}
+.recbtn{width:132px;height:132px;border-radius:50%;background:var(--rec);border:8px solid var(--rec-soft);color:#fff;font-size:17px;font-weight:700;box-shadow:0 6px 18px rgba(217,83,79,.28);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;transition:transform .1s}
+.recbtn:active{transform:scale(.97)}
+.recbtn small{font-size:12px;font-weight:400;opacity:.9}
+.recbtn.recording{background:#1f2933;border-color:#cfd6dd;box-shadow:none;animation:pulse 1.2s infinite}
+.recbtn.busy{background:#9aa9b8;border-color:#e3e9ee;box-shadow:none}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(217,83,79,.35)}50%{box-shadow:0 0 0 14px rgba(217,83,79,0)}}
+@media (prefers-reduced-motion:reduce){.recbtn.recording{animation:none}}
+.hint{color:var(--muted);font-size:13px;text-align:center;max-width:36ch}
+select{background:var(--card);border:1px solid var(--set-line);border-radius:10px;padding:8px 12px;min-height:40px}
+
+.progress{background:var(--busy-soft);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;color:var(--busy-fg)}
+.progress b{color:var(--fg)}
+.progress .label{font-size:11px;font-weight:700;letter-spacing:.06em}
+.bar{height:8px;background:#f0e2c2;border-radius:4px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--busy);border-radius:4px;transition:width .4s}
+.progress.rec{background:var(--rec-soft);color:#8a2a27}.progress.rec .bar{background:#f3cfcd}.progress.rec .bar i{background:var(--rec)}
+.progress.ok{background:var(--op-soft);color:#1f5e57}.progress.ok .bar{background:#cfe3df}.progress.ok .bar i{background:var(--op)}
+.progress.err{background:#fde8e7;color:#8a2a27}
+
+/* ---------- Task 09: 即時音量與頻譜視覺化 ---------- */
+.vu-container{background:#0f172a;border-radius:12px;padding:12px 14px;margin-top:10px;color:#e2e8f0;border:1px solid #1e293b;box-shadow:0 2px 10px rgba(0,0,0,.12);transition:opacity .2s}
+.vu-header{display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:8px}
+.vu-title{font-weight:700;color:#94a3b8;display:inline-flex;align-items:center;gap:4px}
+.vu-status-badge{padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;transition:all .2s ease}
+.vu-active{background:rgba(16,185,129,.2);color:#34d399;border:1px solid #059669}
+.vu-weak{background:rgba(245,158,11,.2);color:#fbbf24;border:1px solid #d97706}
+.vu-silent{background:rgba(239,68,68,.2);color:#f87171;border:1px solid #dc2626}
+.vu-db-val{font-family:monospace;font-size:12px;color:#cbd5e1;font-weight:600}
+.vu-bar-track{position:relative;height:10px;background:#1e293b;border-radius:5px;overflow:hidden;margin-bottom:10px}
+.vu-bar-fill{height:100%;width:0%;border-radius:5px;background:linear-gradient(90deg,#10b981 0%,#34d399 50%,#f59e0b 75%,#ef4444 95%);transition:width .06s cubic-bezier(.1,.7,.1,1)}
+.vu-peak-indicator{position:absolute;top:0;bottom:0;width:3px;background:#fff;left:0%;transition:left .08s ease-out;box-shadow:0 0 5px #fff}
+.spectrum-visualizer{display:flex;align-items:flex-end;justify-content:space-between;height:34px;gap:5px;padding:3px 6px;background:rgba(15,23,42,.7);border-radius:6px}
+.spectrum-bar{flex:1;height:100%;display:flex;align-items:flex-end;background:rgba(51,65,85,.4);border-radius:3px;overflow:hidden}
+.spectrum-fill{width:100%;height:4%;border-radius:2px;background:linear-gradient(to top,#0f766e,#14b8a6,#38bdf8);transition:height .06s cubic-bezier(.1,.7,.1,1)}
+
+.minutes{display:flex;flex-direction:column;gap:12px;padding:2px}
+.minutes h3{margin:0;font-size:18px}
+.minutes .meta{font-size:13px;color:var(--muted)}
+.minutes h4{margin:0;font-size:13px;color:var(--out)}
+.minutes ul{margin:0;padding-left:18px}
+.minutes table{border-collapse:collapse;width:100%;font-size:14px;background:var(--set-bg);border-radius:10px;overflow:hidden}
+.minutes th{font-size:12px;color:var(--muted);font-weight:500;text-align:left;padding:8px 12px}
+.minutes td{padding:6px 12px;border-top:1px solid var(--line)}
+.empty{color:var(--muted);font-size:14px;padding:18px 0;text-align:center}
+details{border-top:1px solid var(--line);padding-top:10px}
+summary{cursor:pointer;color:var(--muted);font-size:13px;list-style:none;display:flex;align-items:center}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"展開 ▾";margin-left:auto}
+details[open] summary::after{content:"收起 ▴"}
+.transcript{white-space:pre-wrap;font-size:14px;color:var(--fg);margin-top:10px;max-height:360px;overflow:auto;line-height:1.7}
+.card.minor details{border-top:0;padding-top:0}
+.card.minor summary{color:var(--fg);font-weight:700;font-size:15px}
+.en{white-space:pre-wrap;font-size:14px;background:var(--set-bg);border-radius:10px;padding:12px;min-height:48px}
+.qr{width:56px;height:56px;border-radius:8px;border:1px solid var(--line);background:#fff;object-fit:contain;flex:none}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#1f2933;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:9999}
+.toast.show{opacity:1}
+.devlinks{font-size:12px;color:var(--muted)}
+.devlinks a{color:var(--muted);margin-right:12px}
+
+/* ---------- 藍牙管理介面樣式 ---------- */
+.bt-item{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;transition:box-shadow .15s}
+.bt-item:hover{box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.bt-item-info{display:flex;flex-direction:column;gap:3px;min-width:180px}
+.bt-item-info strong{font-size:14px;color:var(--fg);display:inline-flex;align-items:center;gap:6px}
+.bt-item-info span{font-size:12px;color:var(--muted);font-family:monospace}
+.bt-item-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.toggle-btn{font-size:12px;padding:5px 10px;border-radius:8px;border:1px solid var(--set-line);background:var(--card);cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+.toggle-btn.active{background:var(--op-soft);color:var(--op);border-color:var(--op);font-weight:700}
+.spinner{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+@keyframes pulseHighlight{0%{transform:scale(1);box-shadow:0 0 0 0 rgba(30,58,95,.4)}50%{transform:scale(1.008);box-shadow:0 0 0 8px rgba(30,58,95,0)}100%{transform:scale(1);box-shadow:0 0 0 0 rgba(30,58,95,0)}}
+.pulse-highlight{animation:pulseHighlight 1.4s ease-out}
+
+@media (max-width:600px){
+  .topbar{padding:10px 14px;gap:8px}
+  .brand span{display:none}
+  .brand b{font-size:16px}
+  .logo{width:32px;height:32px;font-size:13px;border-radius:8px}
+  .pill{padding:5px 9px;font-size:12px;gap:5px}
+  .topbar .pill.sys{display:inline-flex}
+}
+@media (max-width:480px){
+  main{padding:14px 14px 56px}
+  .card{padding:16px}
+  .topbar{justify-content:space-between}
+  .topbar-pills{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+}
+</style>
 </head>
 <body>
 
-    <!-- Header -->
-    <header>
-        <div class="header-container">
-            <div class="logo-group">
-                <span class="logo-badge">Pi 5</span>
-                <span class="logo-title">Edge AI & Bluetooth Voice Gateway</span>
-            </div>
-            <div class="telemetry-bar">
-                <div class="stat-pill">
-                    <span class="status-dot"></span>
-                    <span>Port 80 Online</span>
-                </div>
-                <div class="stat-pill" id="pillBtStatus" style="display: none; border-color: rgba(16, 185, 129, 0.4);">
-                    <span id="pillBtIcon">🎧</span>
-                    <strong id="pillBtText" style="color: #10b981;">--</strong>
-                </div>
-                <div class="stat-pill">
-                    <span>Temp:</span> <strong id="valTemp">--.-°C</strong>
-                </div>
-                <div class="stat-pill">
-                    <span>RAM:</span> <strong id="valRam">-- / -- GB</strong>
-                </div>
-                <div class="stat-pill">
-                    <a href="/" style="color: #10b981; text-decoration: none; font-weight: 600;">🎙️ LocalNote (/) ↗</a>
-                </div>
-                <div class="stat-pill">
-                    <a href="/dbg01" style="color: var(--accent); text-decoration: none; font-weight: 600;">💻 Code Review (/dbg01) ↗</a>
-                </div>
-                <div class="stat-pill">
-                    <a href="/docs" target="_blank" style="color: var(--accent); text-decoration: none;">API Docs ↗</a>
-                </div>
-            </div>
-        </div>
-    </header>
+<header class="topbar">
+  <div style="display:flex;align-items:center;gap:10px;min-width:0">
+    <span class="logo">LN</span>
+    <div class="brand"><b>LocalNote 聽記盒</b><span>會議錄音，紀要在盒子裡生成</span></div>
+  </div>
+  <span class="spacer"></span>
+  <div class="topbar-pills" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
+    <span class="pill net" id="netPill"><span class="dot"></span><span id="netText">檢查連線狀態…</span></span>
+    <span class="pill npu" id="npuPill" style="display:inline-flex;background:linear-gradient(135deg,#0284c7 0%,#0369a1 100%);color:#fff;font-weight:700;box-shadow:0 2px 6px rgba(2,132,199,0.3);border:1px solid #38bdf8;cursor:help" title="Hailo-10H (40 TOPS) 邊緣 AI 加速晶片">⚡ Hailo-10H: --°C</span>
+    <span class="pill sys" id="sysPill">盒子：—</span>
+    <button class="pill" id="btnToggleMetrics" style="cursor:pointer;background:var(--card);border:1px solid var(--line);font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;" title="點擊切換顯示/隱藏核心效能與耗時指標（預設隱藏，Demo 給客戶時不露餡）">📊 效能指標</button>
+  </div>
+</header>
 
-    <!-- Network Switcher Bar -->
-    <div class="network-bar-container">
-        <div class="network-bar">
-            <div class="network-info">
-                <span class="net-badge sta" id="netBadge">STA 聯網模式</span>
-                <div class="net-text">
-                    <strong id="netModeTitle">家用 Wi-Fi 模式 (Online Gateway)</strong>
-                    <span id="netModeDetails">IP: 192.168.50.228 | Telegram & SSH 運作中</span>
+<main>
+  <p class="devlinks" id="devLinks" hidden><a href="/dbg02" style="font-weight:700;color:var(--op)">🛠️ 工程除錯工作台 (/dbg02)</a><a href="/dbg01">Code Review (/dbg01)</a><a href="/docs">API Docs</a><a href="/bluetooth">藍牙管理</a></p>
+
+  <!-- ================= 主畫面：聽記 ================= -->
+  <div id="viewMain">
+    <div class="grid">
+      <!-- ================= 操作 ================= -->
+      <section class="col op">
+        <span class="tag op">操作</span>
+        <div class="card op">
+          <div class="row">
+            <h2>錄一段會議</h2>
+            <span class="spacer"></span>
+            <span class="chip" id="btChip" style="cursor:pointer;" title="點擊切換至耳麥管理頁面"><span class="dot"></span><span id="btText">耳麥：檢查中</span></span>
+          </div>
+          <div class="recwrap">
+            <button class="recbtn" id="recBtn" aria-label="開始錄音"><span id="recLabel">開始錄音</span><small id="recSub"></small></button>
+            <div class="row">
+              <label for="dur">這次錄</label>
+              <select id="dur">
+                <option value="60">1 分鐘</option>
+                <option value="90" selected>1 分 30 秒（演示）</option>
+                <option value="120">2 分鐘</option>
+                <option value="180">3 分鐘</option>
+                <option value="300">5 分鐘</option>
+                <option value="600">10 分鐘</option>
+                <option value="900">15 分鐘</option>
+                <option value="1800">30 分鐘（完整會議）</option>
+              </select>
+            </div>
+            <div class="row" style="margin-top:6px;padding:6px 10px;background:var(--set-bg);border-radius:8px;justify-content:space-between;align-items:center;">
+              <span style="font-size:12.5px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;">
+                🧹 新錄音清空舊內容
+              </span>
+              <button type="button" class="toggle-btn active" id="btnToggleAutoClear" title="點擊切換：開啟時開始新錄音會先清空舊畫面；關閉時保留舊波形與文稿直到新結果出爐">
+                ✓ 自動清空: 開
+              </button>
+            </div>
+            <div class="row" style="margin-top:6px;padding:6px 10px;background:var(--set-bg);border-radius:8px;justify-content:space-between;align-items:center;">
+              <span style="font-size:12.5px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;">
+                ⚡ 快速調校 (跳過 AI 總結)
+              </span>
+              <button type="button" class="toggle-btn" id="btnToggleBypassSummary" title="點擊切換：開啟後僅執行 STT 語音轉逐字稿，跳過最後 AI 生成會議摘要與待辦">
+                ✕ 跳過總結: 關 (完整總結)
+              </button>
+            </div>
+            <p class="hint" id="hint">戴上耳麥，按下紅色按鈕開始說。時間到自動停，盒子接著整理成紀要。</p>
+          </div>
+          <div class="progress" id="progress" hidden>
+            <div class="row" style="align-items:center;">
+              <span class="label">進度</span>
+              <b id="pTitle">—</b>
+              <span class="spacer"></span>
+              <span id="pEta"></span>
+              <button class="btn primary" id="btnFinishEarly" onclick="finishRecordingEarly()" style="padding:3px 9px;font-size:12px;margin-left:6px;background:var(--accent);color:#fff;" title="說完了！提早結束錄音並立即整理會議紀要" hidden>⏹️ 立即整理</button>
+              <button class="btn ghost danger" id="btnCancelJob" onclick="cancelActiveJob()" style="padding:3px 8px;font-size:12px;margin-left:6px;border-color:var(--rec);color:var(--rec);" title="立即終止錄音或背景推論">⛔ 取消</button>
+            </div>
+            <div class="bar"><i id="pBar"></i></div>
+            <span id="pSteps" style="font-size:13px"></span>
+
+            <!-- Task 09: 即時音量頻譜採樣 (Live VU Meter & Spectrum Visualizer) -->
+            <div class="vu-container" id="vuContainer" hidden>
+              <div class="vu-header">
+                <span class="vu-title">🎤 耳麥收音</span>
+                <span class="vu-status-badge vu-silent" id="vuStatusBadge">靜音</span>
+                <span class="spacer"></span>
+                <span class="vu-db-val" id="vuDbVal">-60 dB</span>
+              </div>
+              <div class="vu-bar-track">
+                <div class="vu-bar-fill" id="vuBarFill"></div>
+                <div class="vu-peak-indicator" id="vuPeakIndicator"></div>
+              </div>
+              <div class="spectrum-visualizer" id="spectrumVisualizer">
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+                <div class="spectrum-bar"><div class="spectrum-fill"></div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 核心效能與耗時指標清單區 (清晰直觀看板) -->
+          <div id="metricsPanel" class="metrics-panel" hidden style="margin-top:12px;background:#0f172a;border:1px solid #1e293b;border-radius:12px;padding:12px 14px;color:#e2e8f0;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;border-bottom:1px solid #334155;padding-bottom:6px;">
+              <span style="font-weight:700;color:#38bdf8;display:inline-flex;align-items:center;gap:6px">
+                📊 聽記盒真實效能看板 <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:#1e293b;color:#94a3b8">即時監測</span>
+              </span>
+              <span id="metricTargetStatus" style="font-size:11.5px;font-weight:700;color:#34d399">門檻: 總耗時 &le; 210s</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <!-- 1. 錄音時間 -->
+              <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+                <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                  <span>🎙️ 錄音時間</span>
+                  <span id="metricRecStatus" style="color:#38bdf8">待命</span>
                 </div>
+                <div style="font-size:14px;font-weight:700;margin-top:2px;font-family:monospace;color:#f8fafc;" id="metricRecTime">00:00 / 00:00</div>
+                <div style="color:#64748b;font-size:10px;margin-top:2px;">藍牙 16kHz · 記憶體零磁碟</div>
+              </div>
+              <!-- 2. 逐字稿等待 (尾端延遲) -->
+              <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+                <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                  <span>⚡ 逐字稿等待時間</span>
+                  <span id="metricSttStatus" style="color:#94a3b8">等待</span>
+                </div>
+                <div style="font-size:14px;font-weight:700;margin-top:2px;font-family:monospace;color:#38bdf8;" id="metricSttTime">等待: --</div>
+                <div style="color:#64748b;font-size:10px;margin-top:2px;" id="metricSttDesc">邊錄邊轉 · 停錄瞬間出稿</div>
+              </div>
+              <!-- 3. 總完工時間 (錄音+轉錄) -->
+              <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+                <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                  <span>⏱️ 總完工時間</span>
+                  <span id="metricTotalGoal" style="color:#34d399">目標 &le; 210s</span>
+                </div>
+                <div style="font-size:14px;font-weight:700;margin-top:2px;font-family:monospace;color:#34d399;" id="metricTotalTime">總耗時: --</div>
+                <div style="color:#64748b;font-size:10px;margin-top:2px;" id="metricTotalDesc">從按下開始到看到全稿</div>
+              </div>
+              <!-- 4. 產出成果與模型 -->
+              <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+                <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                  <span>📝 成果與模型</span>
+                  <span style="color:#a78bfa" id="metricModelBadge">Whisper small</span>
+                </div>
+                <div style="font-size:13px;font-weight:700;margin-top:2px;color:#f8fafc;" id="metricOutputWords">文字: --</div>
+                <div style="color:#64748b;font-size:10px;margin-top:2px;" id="metricOutputSpeed">繁中頂級無同音錯字</div>
+              </div>
             </div>
-            <div class="network-actions">
-                <button class="btn-net-switch" id="btnNetSwitch" onclick="handleNetworkToggle()">
-                    <span id="btnNetSwitchIcon">📡</span>
-                    <span id="btnNetSwitchText">切換為獨立熱點模式 (10.20.0.1)</span>
-                </button>
-            </div>
+          </div>
         </div>
+      </section>
+
+      <!-- ================= 設定 ================= -->
+      <section class="col set">
+        <span class="tag set">設定與硬體狀態</span>
+        <!-- ⚡ Hailo-10H 40 TOPS 硬體即時監控看板 (Live Telemetry Card) -->
+        <div class="card set" id="hailoMonitorCard" style="background:#0f172a;border:1px solid #1e293b;border-radius:14px;padding:14px 16px;color:#f8fafc;box-shadow:0 4px 14px rgba(0,0,0,0.2);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;border-bottom:1px solid #334155;padding-bottom:8px;">
+            <span style="font-weight:700;font-size:13.5px;color:#38bdf8;display:inline-flex;align-items:center;gap:6px">
+              ⚡ Hailo-10H AI 加速晶片 <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:#0369a1;color:#fff;font-weight:700">40 TOPS</span>
+            </span>
+            <span id="hailoLiveBadge" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(16,185,129,0.2);color:#34d399;border:1px solid #059669">
+              ● 待命就緒
+            </span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <!-- 1. 晶圓溫度 -->
+            <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+              <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                <span>🌡️ 晶片溫度 (Die Temp)</span>
+                <span id="hailoTempStatus" style="color:#34d399;font-weight:700">低溫良好</span>
+              </div>
+              <div style="font-size:15px;font-weight:700;margin-top:2px;font-family:monospace;color:#38bdf8;" id="hailoTempDisplay">-- °C</div>
+              <div style="color:#64748b;font-size:10px;margin-top:2px;">溫控閾值 &le; 75°C</div>
+            </div>
+            <!-- 2. NNC 核心運算負載 -->
+            <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+              <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                <span>⚙️ NNC 運算負載 (Load)</span>
+                <span id="hailoNncStatus" style="color:#94a3b8">待命</span>
+              </div>
+              <div style="font-size:15px;font-weight:700;margin-top:2px;font-family:monospace;color:#f8fafc;" id="hailoNncDisplay">0 %</div>
+              <div style="color:#64748b;font-size:10px;margin-top:2px;">推論中自動拉升</div>
+            </div>
+            <!-- 3. NPU 專屬記憶體 (LPDDR4X) -->
+            <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+              <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                <span>🧠 專屬記憶體 (RAM)</span>
+                <span id="hailoRamPct" style="color:#a78bfa">-- %</span>
+              </div>
+              <div style="font-size:13px;font-weight:700;margin-top:2px;font-family:monospace;color:#f8fafc;" id="hailoRamDisplay">-- / 7,221 MB</div>
+              <div style="color:#64748b;font-size:10px;margin-top:2px;">Hailo-10H 8GB LPDDR4X</div>
+            </div>
+            <!-- 4. 工作電壓與邊緣模型 -->
+            <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+              <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                <span>⚡ 供電電壓與模型</span>
+                <span id="hailoVoltDisplay" style="color:#fbbf24">799 mV</span>
+              </div>
+              <div style="font-size:12px;font-weight:700;margin-top:2px;color:#f8fafc;" id="hailoModelBadge">Whisper-Small + Qwen3</div>
+              <div style="color:#64748b;font-size:10px;margin-top:2px;">PCIe Gen2 x1 · 零磁碟 I/O</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card set">
+          <div class="row">
+            <div style="flex:1 1 220px;min-width:0">
+              <h2>手機怎麼連</h2>
+              <div>連 Wi-Fi「<b id="ssid">WiFi 熱點</b>」→ 開「<b id="host">localnote.local</b>」。不用裝 App。</div>
+            </div>
+            <img class="qr" id="qr" alt="Wi-Fi QR Code" src="" hidden>
+            <button class="btn ghost" id="netSwitch">切回家用 Wi-Fi</button>
+          </div>
+        </div>
+        <div class="card set">
+          <div class="row">
+            <div style="flex:1 1 150px"><h2>耳麥</h2><div id="btDetail">—</div></div>
+            <div class="row">
+              <button class="btn ghost" id="btnOpenBtMgr" onclick="openBtView()" style="border-color:var(--op);color:var(--op);font-weight:700">🔍 找耳麥 / 管理 ↗</button>
+              <button class="btn ghost" id="btnConnectDefault">連線常用耳麥</button>
+              <button class="btn ghost danger" id="btnQuickDisconnect">中斷</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= 輸出 ================= -->
+      <section class="col out" id="secMinutes">
+        <span class="tag out">輸出</span>
+
+        <!-- Task 12: 互動式音訊波形視覺化與剪輯 (Waveform Visualizer & Trimming - Wavesurfer.js) -->
+        <div class="card out" id="waveformCard" hidden style="margin-bottom:12px;">
+          <div class="row" style="align-items:center;">
+            <h3 style="margin:0;font-size:14px;display:inline-flex;align-items:center;gap:6px;">
+              <span>🎧 錄音母帶波形與剪輯</span>
+            </h3>
+            <span class="spacer"></span>
+            <span class="chip" id="waveTimeDisplay" style="font-family:monospace;font-size:11px;">00:00 / 00:00</span>
+          </div>
+
+          <div id="waveform" style="margin:8px 0;background:var(--set-bg);border-radius:10px;padding:8px;min-height:72px;"></div>
+
+          <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;">
+            <button class="btn ghost" id="btnWavePlayPause" onclick="toggleWavePlay()" style="padding:5px 12px;font-size:13px;">
+              <span id="wavePlayIcon">▶ 播放</span>
+            </button>
+            <button class="btn ghost" id="btnWaveStop" onclick="stopWavePlay()" style="padding:5px 10px;font-size:13px;">
+              ⏹ 停止
+            </button>
+            <span class="spacer"></span>
+            <div style="display:inline-flex;align-items:center;gap:6px;font-size:12px;">
+              <span id="regionLabel" style="color:var(--muted)">選取區間: 全段</span>
+              <button class="btn ghost" id="btnPlayRegion" onclick="playSelectedRegion()" style="padding:4px 8px;font-size:12px;" disabled>
+                ▶ 播選區
+              </button>
+              <button class="btn primary" id="btnTranscribeRegion" onclick="transcribeSelectedRegion()" style="padding:4px 10px;font-size:12px;" disabled>
+                ✂️ 局部轉錄
+              </button>
+            </div>
+          </div>
+
+          <div id="regionTranscriptBox" style="margin-top:10px;font-size:13px;background:var(--set-bg);border:1px dashed var(--line);border-radius:8px;padding:8px 12px;display:none;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;color:var(--op);font-weight:600;">
+              <span>✂️ 局部轉錄結果 (<span id="regionSpan"></span>):</span>
+              <span class="spacer"></span>
+              <button class="btn ghost" style="padding:2px 6px;font-size:11px;" onclick="closeRegionTranscript()">關閉</button>
+            </div>
+            <div id="regionTranscriptText" style="color:var(--fg);line-height:1.6;white-space:pre-wrap;"></div>
+          </div>
+        </div>
+
+        <div class="card out">
+          <div class="row">
+            <h2>會議紀要</h2>
+            <span class="chip out">盒子生成，未上傳</span>
+            <span class="spacer"></span>
+            <button class="btn" id="regenBtn" disabled>重新整理</button>
+            <button class="btn primary" id="copyBtn" disabled>複製紀要</button>
+          </div>
+          <div class="minutes" id="minutes"><div class="empty">還沒有紀要。錄一段會議，約一分鐘後這裡會出現摘要、待辦和決議。</div></div>
+          <details id="transcriptBox" hidden>
+            <summary>完整逐字稿</summary>
+            <div class="transcript" id="transcript"></div>
+          </details>
+        </div>
+
+        <div class="card out minor">
+          <details>
+            <summary>翻成英文、念給我聽 <span class="chip minor" style="margin-left:10px">加分項</span></summary>
+            <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
+              <div class="row">
+                <button class="btn" id="toEnBtn" disabled>紀要翻成英文</button>
+                <button class="btn" id="toZhBtn" disabled>英文翻成中文</button>
+                <button class="btn" id="ttsBtn" disabled>在耳麥念出來</button>
+              </div>
+              <div class="en" id="enBox">—</div>
+            </div>
+          </details>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ================= 藍牙管理子頁面 ================= -->
+  <div id="viewBt" hidden>
+    <div class="row" style="margin-bottom:14px;justify-content:space-between">
+      <button class="btn primary" id="btnBackToMain" onclick="closeBtView()" style="padding:10px 18px;font-size:14px;display:inline-flex;align-items:center;gap:6px">
+        <span>← 返回 LocalNote 聽記盒</span>
+      </button>
+      <div class="row">
+        <span class="tag set" style="font-size:13px">藍牙音訊設備中心 (Bluetooth Hub)</span>
+        <button class="btn ghost" id="btnRefreshBtHub">🔄 刷新狀態</button>
+      </div>
     </div>
 
-    <!-- Navigation Tabs -->
-    <div class="tabs-container">
-        <div class="tabs-nav">
-            <button class="tab-btn active" id="tabBtnVoice" onclick="switchMainTab('voice')">
-                <span>🎧</span> 藍牙耳麥與語音翻譯應用 (BT Voice Studio)
-            </button>
-            <button class="tab-btn" id="tabBtnArena" onclick="switchMainTab('arena')">
-                <span>💬</span> 程式碼審查與 LLM Arena (Code Review)
-            </button>
+    <div style="display:flex;flex-direction:column;gap:18px">
+      <!-- 目前連線耳麥卡片 -->
+      <div class="card" style="border-left:6px solid var(--op)">
+        <div class="row" style="gap:14px">
+          <span style="font-size:28px">🎧</span>
+          <div style="flex:1 1 200px;min-width:0">
+            <div class="row" style="gap:8px;flex-wrap:wrap">
+              <h2 id="hubCurName" style="font-size:18px;margin:0">檢查中...</h2>
+              <span class="chip off" id="hubCurBadge"><span class="dot"></span><span id="hubCurStatus">未連線</span></span>
+              <span class="chip off" id="hubBatteryPill" style="font-size:12px">🔋 <span id="hubBatteryVal">--</span></span>
+              <span class="chip off" id="hubSignalPill" style="font-size:12px">📶 <span id="hubSignalVal">--</span></span>
+            </div>
+            <div id="hubCurMac" style="font-size:12px;color:var(--muted);font-family:monospace;margin-top:2px">MAC: --:--:--:--:--:--</div>
+          </div>
+          <div class="row">
+            <button class="btn ghost danger" id="hubBtnDisconnect" disabled>中斷連線</button>
+          </div>
         </div>
+      </div>
+
+      <!-- ⚡ Hailo-10H 狀態卡片 (Bluetooth Hub 檢視專用) -->
+      <div class="card" style="background:#0f172a;border:1px solid #1e293b;color:#f8fafc;padding:12px 16px;">
+        <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <div style="display:inline-flex;align-items:center;gap:8px">
+            <span style="font-size:20px">⚡</span>
+            <div>
+              <b style="font-size:14px;color:#38bdf8">Hailo-10H AI 加速晶片 (40 TOPS)</b>
+              <span style="font-size:11px;color:#94a3b8;margin-left:6px">PCIe 邊緣 AI 硬體推論</span>
+            </div>
+          </div>
+          <div class="row" style="gap:8px;flex-wrap:wrap">
+            <span class="chip" style="background:#1e293b;color:#38bdf8;font-family:monospace;font-size:12px;font-weight:700">🌡️ 晶片溫度: <span id="btHubHailoTempDisplay">-- °C</span></span>
+            <span class="chip" style="background:#1e293b;color:#34d399;font-family:monospace;font-size:12px;font-weight:700">⚙️ 核心負載: <span id="btHubHailoNncDisplay">0 %</span></span>
+            <span class="chip" style="background:#1e293b;color:#a78bfa;font-family:monospace;font-size:12px;font-weight:700">🧠 RAM: <span id="btHubHailoRamDisplay">--</span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 周圍耳麥搜尋卡片 -->
+      <div class="card op">
+        <div class="row">
+          <div>
+            <h2 style="font-size:16px;margin:0">🔍 周圍耳麥搜尋 (Scan Nearby Headsets)</h2>
+            <div style="font-size:13px;color:var(--muted);margin-top:2px">請確保欲配對的耳麥已開機並處於配對狀態 (紅藍燈閃爍或長按配對鍵)</div>
+          </div>
+          <span class="spacer"></span>
+          <button class="btn primary" id="hubBtnScan">🔍 開始掃描 (8秒)</button>
+        </div>
+        <div id="hubScanContainer" style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+          <div class="empty" id="hubScanEmpty">點擊上方「開始掃描」搜尋周圍的藍牙耳麥</div>
+        </div>
+      </div>
+
+      <!-- 已信任耳麥清單卡片 -->
+      <div class="card">
+        <div class="row">
+          <div>
+            <h2 style="font-size:16px;margin:0">⭐ 已信任耳麥清單 (Trusted Headsets)</h2>
+            <div style="font-size:13px;color:var(--muted);margin-top:2px">點擊即可快速切換連線，並可設定開機自動連線與預設耳麥</div>
+          </div>
+        </div>
+        <div id="hubTrustedContainer" style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+          <div class="empty" id="hubTrustedEmpty">載入設備清單中...</div>
+        </div>
+      </div>
     </div>
+  </div>
+</main>
 
-    <!-- Main Workspace -->
-    <main>
-        <!-- Tab 1: Bluetooth Voice & Translation Studio (Default) -->
-        <div class="tab-content active" id="tabVoice">
-            <div class="grid-2col">
-                <!-- Left Column: BT Manager & Mic Capture -->
-                <section class="panel">
-                    <div class="panel-header">
-                        <h2 class="panel-title">
-                            <span>🎧</span> 藍牙耳麥裝置管理 (Bluetooth Hub)
-                        </h2>
-                        <button class="btn-secondary" onclick="fetchBTStatus()">
-                            <span>🔄</span> 重新檢查狀態
-                        </button>
-                    </div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-                    <!-- Current BT Status (Collapsible Card) -->
-                    <div class="bt-card" id="btCard">
-                        <!-- Top Summary Header (Always visible) -->
-                        <div class="bt-card-header-bar" onclick="toggleBtCollapse()">
-                            <div class="bt-header-left">
-                                <span style="font-size: 1.25rem;">🎧</span>
-                                <div class="bt-header-title-box">
-                                    <strong id="btDeviceName">未連線耳麥</strong>
-                                    <div style="font-size: 0.72rem; color: var(--text-muted); font-family: monospace;" id="btDeviceMac">--:--:--:--:--:--</div>
-                                </div>
-                            </div>
-                            <div class="bt-header-right">
-                                <span class="bt-battery-pill" id="btHeaderBatteryPill" style="display: none;">
-                                    <span id="btHeaderBatIcon">🔋</span>
-                                    <span id="btHeaderBatText">--%</span>
-                                </span>
-                                <span class="bt-badge disconnected" id="btStatusBadge">DISCONNECTED</span>
-                                <button class="btn-toggle-collapse" id="btnToggleBtCollapse" title="收合/展開藍牙控制面板" onclick="event.stopPropagation(); toggleBtCollapse();">
-                                    <span id="iconBtCollapse">▾ 控制</span>
-                                </button>
-                            </div>
-                        </div>
+<script>
+/* ============================================================
+   後端介面約定
+   所有請求同源，不走外網。
+   ============================================================ */
+const API = {
+  system: '/api/system', bt: '/api/bt', btStatus: '/api/bt/status', btScan: '/api/bt/scan',
+  btPair: '/api/bt/pair', btConnect: '/api/bt/connect', btDisconnect: '/api/bt/disconnect',
+  btAuto: '/api/bt/trusted/auto_connect',
+  btRemove: '/api/bt/remove',
+  record: '/api/record', status: '/api/status',
+  result: '/api/result', regenerate: '/api/regenerate', translate: '/api/translate',
+  tts: '/api/tts', netSwitch: '/api/net/switch',
+  cancelJob: '/api/record/cancel', transcribeRegion: '/api/transcribe/region',
+  finishRecord: '/api/record/finish',
+  latestAudio: '/api/audio/latest'
+};
+const POLL_MS = 1500;
+const q = new URLSearchParams(location.search);
+const MOCK = q.get('mock') === '1';
+if (q.get('dev') === '1') document.getElementById('devLinks').hidden = false;
 
-                        <!-- Collapsible Body (Hidden when collapsed) -->
-                        <div class="bt-card-body" id="btCardBody">
-                            <!-- Telemetry: Battery & Signal Strength -->
-                            <div class="bt-telemetry-row" id="btTelemetryRow" style="display: none; padding: 0.65rem 0.85rem; background: rgba(15, 23, 42, 0.7); border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08); align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
-                                <!-- Battery Gauge Detail -->
-                                <div style="display: flex; align-items: center; gap: 0.6rem; flex: 1; min-width: 140px;">
-                                    <span id="btBatteryIcon" style="font-size: 1.35rem;">🔋</span>
-                                    <div style="flex: 1;">
-                                        <div style="display: flex; justify-content: space-between; font-size: 0.75rem; margin-bottom: 3px;">
-                                            <span style="color: var(--text-muted);">耳麥剩餘電量</span>
-                                            <strong id="btBatteryText" style="color: #10b981;">--%</strong>
-                                        </div>
-                                        <div style="height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden;">
-                                            <div id="btBatteryBar" style="height: 100%; width: 0%; background: #10b981; transition: width 0.4s ease, background-color 0.4s ease;"></div>
-                                        </div>
-                                    </div>
-                                </div>
+const $ = id => document.getElementById(id);
+const el = {
+  viewMain: $('viewMain'), viewBt: $('viewBt'),
+  netPill: $('netPill'), netText: $('netText'), npuPill: $('npuPill'), sysPill: $('sysPill'), btChip: $('btChip'), btText: $('btText'), btDetail: $('btDetail'),
+  recBtn: $('recBtn'), recLabel: $('recLabel'), recSub: $('recSub'), dur: $('dur'), hint: $('hint'),
+  progress: $('progress'), pTitle: $('pTitle'), pEta: $('pEta'), pBar: $('pBar'), pSteps: $('pSteps'), btnFinishEarly: $('btnFinishEarly'),
+  minutes: $('minutes'), transcriptBox: $('transcriptBox'), transcript: $('transcript'),
+  regenBtn: $('regenBtn'), copyBtn: $('copyBtn'), toEnBtn: $('toEnBtn'), toZhBtn: $('toZhBtn'), ttsBtn: $('ttsBtn'), enBox: $('enBox'),
+  ssid: $('ssid'), host: $('host'), qr: $('qr'), netSwitch: $('netSwitch'), toast: $('toast'),
+  btnOpenBtMgr: $('btnOpenBtMgr'), btnConnectDefault: $('btnConnectDefault'), btnQuickDisconnect: $('btnQuickDisconnect'),
+  btnBackToMain: $('btnBackToMain'), btnRefreshBtHub: $('btnRefreshBtHub'),
+  hubCurName: $('hubCurName'), hubCurMac: $('hubCurMac'), hubCurBadge: $('hubCurBadge'), hubCurStatus: $('hubCurStatus'),
+  hubBatteryPill: $('hubBatteryPill'), hubBatteryVal: $('hubBatteryVal'),
+  hubSignalPill: $('hubSignalPill'), hubSignalVal: $('hubSignalVal'), hubBtnDisconnect: $('hubBtnDisconnect'),
+  hubBtnScan: $('hubBtnScan'), hubScanContainer: $('hubScanContainer'), hubTrustedContainer: $('hubTrustedContainer'),
+  vuContainer: $('vuContainer'), vuStatusBadge: $('vuStatusBadge'), vuDbVal: $('vuDbVal'),
+  vuBarFill: $('vuBarFill'), vuPeakIndicator: $('vuPeakIndicator'),
+  spectrumFills: document.querySelectorAll('.spectrum-fill')
+};
 
-                                <!-- Signal Strength -->
-                                <div style="display: flex; align-items: center; gap: 0.6rem; flex: 1; min-width: 140px; border-left: 1px solid rgba(255, 255, 255, 0.1); padding-left: 0.75rem;">
-                                    <span id="btSignalIcon" style="font-size: 1.35rem;">📶</span>
-                                    <div style="flex: 1;">
-                                        <div style="display: flex; justify-content: space-between; font-size: 0.75rem; margin-bottom: 3px;">
-                                            <span style="color: var(--text-muted);">訊號連線品質</span>
-                                            <strong id="btSignalText" style="color: #38bdf8;">--%</strong>
-                                        </div>
-                                        <div style="height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden;">
-                                            <div id="btSignalBar" style="height: 100%; width: 0%; background: #38bdf8; transition: width 0.4s ease;"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+let state = 'idle', result = null, pollTimer = null, lastJob = null;
+let handledDoneJob = null, doneHideTimer = null;
+let ws = null;
+let wsConnected = false;
+let wsReconnectDelay = 1000;
+let wsReconnectTimer = null;
+let httpSystemInterval = null;
+let httpBtInterval = null;
 
-                            <div class="action-row">
-                                <button class="btn-secondary" id="btnScanBT" onclick="handleScanBT()">
-                                    <span>🔍</span> 掃描周圍耳麥 (Scan)
-                                </button>
-                                <button class="btn-secondary" id="btnConnectBT" onclick="handleConnectBT()">
-                                    <span>🔗</span> 一鍵連線預設耳麥
-                                </button>
-                                <button class="btn-secondary" id="btnDisconnectBT" onclick="handleDisconnectBT()" style="color: #ef4444;">
-                                    <span>🔌</span> 中斷連線
-                                </button>
-                            </div>
+/* ---------- Task 09: 即時音量與頻譜視覺化更新 ---------- */
+function updateVuMeter(data) {
+  if (!el.vuContainer) return;
+  if (!data || !data.active) {
+    el.vuContainer.hidden = true;
+    if (el.vuBarFill) el.vuBarFill.style.width = '0%';
+    if (el.vuPeakIndicator) el.vuPeakIndicator.style.left = '0%';
+    if (el.spectrumFills) {
+      el.spectrumFills.forEach(f => f.style.height = '4%');
+    }
+    return;
+  }
+  el.vuContainer.hidden = false;
+  const pct = Math.min(100, Math.max(0, data.level_pct || 0));
+  const peakPct = Math.min(100, Math.max(0, (data.peak || 0) * 100));
 
-                            <!-- Trusted Devices Management List -->
-                            <div style="margin-top: 0.25rem;">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
-                                    <span style="font-size: 0.8rem; font-weight: 700; color: var(--accent);">⭐ 已信任耳麥清單 (Trusted Devices)</span>
-                                    <span style="font-size: 0.72rem; color: var(--text-muted);">可個別設定自動連線開關</span>
-                                </div>
-                                <div class="trusted-dev-list" id="trustedDeviceList">
-                                    <div style="font-size: 0.78rem; color: var(--text-muted); padding: 0.3rem;">載入設備清單中...</div>
-                                </div>
-                            </div>
+  if (el.vuBarFill) el.vuBarFill.style.width = pct + '%';
+  if (el.vuPeakIndicator) el.vuPeakIndicator.style.left = Math.max(pct, peakPct) + '%';
+  if (el.vuDbVal) el.vuDbVal.textContent = (data.db != null ? data.db + ' dB' : '--');
 
-                            <!-- Scan Results List -->
-                            <div class="form-group" id="scanResultsContainer" style="display: none; margin-top: 0.4rem;">
-                                <label style="font-size: 0.8rem;">掃描到的新設備 (點擊配對並信任)：</label>
-                                <div id="scanList" style="max-height: 160px; overflow-y: auto;"></div>
-                            </div>
-                        </div>
-                    </div>
+  if (el.vuStatusBadge) {
+    if (data.status === 'active') {
+      el.vuStatusBadge.className = 'vu-status-badge vu-active';
+      el.vuStatusBadge.textContent = '收音良好 🟢';
+    } else if (data.status === 'weak') {
+      el.vuStatusBadge.className = 'vu-status-badge vu-weak';
+      el.vuStatusBadge.textContent = '音量微弱 🟡';
+    } else {
+      el.vuStatusBadge.className = 'vu-status-badge vu-silent';
+      el.vuStatusBadge.textContent = '未收到聲音 🔴';
+    }
+  }
 
-                    <!-- Voice Record Action Box -->
-                    <div class="panel-header" style="margin-top: 0.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.4rem;">
-                        <h2 class="panel-title">
-                            <span>🎙️</span> 耳麥收音與雙語轉錄 (BT Voice to Bilingual)
-                        </h2>
-                        <span id="badgeMemoryStorage" style="font-size: 0.72rem; padding: 0.2rem 0.55rem; border-radius: 9999px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #6ee7b7; font-weight: 500;">
-                            ⚡ RAM-Disk: 零磁碟寫入 (0 Flash Wear)
-                        </span>
-                    </div>
+  // 更新 8 頻段跳動頻譜柱
+  if (data.bands && el.spectrumFills && el.spectrumFills.length) {
+    data.bands.forEach((bHeight, idx) => {
+      if (el.spectrumFills[idx]) {
+        el.spectrumFills[idx].style.height = Math.min(100, Math.max(4, bHeight)) + '%';
+      }
+    });
+  }
+}
 
-                    <div class="voice-box">
-                        <div style="font-size: 0.85rem; color: var(--text-muted);">
-                            點擊按鈕後，請對著藍牙耳麥說話，系統將自動以 faster-whisper 進行語音識別並翻譯為英文：
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 0.75rem;">
-                            <label for="selectDuration" style="font-size: 0.85rem;">錄音秒數：</label>
-                            <select id="selectDuration" style="padding: 0.35rem 0.6rem;">
-                                <option value="5">5 秒 (簡短發話)</option>
-                                <option value="10" selected>10 秒 (推薦 /voice 10 標準)</option>
-                                <option value="15">15 秒 (完整長句敘述)</option>
-                                <option value="30">30 秒 (長段落演說)</option>
-                                <option value="60">60 秒 (超長完整錄音)</option>
-                            </select>
-                        </div>
+/* ---------- 工具 ---------- */
+async function api(path, body, timeoutMs = 15000) {
+  if (MOCK) return mock(path, body);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const opts = body
+      ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal }
+      : { signal: controller.signal };
+    const r = await fetch(path, opts);
+    clearTimeout(timer);
+    if (!r.ok) {
+      let detail = '';
+      try {
+        const errData = await r.json();
+        detail = errData.detail || errData.msg || errData.message || '';
+      } catch (_) {}
+      throw new Error(detail || (path + ' ' + r.status));
+    }
+    return await r.json();
+  } catch (err) {
+    clearTimeout(timer);
+    if (err.name === 'AbortError') {
+      throw new Error(`請求逾時 (${timeoutMs / 1000}s)`);
+    }
+    throw err;
+  }
+}
+function toast(msg, ms = 1800) { el.toast.textContent = msg; el.toast.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.toast.classList.remove('show'), ms); }
+function fmt(s) { s = Math.max(0, Math.round(s)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-                        <!-- Waveform Visualizer -->
-                        <div class="waveform" id="waveAnim">
-                            <div class="wave-bar"></div>
-                            <div class="wave-bar"></div>
-                            <div class="wave-bar"></div>
-                            <div class="wave-bar"></div>
-                            <div class="wave-bar"></div>
-                        </div>
+/* ---------- 視圖切換 (SPA Router) 與藍牙智慧自動更新 ---------- */
+let btHubHeartbeatTimer = null;
+let lastBtHubStateJson = '';
 
-                        <!-- Live Recording Progress & Countdown -->
-                        <div class="rec-progress-box" id="recProgressBox">
-                            <div class="rec-progress-header">
-                                <div class="rec-indicator">
-                                    <div class="rec-dot"></div>
-                                    <span id="recStatusTitle">RECORDING</span>
-                                </div>
-                                <div class="rec-timer-txt" id="recTimerText">10.0s</div>
-                            </div>
-                            <div class="rec-bar-track">
-                                <div class="rec-bar-fill" id="recBarFill"></div>
-                            </div>
-                        </div>
+function startBtHubHeartbeat() {
+  stopBtHubHeartbeat();
+  // 每 3.5 秒在背景自動獲取最新狀態，讓電量、訊號與連線變更無感即時反映
+  btHubHeartbeatTimer = setInterval(() => {
+    if (!el.viewBt.hidden && state !== 'recording') {
+      refreshBtHub(true);
+    }
+  }, 3500);
+}
 
-                        <div style="display: flex; gap: 0.5rem; width: 100%; max-width: 380px; flex-wrap: wrap;">
-                            <button class="btn-primary" id="btnRecordVoice" onclick="handleRecordBTVoice()" style="flex: 1; min-width: 200px; font-size: 1rem; padding: 0.75rem;">
-                                <span id="btnRecordIcon">🎙️</span>
-                                <span id="btnRecordText">開始耳麥錄音 (Record Voice)</span>
-                            </button>
-                            <button class="btn-secondary" id="btnStopVoice" onclick="handleStopVoiceEarly()" style="display: none; font-size: 0.9rem; padding: 0.75rem 1rem; background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.5); color: #fca5a5;">
-                                <span>⏹️</span> 說完了立即轉錄
-                            </button>
-                        </div>
+function stopBtHubHeartbeat() {
+  if (btHubHeartbeatTimer) {
+    clearInterval(btHubHeartbeatTimer);
+    btHubHeartbeatTimer = null;
+  }
+}
 
-                        <!-- Pipeline Stepper Indicator -->
-                        <div class="pipeline-stepper" id="pipelineStepper" style="display: none; width: 100%; margin-top: 0.75rem; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 0.75rem; flex-direction: column; gap: 0.45rem;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; color: var(--text-muted); border-bottom: 1px solid rgba(255, 255, 255, 0.06); padding-bottom: 0.4rem;">
-                                <span>⚡ 雙語語音處理管線進度 (Pipeline Status)</span>
-                                <span id="stepperElapsedText" style="color: #38bdf8; font-family: monospace; font-weight: 600;">總耗時: 0.0s</span>
-                            </div>
-                            
-                            <!-- Step 1: Record -->
-                            <div class="step-item" id="stepItemRec" style="display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; padding: 0.3rem 0.5rem; border-radius: 4px; background: rgba(255, 255, 255, 0.02);">
-                                <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                    <span id="stepIconRec">⚪</span>
-                                    <span>① 藍牙耳麥收音 (Mic Capture)</span>
-                                </div>
-                                <span id="stepTagRec" style="font-size: 0.72rem; color: var(--text-muted);">等待中</span>
-                            </div>
+function triggerBurstRefresh() {
+  // 切換或中斷連線後，於 0.8s、2s、4s 執行三次快速更新，立即捕捉 PipeWire Sink 與電量
+  [800, 2000, 4000].forEach(delay => {
+    setTimeout(() => {
+      if (!el.viewBt.hidden && state !== 'recording') {
+        refreshBtHub(true);
+      }
+      refreshBt();
+    }, delay);
+  });
+}
 
-                            <!-- Step 2: Whisper STT -->
-                            <div class="step-item" id="stepItemStt" style="display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; padding: 0.3rem 0.5rem; border-radius: 4px; background: rgba(255, 255, 255, 0.02);">
-                                <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                    <span id="stepIconStt">⚪</span>
-                                    <span>② faster-whisper 繁中轉錄 (STT)</span>
-                                </div>
-                                <span id="stepTagStt" style="font-size: 0.72rem; color: var(--text-muted);">等待中</span>
-                            </div>
+function openBtView() {
+  el.viewMain.hidden = true;
+  el.viewBt.hidden = false;
+  window.location.hash = 'bt';
+  if (wsConnected) {
+    sendWsMessage({ action: 'subscribe_bt_hub', enable: true });
+    refreshBtHub(true);
+  } else {
+    refreshBtHub();
+    startBtHubHeartbeat();
+  }
+}
+function closeBtView() {
+  if (wsConnected) {
+    sendWsMessage({ action: 'subscribe_bt_hub', enable: false });
+  } else {
+    stopBtHubHeartbeat();
+  }
+  el.viewBt.hidden = true;
+  el.viewMain.hidden = false;
+  if (window.location.hash === '#bt') {
+    history.pushState('', document.title, window.location.pathname + window.location.search);
+  }
+  if (!wsConnected) {
+    refreshBt();
+  }
+}
 
-                            <!-- Step 3: Qwen Translation -->
-                            <div class="step-item" id="stepItemTr" style="display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; padding: 0.3rem 0.5rem; border-radius: 4px; background: rgba(255, 255, 255, 0.02);">
-                                <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                    <span id="stepIconTr">⚪</span>
-                                    <span>③ Qwen 本地大模型英文口譯 (LLM)</span>
-                                </div>
-                                <span id="stepTagTr" style="font-size: 0.72rem; color: var(--text-muted);">等待中</span>
-                            </div>
+window.openBtView = openBtView;
+window.closeBtView = closeBtView;
 
-                            <!-- Step 4: Ready -->
-                            <div class="step-item" id="stepItemDone" style="display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; padding: 0.3rem 0.5rem; border-radius: 4px; background: rgba(255, 255, 255, 0.02);">
-                                <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                    <span id="stepIconDone">⚪</span>
-                                    <span>④ 雙語卡片就緒 & 可點擊試聽 (Ready)</span>
-                                </div>
-                                <span id="stepTagDone" style="font-size: 0.72rem; color: var(--text-muted);">等待中</span>
-                            </div>
-                        </div>
-                    </div>
-                </section>
+el.btnOpenBtMgr.addEventListener('click', openBtView);
+el.btChip.addEventListener('click', openBtView);
+el.btnBackToMain.addEventListener('click', closeBtView);
+el.btnRefreshBtHub.addEventListener('click', () => refreshBtHub(false));
 
-                <!-- Right Column: Bilingual Results, Audio Playback & TTS Synthesis Studio -->
-                <section class="panel">
-                    <div class="panel-header">
-                        <h2 class="panel-title">
-                            <span>🌐</span> 中英雙語對照卡與音訊回放
-                        </h2>
-                    </div>
+window.addEventListener('hashchange', () => {
+  if (window.location.hash === '#bt') openBtView();
+  else if (!el.viewBt.hidden) closeBtView();
+});
+if (window.location.hash === '#bt' || window.location.pathname === '/bluetooth' || window.location.pathname === '/bt') {
+  openBtView();
+}
 
-                    <!-- Audio Playback Inspection Card -->
-                    <div class="playback-box" id="playbackBox">
-                        <div class="playback-header">
-                            <span>🎧 耳麥錄音原音回放 (Audio Playback)</span>
-                            <span id="audioStatusBadge" style="font-size: 0.75rem; color: #10b981; font-weight: normal;">● 錄音就緒可試聽</span>
-                        </div>
-                        <audio id="voiceAudioPlayer" controls preload="auto"></audio>
-                        <div style="font-size: 0.75rem; color: var(--text-muted); display: flex; justify-content: space-between;">
-                            <span>錄音檔由 PipeWire 擷取自藍牙耳麥麥克風</span>
-                            <span id="audioHintBadge"></span>
-                        </div>
-                    </div>
+/* ---------- 頂部狀態 ---------- */
+let lastSystemData = null;
 
-                    <!-- Hidden Audio for TTS -->
-                    <audio id="browserAudioPlayer" style="display: none;"></audio>
+function updateSystemUI(s) {
+  if (!s) return;
+  lastSystemData = s;
+  const isNarrow = window.innerWidth <= 600;
+  el.netPill.classList.toggle('online', !s.offline);
+  if (isNarrow) {
+    el.netText.textContent = s.offline ? '離線模式' : '維護 · 有外網';
+    el.sysPill.textContent = `⚡ ${Math.round(s.cpu)}% · ${Math.round(s.temp)}°C`;
+  } else {
+    el.netText.textContent = s.offline ? '離線運作 · 資料不出盒子' : '維護模式 · 有外網';
+    el.sysPill.textContent = `盒子：${state === 'processing' ? '整理中' : state === 'recording' ? '錄音中' : '待命'} · 負載 ${Math.round(s.cpu)}% · ${Math.round(s.temp)}°C`;
+  }
+  const npu = (s && s.npu && s.npu.detected) ? s.npu : (s && s.hailo && s.hailo.detected ? s.hailo : (lastSystemData && lastSystemData.npu && lastSystemData.npu.detected ? lastSystemData.npu : null));
+  if (npu) {
+    if (el.npuPill) {
+      el.npuPill.style.display = 'inline-flex';
+      const devName = npu.device || 'Hailo-10H';
+      const tempVal = npu.temp_c != null ? `${Math.round(npu.temp_c)}°C` : '--';
+      const utilVal = npu.nnc_util_pct != null ? `${Math.round(npu.nnc_util_pct)}%` : '0%';
+      el.npuPill.textContent = `⚡ ${devName}: ${tempVal} · 負載 ${utilVal}`;
+      el.npuPill.title = `NPU: ${devName} (${npu.tops || 40} TOPS)\n核心負載: ${utilVal}\n晶片溫度: ${npu.temp_c ?? '--'}°C\nRAM: ${npu.ram_usage_mb || '--'}\n電壓: ${npu.voltage_mv || '--'} mV`;
+    }
+    const tDisp = $('hailoTempDisplay');
+    const nncDisp = $('hailoNncDisplay');
+    const ramDisp = $('hailoRamDisplay');
+    const ramPct = $('hailoRamPct');
+    const voltDisp = $('hailoVoltDisplay');
+    const tempStatus = $('hailoTempStatus');
+    const nncStatus = $('hailoNncStatus');
+    const liveBadge = $('hailoLiveBadge');
+    if (tDisp && npu.temp_c != null) {
+      tDisp.textContent = `${npu.temp_c.toFixed(1)} °C`;
+      if (tempStatus) {
+        tempStatus.textContent = npu.temp_c < 65 ? '低溫良好' : npu.temp_c < 75 ? '正常' : '偏高';
+        tempStatus.style.color = npu.temp_c < 65 ? '#34d399' : npu.temp_c < 75 ? '#fbbf24' : '#f87171';
+      }
+    }
+    if (nncDisp && npu.nnc_util_pct != null) {
+      nncDisp.textContent = `${Math.round(npu.nnc_util_pct)} %`;
+      if (nncStatus) {
+        nncStatus.textContent = npu.nnc_util_pct > 5 ? '推論加速中 🚀' : (state === 'recording' ? '錄音待命中' : '待命');
+        nncStatus.style.color = npu.nnc_util_pct > 5 ? '#38bdf8' : '#94a3b8';
+      }
+    }
+    if (liveBadge) {
+      liveBadge.textContent = (npu.nnc_util_pct > 5) ? '● 正在推論加速' : '● 待命就緒';
+      liveBadge.style.color = (npu.nnc_util_pct > 5) ? '#38bdf8' : '#34d399';
+      liveBadge.style.borderColor = (npu.nnc_util_pct > 5) ? '#0284c7' : '#059669';
+    }
+    if (ramDisp && npu.ram_usage_mb) ramDisp.textContent = `${npu.ram_usage_mb} MB`;
+    if (ramPct && npu.ram_util_pct != null) ramPct.textContent = `${npu.ram_util_pct.toFixed(1)} %`;
+    if (voltDisp && npu.voltage_mv) voltDisp.textContent = `${npu.voltage_mv} mV`;
 
-                    <!-- Results Output -->
-                    <div class="bilingual-card" id="bilingualCard">
-                        <div class="card-row">
-                            <span class="card-row-title">🇹🇼 語音轉錄 (Whisper STT 繁體中文)</span>
-                            <div class="card-row-content" id="txtTranscribed">
-                                尚未進行語音辨識。請點擊左側「開始耳麥錄音」說話。
-                            </div>
-                        </div>
+    const btTDisp = $('btHubHailoTempDisplay');
+    const btNncDisp = $('btHubHailoNncDisplay');
+    const btRamDisp = $('btHubHailoRamDisplay');
+    if (btTDisp && npu.temp_c != null) btTDisp.textContent = `${npu.temp_c.toFixed(1)} °C`;
+    if (btNncDisp && npu.nnc_util_pct != null) btNncDisp.textContent = `${Math.round(npu.nnc_util_pct)} %`;
+    if (btRamDisp && npu.ram_usage_mb) btRamDisp.textContent = `${npu.ram_usage_mb} MB`;
+  }
+  if (s.ssid) el.ssid.textContent = s.ssid;
+  if (s.host) el.host.textContent = s.host;
+  if (s.wifi_qr) { el.qr.src = s.wifi_qr; el.qr.hidden = false; }
+  el.netSwitch.textContent = s.mode === 'ap' ? '切回家用 Wi-Fi' : '切到演示熱點';
+  el.netSwitch.dataset.to = s.mode === 'ap' ? 'sta' : 'ap';
+}
 
-                        <div class="card-row">
-                            <span class="card-row-title">🇺🇸 即時道地英文 (English Translation)</span>
-                            <div class="card-row-content" id="txtTranslated">
-                                Awaiting speech input...
-                            </div>
-                        </div>
+async function refreshSystem() {
+  try {
+    const s = await api(API.system);
+    updateSystemUI(s);
+  } catch (e) {
+    if (!wsConnected) el.netText.textContent = '連不上盒子';
+  }
+}
 
-                        <div class="action-row" id="ttsActionRow" style="display: none;">
-                            <button class="btn-secondary" onclick="playCurrentTTS(true)">
-                                <span>🔊</span> 透過耳麥喇叭朗讀 (Headset Play)
-                            </button>
-                            <button class="btn-secondary" onclick="playCurrentTTS(false)">
-                                <span>📱</span> 手機/瀏覽器播放 (Browser Play)
-                            </button>
-                        </div>
-                    </div>
+function updateBtUI(b) {
+  if (!b) return;
+  el.btChip.classList.toggle('off', !b.connected);
+  el.btText.textContent = b.connected ? `耳麥 ${b.name || ''} 已連線` : '耳麥未連線';
+  el.btDetail.textContent = b.connected ? `${b.name || ''} · 已連線` : '未連線。按「找耳麥 / 管理」。';
+  el.recBtn.disabled = !b.connected && state === 'idle';
+}
 
-                    <!-- Manual Text Translate & TTS Box -->
-                    <div class="panel-header" style="margin-top: 1rem;">
-                        <h2 class="panel-title">
-                            <span>✍️</span> 手動文字即時翻譯與語音合成
-                        </h2>
-                    </div>
+async function refreshBt() {
+  try {
+    const b = await api(API.bt);
+    updateBtUI(b);
+  } catch (e) {
+    if (!wsConnected) el.btText.textContent = '耳麥狀態未知';
+  }
+}
 
-                    <div class="form-group">
-                        <textarea id="txtManualInput" placeholder="輸入你想翻譯或發音的中英文句子..."></textarea>
-                    </div>
+/* ---------- 藍牙裝置管理中心 (Bluetooth Hub) ---------- */
+function getRssiQualityText(rssi) {
+  if (rssi == null) return '';
+  if (rssi >= -60) return '極佳';
+  if (rssi >= -75) return '良好';
+  return '微弱';
+}
 
-                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        <button class="btn-primary" onclick="handleManualTranslate('zh2en')">
-                            <span>🇺🇸</span> 繁中 ➔ 英文翻譯
-                        </button>
-                        <button class="btn-primary" onclick="handleManualTranslate('en2zh')" style="background: linear-gradient(135deg, #059669, #0d9488);">
-                            <span>🇹🇼</span> 英文 ➔ 繁中翻譯
-                        </button>
-                        <button class="btn-secondary" onclick="handleManualTTS()">
-                            <span>🔊</span> 合成語音並在耳麥朗讀 (TTS)
-                        </button>
-                    </div>
-                </section>
-            </div>
+function updateBtHubUI(b) {
+  if (!b) return;
+  const conn = !!b.connected;
+  el.hubCurName.textContent = b.connected_name || (conn ? '未知設備' : '未連線耳麥');
+  el.hubCurMac.textContent = 'MAC: ' + (b.connected_mac || '--:--:--:--:--:--');
+  el.hubCurBadge.className = 'chip ' + (conn ? '' : 'off');
+  el.hubCurStatus.textContent = conn ? 'CONNECTED' : 'DISCONNECTED';
+  el.hubBtnDisconnect.disabled = !conn;
+
+  // 電量顯示
+  if (conn) {
+    if (b.battery_level != null) {
+      el.hubBatteryPill.className = 'chip ' + (b.battery_level <= 20 ? 'err' : (b.battery_level <= 50 ? 'minor' : 'out'));
+      el.hubBatteryVal.textContent = b.battery_level + '%';
+    } else {
+      el.hubBatteryPill.className = 'chip off';
+      el.hubBatteryVal.textContent = '電量未回報';
+    }
+  } else {
+    el.hubBatteryPill.className = 'chip off';
+    el.hubBatteryVal.textContent = '未連線';
+  }
+
+  // 訊號強度顯示
+  if (conn) {
+    el.hubSignalPill.className = 'chip';
+    if (b.rssi != null && b.rssi !== 0) {
+      const q = getRssiQualityText(b.rssi);
+      el.hubSignalVal.textContent = `${b.rssi} dBm (${q})`;
+    } else if (b.signal_level_pct) {
+      el.hubSignalVal.textContent = `訊號良好 (${b.signal_level_pct}%)`;
+    } else {
+      el.hubSignalVal.textContent = '已連線 (正常)';
+    }
+  } else {
+    el.hubSignalPill.className = 'chip off';
+    el.hubSignalVal.textContent = '離線';
+  }
+
+  // 只有資料發生變動時才重新渲染 DOM，避免打斷使用者點擊
+  const currentJson = JSON.stringify(b.trusted_devices || []);
+  if (currentJson !== lastBtHubStateJson) {
+    lastBtHubStateJson = currentJson;
+    renderTrustedDevices(b.trusted_devices || []);
+  }
+}
+
+async function refreshBtHub(silent = false) {
+  try {
+    const b = await api(API.btStatus);
+    updateBtHubUI(b);
+  } catch (e) {
+    if (!silent) toast('讀取藍牙詳細狀態失敗');
+  }
+}
+
+function renderTrustedDevices(list) {
+  if (!list || list.length === 0) {
+    el.hubTrustedContainer.innerHTML = '<div class="empty">尚未儲存任何已配對耳麥，請在上方搜尋周圍設備進行配對。</div>';
+    return;
+  }
+  el.hubTrustedContainer.innerHTML = list.map(dev => {
+    const isConn = !!dev.connected;
+    const isDef = !!dev.is_default;
+    const autoConn = !!dev.auto_connect;
+    const batBadge = (isConn && dev.battery_level != null)
+      ? `<span class="chip ${dev.battery_level <= 20 ? 'err' : 'out'}" style="font-size:11px">🔋 ${dev.battery_level}%</span>`
+      : '';
+    const rssiBadge = (isConn && dev.rssi)
+      ? `<span class="chip" style="font-size:11px">📶 ${dev.rssi} dBm</span>`
+      : '';
+    return `
+      <div class="bt-item">
+        <div class="bt-item-info">
+          <strong>${esc(dev.name || '耳麥')} ${isDef ? '<span class="tag set" style="font-size:10px">⭐ 預設</span>' : ''}</strong>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:2px;flex-wrap:wrap">
+            <span style="font-family:monospace">${esc(dev.mac)}</span>
+            ${batBadge}
+            ${rssiBadge}
+          </div>
         </div>
-
-        <!-- Tab 2: LLM Arena & Code Review -->
-        <div class="tab-content" id="tabArena">
-            <div class="grid-2col">
-                <section class="panel">
-                    <div class="panel-header">
-                        <h2 class="panel-title">
-                            <span>💬</span> 提問與程式碼審查 (Prompt & Code)
-                        </h2>
-                    </div>
-                    <div class="form-group">
-                        <label for="selectModel">選擇模型 (Select Model)</label>
-                        <select id="selectModel">
-                            <option value="qwen2.5-coder:7b" selected>qwen2.5-coder:7b (推薦代碼審查)</option>
-                            <option value="deepseek-r1:7b">deepseek-r1:7b (深度思考推理)</option>
-                            <option value="llama3.2:3b">llama3.2:3b (極速輕量回應)</option>
-                            <option value="codellama:7b">codellama:7b</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="txtPrompt">問題 / 提示詞 (Instructions)</label>
-                        <textarea id="txtPrompt" placeholder="在這裡輸入你想詢問的技術問題或代碼分析指示..."></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label for="txtCode">原始程式碼 (Source Code)</label>
-                        <textarea id="txtCode" style="min-height: 160px; font-family: monospace;" placeholder="# 在這裡貼上欲審查的 Python / C 程式碼..."></textarea>
-                    </div>
-                    <button class="btn-primary" id="btnSubmit" onclick="submitTask()">
-                        <span>🚀 送入 Redis 佇列並開始推論</span>
-                    </button>
-                </section>
-
-                <section class="panel">
-                    <div class="panel-header">
-                        <h2 class="panel-title">
-                            <span>⚡</span> 推論結果與狀態 (Inference & Output)
-                        </h2>
-                        <button class="btn-secondary" id="btnCopy" onclick="copyResponse()" style="display: none;">複製內容</button>
-                    </div>
-                    <div id="markdownOutput" style="min-height: 200px; max-height: 520px; overflow-y: auto; background: #0b1120; padding: 1rem; border-radius: 8px;">
-                        等待提交任務...
-                    </div>
-                </section>
-            </div>
+        <div class="bt-item-actions">
+          <span class="chip ${isConn ? '' : 'off'}" style="font-size:12px"><span class="dot"></span>${isConn ? '已連線' : '離線'}</span>
+          <button class="btn sm ${isConn ? 'ghost' : 'primary'}" data-action="connect" data-mac="${esc(dev.mac)}" data-name="${esc(dev.name || dev.mac)}" ${isConn ? 'disabled' : ''}>
+            ${isConn ? '已連線' : '連線'}
+          </button>
+          <button class="btn sm ghost" data-action="default" data-mac="${esc(dev.mac)}" data-name="${esc(dev.name || dev.mac)}" ${isDef ? 'disabled' : ''}>
+            ${isDef ? '已設預設' : '設為預設'}
+          </button>
+          <button class="toggle-btn ${autoConn ? 'active' : ''}" data-action="toggle-auto" data-mac="${esc(dev.mac)}" data-name="${esc(dev.name || dev.mac)}" data-curr="${autoConn}">
+            ${autoConn ? '✓ 自動連線: 開' : '✕ 自動連線: 關'}
+          </button>
+          <button class="btn sm ghost" data-action="remove" data-mac="${esc(dev.mac)}" data-name="${esc(dev.name || dev.mac)}" style="color:#ef4444;border-color:rgba(239,68,68,0.3)" title="取消配對並從信任清單中刪除">
+            🗑️ 刪除
+          </button>
         </div>
-    </main>
+      </div>
+    `;
+  }).join('');
 
-    <!-- Hidden Audio Player for Browser Playback -->
-    <audio id="browserAudioPlayer" style="display: none;"></audio>
+  // 綁定項目操作按鈕
+  el.hubTrustedContainer.querySelectorAll('[data-action]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const act = btn.dataset.action;
+      const mac = btn.dataset.mac;
+      const devName = btn.dataset.name || mac;
+      btn.disabled = true;
+      try {
+        if (act === 'connect') {
+          const isCurrentlyConnectedToOther = el.hubCurStatus.textContent === 'CONNECTED' && !el.hubCurMac.textContent.includes(mac);
+          btn.innerHTML = '<span class="spinner"></span> 切換中...';
+          if (isCurrentlyConnectedToOther) {
+            toast(`正在自動中斷原設備並切換至 ${devName}...`, 3000);
+          } else {
+            toast(`正在連線 ${devName}...`);
+          }
+          const r = await api(API.btConnect, { target: mac });
+          toast(r.msg || r.message || `🎧 已成功切換連線至 ${devName}`);
+          lastBtHubStateJson = ''; // 強制更新 DOM
+          await refreshBtHub(true);
+          await refreshBt();
+          triggerBurstRefresh();
+        } else if (act === 'default') {
+          await api(API.btAuto, { mac: mac, auto_connect: true, set_default: true });
+          toast(`已將 ${devName} 設為預設耳麥`);
+          lastBtHubStateJson = '';
+          await refreshBtHub(true);
+        } else if (act === 'toggle-auto') {
+          const nextVal = btn.dataset.curr !== 'true';
+          btn.innerHTML = '<span class="spinner"></span> 更新中...';
+          await api(API.btAuto, { mac: mac, auto_connect: nextVal, set_default: false });
+          toast(`已更新 ${devName} 自動連線設定為 ${nextVal ? '開' : '關'}`);
+          lastBtHubStateJson = '';
+          await refreshBtHub(true);
+        } else if (act === 'remove') {
+          if (!confirm(`確定要取消配對並從清單中移除耳麥「${devName}」嗎？`)) {
+            return;
+          }
+          btn.innerHTML = '<span class="spinner"></span> 移除中...';
+          const r = await api(API.btRemove, { mac: mac });
+          toast(r.message || `已移除設備 ${devName}`);
+          lastBtHubStateJson = '';
+          await refreshBtHub(true);
+          await refreshBt();
+        }
+      } catch (err) {
+        toast('操作失敗：' + err.message);
+        lastBtHubStateJson = '';
+        await refreshBtHub(true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+}
 
-    <script>
-        // Main Tab Switcher
-        function switchMainTab(tab) {
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+// 掃描周圍耳麥
+el.hubBtnScan.addEventListener('click', async () => {
+  const btn = el.hubBtnScan;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> 正在搜尋周圍耳麥 (8秒)...';
+  el.hubScanContainer.innerHTML = '<div class="empty">正在掃描周圍藍牙設備，請確保耳麥處於配對狀態...</div>';
+  try {
+    const r = await api(API.btScan, {});
+    const devs = r.devices || [];
+    if (devs.length === 0) {
+      el.hubScanContainer.innerHTML = '<div class="empty">未找到可配對的耳麥。請確認耳麥處於紅藍燈配對狀態後重試。</div>';
+    } else {
+      el.hubScanContainer.innerHTML = devs.map(d => {
+        const q = getRssiQualityText(d.rssi);
+        const rssiLabel = d.rssi != null ? `<span class="chip" style="font-size:11px">📶 ${d.rssi} dBm (${q})</span>` : '';
+        const batLabel = d.battery_level != null ? `<span class="chip out" style="font-size:11px">🔋 ${d.battery_level}%</span>` : '';
+        return `
+          <div class="bt-item">
+            <div class="bt-item-info">
+              <strong>🎧 ${esc(d.name || '未知藍牙設備')}</strong>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:2px;flex-wrap:wrap">
+                <span style="font-family:monospace">${esc(d.mac)}</span>
+                ${rssiLabel}
+                ${batLabel}
+              </div>
+            </div>
+            <div class="bt-item-actions">
+              <button class="btn sm primary" data-pair="${esc(d.mac)}">🔗 配對並連線</button>
+            </div>
+          </div>
+        `;
+      }).join('');
 
-            if (tab === 'voice') {
-                document.getElementById('tabBtnVoice').classList.add('active');
-                document.getElementById('tabVoice').classList.add('active');
-                fetchBTStatus();
-            } else {
-                document.getElementById('tabBtnArena').classList.add('active');
-                document.getElementById('tabArena').classList.add('active');
-            }
+      el.hubScanContainer.querySelectorAll('[data-pair]').forEach(pBtn => {
+        pBtn.addEventListener('click', async () => {
+          const targetMac = pBtn.dataset.pair;
+          pBtn.disabled = true;
+          pBtn.innerHTML = '<span class="spinner"></span> 配對中...';
+          try {
+            toast(`正在配對 ${targetMac}...`);
+            await api(API.btPair, { target: targetMac });
+            toast(`配對成功，正在建立音訊連線...`);
+            await api(API.btConnect, { target: targetMac });
+            lastBtHubStateJson = '';
+            await refreshBtHub(true);
+            triggerBurstRefresh();
+          } catch (pErr) {
+            toast('配對連線失敗：' + pErr.message);
+          } finally {
+            pBtn.disabled = false;
+            pBtn.textContent = '🔗 配對並連線';
+          }
+        });
+      });
+    }
+  } catch (err) {
+    el.hubScanContainer.innerHTML = `<div class="empty" style="color:var(--rec)">掃描失敗：${esc(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '🔍 開始掃描 (8秒)';
+  }
+});
+
+// 中斷連線按鈕
+async function handleBtDisconnect() {
+  try {
+    toast('正在中斷耳麥連線...');
+    const r = await api(API.btDisconnect, {});
+    toast(r.msg || r.message || '已中斷連線');
+    lastBtHubStateJson = '';
+    await refreshBtHub(true);
+    await refreshBt();
+    triggerBurstRefresh();
+  } catch (err) {
+    toast('中斷失敗：' + err.message);
+  }
+}
+el.hubBtnDisconnect.addEventListener('click', handleBtDisconnect);
+el.btnQuickDisconnect.addEventListener('click', handleBtDisconnect);
+
+// 連線常用/預設耳麥
+el.btnConnectDefault.addEventListener('click', async () => {
+  try {
+    toast('正在連線常用耳麥...');
+    const r = await api(API.btConnect, {});
+    toast(r.msg || r.message || '已連線');
+    await refreshBt();
+  } catch (err) {
+    toast('連線失敗：' + err.message);
+  }
+});
+
+/* ---------- 錄音與進度 ---------- */
+function setState(s) {
+  state = s;
+  el.recBtn.classList.toggle('recording', s === 'recording');
+  el.recBtn.classList.toggle('busy', s === 'processing');
+  const isFinished = (s === 'idle' || s === 'done' || s === 'completed' || s === 'error');
+  el.recBtn.disabled = !isFinished;
+  el.dur.disabled = s === 'recording' || s === 'processing';
+  if (isFinished) { el.recLabel.textContent = '開始錄音'; el.recSub.textContent = ''; }
+  if (s === 'recording') el.recLabel.textContent = '錄音中';
+  if (s === 'processing') { el.recLabel.textContent = '整理中'; el.recSub.textContent = '請稍等'; }
+  el.regenBtn.disabled = !(result && isFinished);
+  if (lastSystemData) updateSystemUI(lastSystemData);
+  else refreshSystem();
+}
+function scrollToMinutes() {
+  const target = document.getElementById('secMinutes') || el.minutes;
+  if (target) {
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    target.classList.remove('pulse-highlight');
+    void target.offsetWidth;
+    target.classList.add('pulse-highlight');
+  }
+}
+function renderProgress(st) {
+  const p = el.progress;
+  if (st.state === 'idle') {
+    p.hidden = true;
+    if (el.btnFinishEarly) el.btnFinishEarly.hidden = true;
+    handledDoneJob = null;
+    updateVuMeter({ active: false });
+    return;
+  }
+  if (st.state === 'recording') {
+    p.hidden = false; p.className = 'progress rec';
+    if (el.btnFinishEarly) { el.btnFinishEarly.hidden = false; el.btnFinishEarly.disabled = false; }
+    el.pTitle.textContent = '🎙️ 藍牙收音中 (背景同步聽寫中 ⚡)';
+    const recRemain = Math.max(0, (st.total || 90) - (st.elapsed || 0));
+    el.pEta.textContent = `已錄 ${fmt(st.elapsed || 0)} · 倒數 ${fmt(recRemain)}`;
+    el.pBar.style.width = Math.min(100, 100 * (st.elapsed || 0) / Math.max(1, (st.total || 90))) + '%';
+    el.pSteps.textContent = 'AI 正邊聽邊切片轉錄，說完可按「立即整理」或等時間到自動收音...';
+    el.recSub.textContent = `剩 ${fmt(recRemain)}`;
+    handledDoneJob = null;
+    clearTimeout(doneHideTimer);
+  } else if (st.state === 'processing') {
+    updateVuMeter({ active: false });
+    if (el.btnFinishEarly) el.btnFinishEarly.hidden = true;
+    p.hidden = false; p.className = 'progress busy';
+    if (st.phase === 'transcribe') {
+      el.pTitle.textContent = '⚡ 錄音完成！AI 正彙整最後尾音';
+      el.pEta.textContent = '即將產出逐字稿 (約數秒)...';
+      el.pSteps.textContent = st.msg || '前段 90% 音訊已在錄音中轉出，正在整合母帶...';
+    } else if (bypassSummary || st.phase === 'done') {
+      el.pTitle.textContent = '🎉 逐字稿已就緒！(調校模式)';
+      el.pEta.textContent = '跳過 AI 總結，直出全稿...';
+      el.pSteps.textContent = st.msg || '逐字稿已出爐於下方...';
+    } else {
+      el.pTitle.textContent = '📝 逐字稿已就緒！AI 正提煉會議重點';
+      el.pEta.textContent = '正在結構化會議決議與待辦...';
+      el.pSteps.textContent = st.msg || '逐字稿已出爐於下方，AI 正在分析重點...';
+    }
+    el.pBar.style.width = Math.max(25, Math.min(96, st.progress ?? 50)) + '%';
+    handledDoneJob = null;
+    clearTimeout(doneHideTimer);
+    // 錄音結束進入處理中時，波形圖 0 延遲立即嘗試載入母帶
+    const waveCard = document.getElementById('waveformCard');
+    if (!wavesurfer || (waveCard && waveCard.hidden)) {
+      loadAudioWaveform(st.job);
+    }
+  } else if (st.state === 'done' || st.state === 'completed') {
+    updateVuMeter({ active: false });
+    if (el.btnFinishEarly) el.btnFinishEarly.hidden = true;
+    const currentJobKey = st.job || 'done';
+    if (handledDoneJob !== currentJobKey) {
+      handledDoneJob = currentJobKey;
+      p.hidden = false; p.className = 'progress ok';
+      el.pTitle.textContent = '🎉 任務全數完成！';
+      el.pEta.textContent = '100% 完工 ✓';
+      el.pBar.style.width = '100%';
+      const isSingleCol = window.innerWidth <= 700;
+      if (isSingleCol) {
+        el.pSteps.innerHTML = '<span style="cursor:pointer;text-decoration:underline" onclick="scrollToMinutes()">👇 成果已在下方展開 (點擊查看)</span>';
+        setTimeout(() => { scrollToMinutes(); }, 350);
+      } else {
+        el.pSteps.textContent = '👉 完整逐字稿與音訊波形圖已就緒';
+      }
+      clearTimeout(doneHideTimer);
+      doneHideTimer = setTimeout(() => { p.hidden = true; }, 10000);
+    }
+  } else if (st.state === 'error') {
+    updateVuMeter({ active: false });
+    p.hidden = false; p.className = 'progress err';
+    el.pTitle.textContent = '出錯了';
+    el.pEta.textContent = '';
+    el.pBar.style.width = '0%';
+    el.pSteps.textContent = st.msg || '再按一次開始錄音';
+    handledDoneJob = null;
+  }
+}
+
+async function handleStatusUpdate(st) {
+  if (!st) return;
+  renderProgress(st);
+  if (st.state !== state) setState(st.state);
+
+  // ⚡ 實時更新核心效能與耗時指標
+  if (st.metrics) {
+    updateMetricsUI(st.metrics);
+  }
+
+  // ⚡ 雙保險 1: 當 STT 進行中或完成且已有逐字稿時，立即逐段展開逐字稿，0 秒等待！
+  if (st.transcript && (el.transcriptBox.hidden || !el.transcriptBox.open || el.transcript.innerText !== st.transcript)) {
+    el.transcriptBox.hidden = false;
+    el.transcriptBox.open = true;
+    const cursor = (st.phase === 'transcribe') ? ' <span class="streaming-cursor"></span>' : '';
+    el.transcript.innerHTML = esc(st.transcript).replace(/\n\n/g, '<br><br>') + cursor;
+    try { el.transcript.scrollTop = el.transcript.scrollHeight; } catch (_) {}
+    if (st.job && st.state !== 'recording') loadAudioWaveform(st.job);
+  }
+
+  // ⚡ 雙保險 2: 當 LLM 正在生成時，若輪詢到 summary_stream，以打字機呈現
+  if (st.summary_stream && st.state === 'processing' && st.phase === 'summarize') {
+    renderStreamingMinutes(st.summary_stream);
+  }
+
+  if ((st.state === 'done' || st.state === 'completed') && st.job && st.job !== lastJob) {
+    lastJob = st.job;
+    await loadResult();
+  }
+}
+
+async function poll() {
+  try {
+    const st = await api(API.status);
+    await handleStatusUpdate(st);
+    // 雙軌保險機制：在 recording 或 processing 期間，即使 WebSocket 已連線，
+    // 依然每 2.5 秒定時執行一次 HTTP 輪詢校驗，杜絕因手機休眠或網路毛刺錯過 done 事件
+    if (st.state === 'recording' || st.state === 'processing') {
+      pollTimer = setTimeout(poll, 2500);
+    } else if (!wsConnected) {
+      pollTimer = setTimeout(poll, POLL_MS * 3);
+    }
+  } catch (e) {
+    if (state === 'recording' || state === 'processing') {
+      pollTimer = setTimeout(poll, 2500);
+    } else if (!wsConnected) {
+      pollTimer = setTimeout(poll, POLL_MS * 2);
+    }
+  }
+}
+
+/* ---------- 新錄音自動清空舊內容開關 (手動設定 & 本地持久化) ---------- */
+let autoClearOnRecord = localStorage.getItem('localnote_auto_clear_on_record') !== '0';
+
+function updateAutoClearUI() {
+  const btn = $('btnToggleAutoClear');
+  if (!btn) return;
+  if (autoClearOnRecord) {
+    btn.className = 'toggle-btn active';
+    btn.innerHTML = '✓ 自動清空: 開';
+    btn.title = '點擊切換：目前為開啟（開始新錄音時會先清空舊畫面）';
+  } else {
+    btn.className = 'toggle-btn';
+    btn.innerHTML = '✕ 自動清空: 關';
+    btn.title = '點擊切換：目前為關閉（開始新錄音時保留舊波形與文稿，直到新結果出爐）';
+  }
+}
+
+function clearPreviousOutputs() {
+  // 1. 清空會議紀要輸出
+  if (el.minutes) el.minutes.innerHTML = '<div class="empty">錄音中，完成後將在此整理出會議紀要。</div>';
+  result = null;
+  lastJob = null;
+  if (el.copyBtn) el.copyBtn.disabled = true;
+  if (el.regenBtn) el.regenBtn.disabled = true;
+  if (el.toEnBtn) el.toEnBtn.disabled = true;
+  if (el.toZhBtn) el.toZhBtn.disabled = true;
+  if (el.enBox) el.enBox.hidden = true;
+
+  // 2. 清空並收合逐字稿
+  if (el.transcriptBox) {
+    el.transcriptBox.hidden = true;
+    el.transcriptBox.open = false;
+  }
+  if (el.transcript) el.transcript.innerText = '';
+
+  // 3. 隱藏並清空音訊波形圖
+  const waveCard = document.getElementById('waveformCard');
+  if (waveCard) waveCard.hidden = true;
+  if (wavesurfer) {
+    try {
+      wavesurfer.stop();
+      wavesurfer.empty();
+    } catch (_) {}
+  }
+  const regionBox = document.getElementById('regionTranscriptBox');
+  if (regionBox) regionBox.hidden = true;
+  activeAudioUrl = null;
+}
+
+const btnToggleAutoClear = $('btnToggleAutoClear');
+if (btnToggleAutoClear) {
+  btnToggleAutoClear.addEventListener('click', () => {
+    autoClearOnRecord = !autoClearOnRecord;
+    localStorage.setItem('localnote_auto_clear_on_record', autoClearOnRecord ? '1' : '0');
+    updateAutoClearUI();
+    toast(autoClearOnRecord ? '已開啟：新錄音時將自動清空舊畫面' : '已關閉：新錄音時將保留舊文稿與波形');
+  });
+}
+updateAutoClearUI();
+
+/* ---------- 快速調校模式：跳過 AI 總結開關 (Bypass Summary) ---------- */
+let bypassSummary = localStorage.getItem('localnote_bypass_summary') === '1'; // 預設 0 (關閉)
+
+function updateBypassSummaryUI() {
+  const btn = $('btnToggleBypassSummary');
+  if (!btn) return;
+  if (bypassSummary) {
+    btn.className = 'toggle-btn active';
+    btn.innerHTML = '✓ 跳過總結: 開 (純逐字稿)';
+    btn.title = '點擊切換：目前為開啟（錄音完成後僅輸出逐字稿，跳過 AI 會議總結）';
+  } else {
+    btn.className = 'toggle-btn';
+    btn.innerHTML = '✕ 跳過總結: 關 (完整總結)';
+    btn.title = '點擊切換：目前為關閉（錄音完成後進行 AI 會議總結與待辦生成）';
+  }
+}
+
+const btnToggleBypassSummary = $('btnToggleBypassSummary');
+if (btnToggleBypassSummary) {
+  btnToggleBypassSummary.addEventListener('click', () => {
+    bypassSummary = !bypassSummary;
+    localStorage.setItem('localnote_bypass_summary', bypassSummary ? '1' : '0');
+    updateBypassSummaryUI();
+    toast(bypassSummary ? '⚡ 已開啟調校模式：僅產出逐字稿，跳過 AI 總結' : '已關閉調校模式：完整生成會議摘要與待辦');
+    fetch('/api/config/bypass_summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: bypassSummary })
+    }).catch(() => {});
+  });
+}
+updateBypassSummaryUI();
+
+/* ---------- 核心效能與耗時指標面板 (即時更新 & 手動切換開關，預設隱藏) ---------- */
+const btnToggleMetrics = $('btnToggleMetrics');
+const metricsPanel = $('metricsPanel');
+let showMetrics = localStorage.getItem('localnote_show_telemetry') === '1'; // 預設為 false (隱藏)
+
+function updateMetricsToggleUI() {
+  if (metricsPanel) metricsPanel.hidden = !showMetrics;
+  if (btnToggleMetrics) {
+    btnToggleMetrics.style.color = showMetrics ? 'var(--op)' : 'var(--muted)';
+    btnToggleMetrics.style.borderColor = showMetrics ? 'var(--op)' : 'var(--line)';
+    btnToggleMetrics.style.background = showMetrics ? 'var(--op-soft)' : 'var(--card)';
+    btnToggleMetrics.innerHTML = showMetrics ? '📊 效能指標 (開)' : '📊 效能指標';
+  }
+}
+
+if (btnToggleMetrics) {
+  btnToggleMetrics.addEventListener('click', () => {
+    showMetrics = !showMetrics;
+    localStorage.setItem('localnote_show_telemetry', showMetrics ? '1' : '0');
+    updateMetricsToggleUI();
+    toast(showMetrics ? '已顯示核心效能與耗時指標面板' : '已隱藏效能指標面板 (Demo 模式)');
+  });
+}
+updateMetricsToggleUI();
+
+function updateMetricsUI(m) {
+  if (!m) return;
+  const elRecStatus = $('metricRecStatus');
+  const elRecTime = $('metricRecTime');
+  const elSttStatus = $('metricSttStatus');
+  const elSttTime = $('metricSttTime');
+  const elSttDesc = $('metricSttDesc');
+  const elTotalTime = $('metricTotalTime');
+  const elTotalGoal = $('metricTotalGoal');
+  const elTotalDesc = $('metricTotalDesc');
+  const elOutputWords = $('metricOutputWords');
+  const elOutputSpeed = $('metricOutputSpeed');
+  const elTargetStatus = $('metricTargetStatus');
+
+  // 1. 錄音時間
+  if (elRecStatus) {
+    if (m.record_status === 'running') {
+      elRecStatus.textContent = '收音中 🔴';
+      elRecStatus.style.color = '#ef4444';
+    } else if (m.record_status === 'done') {
+      elRecStatus.textContent = '完成 🟢';
+      elRecStatus.style.color = '#34d399';
+    } else {
+      elRecStatus.textContent = '待命';
+      elRecStatus.style.color = '#94a3b8';
+    }
+  }
+  if (elRecTime) {
+    const recSec = m.record_elapsed || m.record_duration || 0;
+    const totSec = m.record_total || 180;
+    elRecTime.textContent = `${fmt(recSec)} / ${fmt(totSec)}`;
+  }
+
+  // 2. 逐字稿等待時間 (Tail Latency & Realtime STT Lag)
+  if (elSttStatus) {
+    if (m.stt_status === 'done') {
+      elSttStatus.textContent = '已出稿 🟢';
+      elSttStatus.style.color = '#34d399';
+    } else if (m.first_stt_time != null) {
+      elSttStatus.textContent = '邊錄邊轉 ⚡';
+      elSttStatus.style.color = '#34d399';
+    } else if (m.first_chunk_time != null) {
+      elSttStatus.textContent = '首片推論中 🔄';
+      elSttStatus.style.color = '#fbbf24';
+    } else if (m.record_status === 'running') {
+      elSttStatus.textContent = '採集中 ⏳';
+      elSttStatus.style.color = '#38bdf8';
+    } else if (m.record_status === 'done' && m.stt_status === 'running') {
+      elSttStatus.textContent = '尾端結算中 ⏳';
+      elSttStatus.style.color = '#fbbf24';
+    } else if (m.stt_status === 'running') {
+      elSttStatus.textContent = '收尾中 ⚡';
+      elSttStatus.style.color = '#38bdf8';
+    } else {
+      elSttStatus.textContent = '即時解算';
+      elSttStatus.style.color = '#38bdf8';
+    }
+  }
+  if (elSttTime) {
+    const fc = m.first_chunk_time; // 第一次進 STT 時間點 (秒)
+    const fs = m.first_stt_time;   // 第一次 STT 出字時間點 (秒)
+    const fl = m.first_stt_latency != null ? m.first_stt_latency : (fc != null && fs != null ? Math.max(0.1, +(fs - fc).toFixed(1)) : null);
+
+    if (m.stt_status === 'done') {
+      const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : (m.stt_duration || 0);
+      if (fs != null && fl != null) {
+        elSttTime.textContent = `首字 ${fs.toFixed(1)}s (差 ${fl.toFixed(1)}s) · 尾端 ${waitSec <= 0.5 ? '0s' : waitSec.toFixed(1) + 's'}`;
+      } else {
+        elSttTime.textContent = waitSec <= 0.5 ? '即時 0 延遲 (秒出)' : `等待: ${waitSec.toFixed(1)} 秒`;
+      }
+      elSttTime.style.color = '#34d399';
+    } else if (m.record_status === 'done' && m.stt_status === 'running') {
+      const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : 0;
+      elSttTime.textContent = `尾端等待: ${waitSec.toFixed(1)}s (出字中...)`;
+      elSttTime.style.color = '#fbbf24';
+    } else if (m.record_status === 'running') {
+      if (fs != null && fl != null) {
+        const audioDelay = m.stt_audio_delay != null ? ` · 即時差 ${m.stt_audio_delay.toFixed(1)}s` : '';
+        elSttTime.textContent = `首字 ${fs.toFixed(1)}s (時差 ${fl.toFixed(1)}s)${audioDelay}`;
+        elSttTime.style.color = '#34d399';
+      } else if (fc != null) {
+        elSttTime.textContent = `進 STT: ${fc.toFixed(1)}s (首字解算中...)`;
+        elSttTime.style.color = '#fbbf24';
+      } else {
+        const recSec = m.record_elapsed || 0;
+        elSttTime.textContent = `採集中: ${recSec.toFixed(0)}s (首片 8s 入隊)`;
+        elSttTime.style.color = '#38bdf8';
+      }
+    } else if (m.stt_status === 'running') {
+      const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : 0;
+      elSttTime.textContent = `尾端等待: ${waitSec.toFixed(1)}s...`;
+      elSttTime.style.color = '#fbbf24';
+    } else {
+      elSttTime.textContent = '等待: --';
+      elSttTime.style.color = '#94a3b8';
+    }
+  }
+  if (elSttDesc) {
+    const fc = m.first_chunk_time;
+    const fs = m.first_stt_time;
+    const fl = m.first_stt_latency != null ? m.first_stt_latency : (fc != null && fs != null ? Math.max(0.1, +(fs - fc).toFixed(1)) : null);
+
+    if (m.stt_status === 'done') {
+      const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : (m.stt_duration || 0);
+      if (fc != null && fs != null) {
+        elSttDesc.textContent = `⚡ 首進 STT: ${fc.toFixed(1)}s → 首出字: ${fs.toFixed(1)}s (推論時差 ${fl.toFixed(1)}s) · 尾端整合 ${waitSec.toFixed(1)}s`;
+      } else {
+        elSttDesc.textContent = `⚡ 錄音結束僅等 ${waitSec.toFixed(1)}s (快取直出)`;
+      }
+    } else if (m.record_status === 'done' && m.stt_status === 'running') {
+      elSttDesc.textContent = '⏳ 錄音結束，正在依序解算剩餘音訊切片入稿...';
+    } else if (m.record_status === 'running') {
+      if (fc != null && fs != null) {
+        elSttDesc.textContent = `🎙️ 首進 STT: ${fc.toFixed(1)}s → 首出字: ${fs.toFixed(1)}s (推論時差 ${fl.toFixed(1)}s)`;
+      } else if (fc != null) {
+        elSttDesc.textContent = `⏳ 首切片已於 ${fc.toFixed(1)}s 送入 STT 隊列，正在解算首句...`;
+      } else {
+        elSttDesc.textContent = '🎙️ 正在緩衝首段 8s 音訊，切片後立即啟動 STT';
+      }
+    }
+  }
+
+  // 3. 總完工時間 (錄音 + STT，門檻動態計算為 錄音目標 + 30 秒)
+  const recTarget = m.record_total || m.record_duration || 90;
+  const targetThreshold = Math.round(recTarget + 30);
+  const totalSec = m.total_stt_time || m.total_elapsed || (m.record_duration ? m.record_duration + (m.stt_duration || 0) : null);
+
+  if (elTotalTime) {
+    if (totalSec != null && m.stt_status === 'done') {
+      elTotalTime.textContent = `總時長: ${totalSec.toFixed(1)} 秒 (${fmt(Math.round(totalSec))})`;
+      if (totalSec <= targetThreshold) {
+        elTotalTime.style.color = '#34d399';
+      } else {
+        elTotalTime.style.color = '#f87171';
+      }
+    } else if (m.record_status === 'done' && m.stt_status === 'running') {
+      const curTotal = totalSec || (m.record_elapsed || 0);
+      const tailWait = m.stt_tail_wait != null ? ` (尾端 ${m.stt_tail_wait.toFixed(1)}s)` : '';
+      elTotalTime.textContent = `尾端收尾中: ${curTotal.toFixed(1)}s${tailWait}`;
+      elTotalTime.style.color = '#fbbf24';
+    } else if (m.record_status === 'running') {
+      const curRec = m.record_elapsed || 0;
+      elTotalTime.textContent = `錄音中: ${fmt(Math.round(curRec))}`;
+      elTotalTime.style.color = '#38bdf8';
+    } else {
+      elTotalTime.textContent = '總耗時: --';
+    }
+  }
+  if (elTotalGoal) {
+    if (totalSec != null && m.stt_status === 'done') {
+      if (totalSec <= targetThreshold) {
+        elTotalGoal.textContent = `目標 <= ${targetThreshold}s ✅ 達標`;
+        elTotalGoal.style.color = '#34d399';
+      } else {
+        elTotalGoal.textContent = `門檻 ${targetThreshold}s ⚠️ 超時`;
+        elTotalGoal.style.color = '#f87171';
+      }
+    } else if (m.record_status === 'done' && m.stt_status === 'running') {
+      elTotalGoal.textContent = `消化最後切片中...`;
+      elTotalGoal.style.color = '#fbbf24';
+    } else {
+      elTotalGoal.textContent = `目標 <= ${targetThreshold}s`;
+      elTotalGoal.style.color = '#94a3b8';
+    }
+  }
+  if (elTargetStatus) {
+    if (totalSec != null && m.stt_status === 'done') {
+      elTargetStatus.textContent = totalSec <= targetThreshold ? `🎉 極速達標！總耗時 <= ${targetThreshold} 秒` : `⚠️ 總耗時超過 ${targetThreshold} 秒`;
+      elTargetStatus.style.color = totalSec <= targetThreshold ? '#34d399' : '#f87171';
+    } else if (m.record_status === 'done' && m.stt_status === 'running') {
+      elTargetStatus.textContent = `⏳ 錄音結束，正在即時消化尾端切片...`;
+      elTargetStatus.style.color = '#fbbf24';
+    } else {
+      elTargetStatus.textContent = `門檻: 總耗時 <= ${targetThreshold}s`;
+      elTargetStatus.style.color = '#38bdf8';
+    }
+  }
+
+  // 4. 成果與字數
+  if (elOutputWords) {
+    const chars = m.stt_chars || 0;
+    const paras = m.stt_paragraphs || 0;
+    if (chars > 0) {
+      elOutputWords.textContent = `${chars} 字 (${paras} 段)`;
+    } else {
+      elOutputWords.textContent = '文字: --';
+    }
+  }
+  if (elOutputSpeed) {
+    const cps = m.stt_chars_per_sec;
+    if (cps != null && cps > 0) {
+      elOutputSpeed.textContent = `辨識速率: ~${cps} 字/秒 · 繁中頂級`;
+    } else {
+      elOutputSpeed.textContent = '繁中頂級無同音錯字';
+    }
+  }
+}
+
+el.recBtn.addEventListener('click', async () => {
+  if (state === 'recording' || state === 'processing') return;
+  try {
+    el.recBtn.disabled = true;
+    const durSec = +el.dur.value;
+
+    // 依據使用者設定：若開啟清空開關，新錄音啟動時先清空上一份輸出
+    if (autoClearOnRecord) {
+      clearPreviousOutputs();
+    }
+
+    setState('recording');
+    renderProgress({ state: 'recording', elapsed: 0, total: durSec });
+    toast(bypassSummary ? '開始錄音 (調校模式: 跳過總結)' : '開始錄音');
+    await api(API.record, { seconds: durSec, bypass_summary: bypassSummary });
+    if (!wsConnected) {
+      clearTimeout(pollTimer);
+      poll();
+    }
+  } catch (e) {
+    toast('無法開始錄音：' + e.message);
+    setState('idle');
+  }
+});
+
+el.regenBtn.addEventListener('click', async () => {
+  try {
+    setState('processing');
+    renderProgress({ state: 'processing', phase: 'summarize', progress: 5, eta: 5 });
+    toast('重新整理中');
+    await api(API.regenerate, {});
+    if (!wsConnected) {
+      clearTimeout(pollTimer);
+      poll();
+    }
+  } catch (e) {
+    toast('無法重新整理：' + e.message);
+  }
+});
+
+/* ---------- 紀要 ---------- */
+async function loadResult() {
+  try {
+    result = await api(API.result);
+    renderMinutes(result);
+    el.copyBtn.disabled = !result.markdown;
+    el.regenBtn.disabled = false; el.toEnBtn.disabled = false; el.toZhBtn.disabled = false;
+    loadAudioWaveform(result?.job);
+  } catch (e) { toast('讀取紀要失敗'); }
+}
+
+/* ---------- Task 11: 異步工作佇列與取消權杖 (Job Queue & Cancellation Token) ---------- */
+async function cancelActiveJob() {
+  try {
+    toast('正在中斷任務並釋放硬體資源...');
+    await api(API.cancelJob, {});
+    toast('任務已手動中斷');
+    setState('idle');
+    renderProgress({ state: 'idle' });
+  } catch (e) {
+    toast('中斷失敗：' + e.message);
+  }
+}
+
+async function finishRecordingEarly() {
+  try {
+    toast('⏹️ 收到提前結束指令，正在整理會議紀要...');
+    if (el.btnFinishEarly) el.btnFinishEarly.disabled = true;
+    await api(API.finishRecord, {});
+  } catch (e) {
+    toast('提前結算失敗：' + e.message);
+    if (el.btnFinishEarly) el.btnFinishEarly.disabled = false;
+  }
+}
+
+/* ---------- Task 12: Wavesurfer 音訊波形試聽與區間剪輯 ---------- */
+let wavesurfer = null;
+let wsRegions = null;
+let currentRegion = null;
+let activeAudioUrl = null;
+
+function initWaveSurfer() {
+  if (wavesurfer) return;
+  const container = document.getElementById('waveform');
+  if (!container || typeof WaveSurfer === 'undefined') return;
+
+  try {
+    wavesurfer = WaveSurfer.create({
+      container: '#waveform',
+      waveColor: '#627d98',
+      progressColor: '#0f766e',
+      cursorColor: '#d9534f',
+      cursorWidth: 2,
+      barWidth: 3,
+      barGap: 2,
+      barRadius: 2,
+      height: 64,
+      normalize: true
+    });
+
+    const RegionPluginClass = window.RegionsPlugin || (WaveSurfer.Regions ? WaveSurfer.Regions : null);
+    if (RegionPluginClass && typeof RegionPluginClass.create === 'function') {
+      wsRegions = wavesurfer.registerPlugin(RegionPluginClass.create());
+
+      wsRegions.on('region-created', (region) => {
+        wsRegions.getRegions().forEach(r => {
+          if (r !== region) r.remove();
+        });
+        currentRegion = region;
+        updateRegionUI(region);
+      });
+
+      wsRegions.on('region-updated', (region) => {
+        currentRegion = region;
+        updateRegionUI(region);
+      });
+
+      wsRegions.on('region-clicked', (region, e) => {
+        e.stopPropagation();
+        region.play();
+      });
+    }
+
+    wavesurfer.on('audioprocess', () => updateWaveTime());
+    wavesurfer.on('seeking', () => updateWaveTime());
+    wavesurfer.on('play', () => {
+      const icon = document.getElementById('wavePlayIcon');
+      if (icon) icon.textContent = '⏸ 暫停';
+    });
+    wavesurfer.on('pause', () => {
+      const icon = document.getElementById('wavePlayIcon');
+      if (icon) icon.textContent = '▶ 播放';
+    });
+    wavesurfer.on('finish', () => {
+      const icon = document.getElementById('wavePlayIcon');
+      if (icon) icon.textContent = '▶ 播放';
+    });
+    wavesurfer.on('loading', (percent) => {
+      const elTime = document.getElementById('waveTimeDisplay');
+      if (elTime) elTime.textContent = `解碼中 ${percent}%`;
+    });
+    wavesurfer.on('ready', () => {
+      updateWaveTime();
+      const btn = document.getElementById('btnWavePlayPause');
+      if (btn) btn.disabled = false;
+      if (wsRegions && typeof wsRegions.enableDragSelection === 'function') {
+        wsRegions.enableDragSelection({
+          color: 'rgba(15, 118, 110, 0.22)'
+        });
+      }
+    });
+  } catch (err) {
+    console.warn('[WaveSurfer] Init error:', err);
+  }
+}
+
+function updateWaveTime() {
+  if (!wavesurfer) return;
+  const cur = wavesurfer.getCurrentTime();
+  const dur = wavesurfer.getDuration();
+  const elTime = document.getElementById('waveTimeDisplay');
+  if (elTime) elTime.textContent = `${fmt(cur)} / ${fmt(dur)}`;
+}
+
+function toggleWavePlay() {
+  if (!wavesurfer) return;
+  const dur = wavesurfer.getDuration();
+  if (!dur || dur <= 0) {
+    toast('音訊母帶載入解碼中，請稍候 1~2 秒...');
+    return;
+  }
+  wavesurfer.playPause();
+}
+
+function stopWavePlay() {
+  if (!wavesurfer) return;
+  wavesurfer.stop();
+  const icon = document.getElementById('wavePlayIcon');
+  if (icon) icon.textContent = '▶ 播放';
+  updateWaveTime();
+}
+
+function updateRegionUI(region) {
+  const lbl = document.getElementById('regionLabel');
+  const btnPlay = document.getElementById('btnPlayRegion');
+  const btnTrans = document.getElementById('btnTranscribeRegion');
+  if (region) {
+    if (lbl) lbl.textContent = `選取區間: ${fmt(region.start)} ~ ${fmt(region.end)}`;
+    if (btnPlay) btnPlay.disabled = false;
+    if (btnTrans) btnTrans.disabled = false;
+  } else {
+    if (lbl) lbl.textContent = '選取區間: 全段';
+    if (btnPlay) btnPlay.disabled = true;
+    if (btnTrans) btnTrans.disabled = true;
+  }
+}
+
+function playSelectedRegion() {
+  if (currentRegion) {
+    currentRegion.play();
+  }
+}
+
+async function transcribeSelectedRegion() {
+  if (!currentRegion) {
+    toast('請先在波形圖上拖曳滑鼠選取欲轉錄的時間區間');
+    return;
+  }
+  const btn = document.getElementById('btnTranscribeRegion');
+  if (btn) btn.disabled = true;
+  toast(`正在局部聽寫 (${fmt(currentRegion.start)} ~ ${fmt(currentRegion.end)})...`);
+
+  try {
+    const res = await api(API.transcribeRegion, {
+      job_id: result?.job || null,
+      start_sec: currentRegion.start,
+      end_sec: currentRegion.end
+    });
+
+    const box = document.getElementById('regionTranscriptBox');
+    const span = document.getElementById('regionSpan');
+    const text = document.getElementById('regionTranscriptText');
+    if (box && span && text) {
+      span.textContent = `${fmt(currentRegion.start)} ~ ${fmt(currentRegion.end)}`;
+      text.textContent = res.transcript || '（所選範圍內未檢測到清晰人聲語音）';
+      box.style.display = 'block';
+    }
+    toast('局部轉錄完成！');
+  } catch (e) {
+    toast('局部轉錄失敗：' + e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function closeRegionTranscript() {
+  const box = document.getElementById('regionTranscriptBox');
+  if (box) box.style.display = 'none';
+}
+
+let isLoadingAudio = false;
+let lastLoadedAudioJob = null;
+
+async function loadAudioWaveform(jobId, precomputedPeaks, directAudioUrl) {
+  if (jobId && lastLoadedAudioJob === jobId && wavesurfer && wavesurfer.getDuration()) {
+    return;
+  }
+  if (isLoadingAudio) return;
+  isLoadingAudio = true;
+
+  try {
+    let targetUrl = directAudioUrl;
+    let peaks = precomputedPeaks;
+    if (!targetUrl) {
+      const res = await api(API.latestAudio);
+      if (res.status === 'success' && res.audio_url) {
+        targetUrl = res.audio_url;
+        peaks = peaks || res.peaks;
+      }
+    }
+    if (targetUrl) {
+      if (jobId) lastLoadedAudioJob = jobId;
+      const waveCard = document.getElementById('waveformCard');
+      if (waveCard) waveCard.hidden = false;
+      initWaveSurfer();
+      if (wavesurfer && (activeAudioUrl !== targetUrl || !wavesurfer.getDuration())) {
+        activeAudioUrl = targetUrl;
+        const elTime = document.getElementById('waveTimeDisplay');
+        if (elTime && (!peaks || peaks.length === 0)) elTime.textContent = '載入解碼中...';
+        const btn = document.getElementById('btnWavePlayPause');
+        if (btn && (!peaks || peaks.length === 0)) btn.disabled = true;
+
+        if (peaks && peaks.length > 0) {
+          wavesurfer.load(targetUrl, [peaks]);
+        } else {
+          wavesurfer.load(targetUrl);
         }
 
-        // Toast Notification System
-        function showToast(msg) {
-            let toast = document.getElementById('globalToast');
-            if (!toast) {
-                toast = document.createElement('div');
-                toast.id = 'globalToast';
-                toast.className = 'bt-toast';
-                document.body.appendChild(toast);
-            }
-            toast.innerText = msg;
-            toast.classList.add('show');
-            clearTimeout(window._toastTimeout);
-            window._toastTimeout = setTimeout(() => {
-                toast.classList.remove('show');
-            }, 3500);
+        if (wsRegions && typeof wsRegions.clearRegions === 'function') {
+          wsRegions.clearRegions();
         }
+        currentRegion = null;
+        updateRegionUI(null);
+      }
+    }
+  } catch (e) {
+    console.warn('[WaveSurfer] Load error:', e);
+  } finally {
+    isLoadingAudio = false;
+  }
+}
 
-        // Bluetooth Management with Reactive Auto-Refresh & Collapsible Control
-        let lastBtStateHash = "";
-        let isBtFirstLoad = true;
-        let isBtCollapsed = localStorage.getItem('pi5_bt_collapsed') === 'true';
+window.cancelActiveJob = cancelActiveJob;
+window.finishRecordingEarly = finishRecordingEarly;
+window.toggleWavePlay = toggleWavePlay;
+window.stopWavePlay = stopWavePlay;
+window.playSelectedRegion = playSelectedRegion;
+window.transcribeSelectedRegion = transcribeSelectedRegion;
+function handleTranscriptStream(data) {
+  if (!data || !data.transcript) return;
+  // ⚡ STT 逐段即時噴出：秒開展開卡片，即時動態滾動！
+  el.transcriptBox.hidden = false;
+  el.transcriptBox.open = true;
+  const cursor = data.is_final ? '' : ' <span class="streaming-cursor"></span>';
+  el.transcript.innerHTML = esc(data.transcript).replace(/\n\n/g, '<br><br>') + cursor;
+  try {
+    el.transcript.scrollTop = el.transcript.scrollHeight;
+  } catch (_) {}
+}
 
-        function applyBtCollapseState() {
-            const body = document.getElementById('btCardBody');
-            const icon = document.getElementById('iconBtCollapse');
-            if (!body) return;
-            if (isBtCollapsed) {
-                body.classList.add('collapsed');
-                if (icon) icon.innerText = '▾ 展開設定';
-            } else {
-                body.classList.remove('collapsed');
-                if (icon) icon.innerText = '▴ 收合控制';
-            }
-        }
+function handleTranscriptReady(data) {
+  if (!data) return;
+  if (data.transcript) {
+    el.transcriptBox.hidden = false;
+    el.transcriptBox.open = true;
+    el.transcript.innerHTML = esc(data.transcript).replace(/\n\n/g, '<br><br>');
+    toast('🎧 逐字稿已全部聽寫完成！');
+    try {
+      el.transcriptBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } catch (_) {}
+  }
+  if (data.job_id) {
+    loadAudioWaveform(data.job_id);
+  }
+}
 
-        function toggleBtCollapse() {
-            isBtCollapsed = !isBtCollapsed;
-            localStorage.setItem('pi5_bt_collapsed', isBtCollapsed ? 'true' : 'false');
-            applyBtCollapseState();
-        }
+function handleSummaryStream(data) {
+  if (!data || !data.accumulated) return;
+  renderStreamingMinutes(data.accumulated);
+}
 
-        async function fetchBTStatus() {
-            if (currentStreamingSessionId) return; // 錄音進行中暫停輪詢，保障藍牙 SCO 語音傳輸
-            try {
-                const res = await fetch('/api/bt/status');
-                if (!res.ok) return;
-                const data = await res.json();
-                const badge = document.getElementById('btStatusBadge');
-                const name = document.getElementById('btDeviceName');
-                const mac = document.getElementById('btDeviceMac');
-                const telemRow = document.getElementById('btTelemetryRow');
-                const batText = document.getElementById('btBatteryText');
-                const batBar = document.getElementById('btBatteryBar');
-                const batIcon = document.getElementById('btBatteryIcon');
-                const sigText = document.getElementById('btSignalText');
-                const sigBar = document.getElementById('btSignalBar');
-                const sigIcon = document.getElementById('btSignalIcon');
-                const pillStatus = document.getElementById('pillBtStatus');
-                const pillText = document.getElementById('pillBtText');
-                const pillIcon = document.getElementById('pillBtIcon');
-                const headerBatPill = document.getElementById('btHeaderBatteryPill');
-                const headerBatText = document.getElementById('btHeaderBatText');
-                const headerBatIcon = document.getElementById('btHeaderBatIcon');
+function renderStreamingMinutes(text) {
+  if (!text) return;
+  const html = text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/^### (.*$)/gim, '<h4 style="margin:10px 0 4px;color:var(--op);font-size:14px">$1</h4>')
+    .replace(/^## (.*$)/gim, '<h3 style="margin:14px 0 6px;color:var(--out);border-bottom:1px solid var(--line);padding-bottom:4px;font-size:16px">$1</h3>')
+    .replace(/^\- (.*$)/gim, '<li style="margin-left:18px;line-height:1.6">$1</li>')
+    .replace(/\n/g, '<br>');
 
-                // Auto-detect Bluetooth device changes and refresh
-                if (!isBtFirstLoad && data.state_hash && data.state_hash !== lastBtStateHash) {
-                    console.log("[BT Reactive] Bluetooth state changed:", data.state_hash);
-                    if (data.connected) {
-                        showToast(`🎧 藍牙耳麥已連線: ${data.connected_name || '耳麥'} (電量 ${data.battery_level !== null ? data.battery_level + '%' : '未知'})`);
-                    } else {
-                        showToast('⚠️ 藍牙耳麥已中斷連線');
-                    }
-                }
-                lastBtStateHash = data.state_hash || "";
-                isBtFirstLoad = false;
+  el.minutes.innerHTML = `
+    <div class="streaming-container" style="line-height:1.75">
+      <div style="font-size:12.5px;font-weight:700;color:var(--op);margin-bottom:10px;display:flex;align-items:center;gap:6px">
+        <span class="dot" style="background:#0f766e;animation:pulseGlow 1s infinite"></span> AI 即時摘要提煉中…
+      </div>
+      <div style="font-size:14.5px;color:var(--fg)">${html}<span class="streaming-cursor"></span></div>
+    </div>`;
+}
 
-                if (data.connected && data.connected_mac) {
-                    badge.className = 'bt-badge connected';
-                    badge.innerText = 'CONNECTED';
-                    name.innerText = data.connected_name || '已連線藍牙耳麥';
-                    mac.innerText = data.connected_mac;
+function renderMinutes(r) {
+  if (!r) { el.minutes.innerHTML = '<div class="empty">還沒有紀要。</div>'; return; }
+  if ((!r.summary || !r.summary.length) && (!r.todos || !r.todos.length) && r.transcript) {
+    el.minutes.innerHTML = '<div style="padding:14px;background:var(--set-bg);border-radius:8px;color:var(--text);font-size:14px;line-height:1.6">⚡ <b>快速調校模式</b>：已跳過 AI 會議總結。<br><span style="color:var(--muted);font-size:13px">完整逐字稿已展開於下方，音訊波形圖已就緒。若需生成總結可隨時點擊下方「重新整理」按鈕。</span></div>';
+    el.transcriptBox.hidden = false;
+    el.transcriptBox.open = true;
+    el.transcript.innerText = r.transcript;
+    return;
+  }
+  if (!r.summary && !r.todos) { el.minutes.innerHTML = '<div class="empty">還沒有紀要。</div>'; return; }
+  const when = r.started_at ? new Date(r.started_at) : null;
+  const meta = [when ? `${when.getMonth() + 1} 月 ${when.getDate()} 日 ${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}` : '', r.duration ? fmt(r.duration).replace(/^(\d+):(\d+)$/, (m, a, b) => `${+a} 分 ${+b} 秒`) : ''].filter(Boolean).join(' · ');
+  el.minutes.innerHTML = `
+    <div><h3>${esc(r.title || '會議')}</h3><div class="meta">${esc(meta)}</div></div>
+    <div><h4>摘要</h4><ul>${(r.summary || []).map(s => `<li>${esc(s)}</li>`).join('') || '<li>—</li>'}</ul></div>
+    <div><h4>待辦</h4><table><thead><tr><th>事項</th><th>負責人</th><th>時間</th></tr></thead><tbody>
+      ${(r.todos || []).map(t => `<tr><td>${esc(t.item)}</td><td>${esc(t.owner || '待定')}</td><td>${esc(t.due || '待定')}</td></tr>`).join('') || '<tr><td colspan="3">—</td></tr>'}
+    </tbody></table></div>
+    <div><h4>決議</h4><ul>${(r.decisions || []).map(s => `<li>${esc(s)}</li>`).join('') || '<li>—</li>'}</ul></div>`;
+  if (r.transcript) {
+    el.transcriptBox.hidden = false;
+    el.transcriptBox.open = true;
+    el.transcript.innerText = r.transcript;
+  } else {
+    el.transcriptBox.hidden = true;
+  }
+}
+el.copyBtn.addEventListener('click', async () => {
+  const text = result?.markdown || '';
+  try { await navigator.clipboard.writeText(text); toast('紀要已複製'); }
+  catch (e) {
+    const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); toast('紀要已複製'); } catch (_) { toast('請長按選取複製'); } ta.remove();
+  }
+});
 
-                    // Telemetry: Battery & Signal
-                    if (telemRow) telemRow.style.display = 'flex';
-                    if (data.battery_level !== null && data.battery_level !== undefined) {
-                        const bVal = Math.min(100, Math.max(0, data.battery_level));
-                        batText.innerText = `${bVal}%`;
-                        batBar.style.width = `${bVal}%`;
-                        let bIcon = '🔋';
-                        let bColor = '#10b981';
-                        if (bVal > 50) {
-                            bColor = '#10b981';
-                            bIcon = '🔋';
-                        } else if (bVal >= 20) {
-                            bColor = '#f59e0b';
-                            bIcon = '🔋';
-                        } else {
-                            bColor = '#ef4444';
-                            bIcon = '🪫';
-                        }
-                        batBar.style.backgroundColor = bColor;
-                        batText.style.color = bColor;
-                        batIcon.innerText = bIcon;
+/* ---------- 加分項 ---------- */
+function getMinutesSummaryForTranslation() {
+  if (!result) return '';
+  const lines = [];
+  if (result.summary && result.summary.length) {
+    lines.push('【摘要】');
+    result.summary.forEach(s => lines.push(`• ${s}`));
+  }
+  if (result.todos && result.todos.length) {
+    lines.push('\n【待辦事項】');
+    result.todos.forEach(t => lines.push(`• ${t.item} (${t.owner || '待定'})`));
+  }
+  if (result.decisions && result.decisions.length && result.decisions[0] !== '—') {
+    lines.push('\n【決議】');
+    result.decisions.forEach(d => lines.push(`• ${d}`));
+  }
+  if (lines.length > 0) return lines.join('\n');
+  if (result.markdown) {
+    const withoutTranscript = result.markdown.split('## 逐字稿')[0].split('## 完整逐字稿')[0];
+    return withoutTranscript.trim();
+  }
+  return '';
+}
 
-                        // Header Summary Battery Pill
-                        if (headerBatPill) {
-                            headerBatPill.style.display = 'inline-flex';
-                            headerBatText.innerText = `${bVal}%`;
-                            headerBatIcon.innerText = bIcon;
-                        }
-                    } else {
-                        batText.innerText = '未回報';
-                        batBar.style.width = '0%';
-                        batIcon.innerText = '🔋';
-                        if (headerBatPill) headerBatPill.style.display = 'none';
-                    }
+el.toEnBtn.addEventListener('click', async () => {
+  const textToTranslate = getMinutesSummaryForTranslation();
+  if (!textToTranslate || !textToTranslate.trim()) {
+    toast('目前尚無會議紀要可供翻譯，請先錄音生成紀要');
+    return;
+  }
+  el.toEnBtn.disabled = true;
+  let secs = 0;
+  el.enBox.textContent = '翻譯中（樹莓派邊緣推論約需 10~15 秒，已耗時 0s）…';
+  const timer = setInterval(() => {
+    secs++;
+    el.enBox.textContent = `翻譯中（樹莓派邊緣推論約需 10~15 秒，已耗時 ${secs}s）…`;
+  }, 1000);
+  try {
+    const r = await api(API.translate, { text: textToTranslate, to: 'en' });
+    el.enBox.textContent = r.text || '（無翻譯結果）';
+    el.ttsBtn.disabled = false;
+  } catch (e) {
+    el.enBox.textContent = '翻譯失敗：' + e.message;
+  } finally {
+    clearInterval(timer);
+    el.toEnBtn.disabled = false;
+  }
+});
 
-                    if (data.signal_level_pct !== null && data.signal_level_pct !== undefined) {
-                        const sVal = Math.min(100, Math.max(0, data.signal_level_pct));
-                        const lq = data.link_quality !== null ? `${data.link_quality}/255` : '滿格';
-                        sigText.innerText = `${sVal}% (${lq})`;
-                        sigBar.style.width = `${sVal}%`;
-                        sigIcon.innerText = '📶';
-                    } else {
-                        sigText.innerText = '良好 (正常)';
-                        sigBar.style.width = '100%';
-                        sigIcon.innerText = '📶';
-                    }
+el.toZhBtn.addEventListener('click', async () => {
+  const src = el.enBox.textContent;
+  if (!src || src === '—' || src.startsWith('翻譯') || !src.trim()) {
+    toast('目前無英文內容可供反向翻譯');
+    return;
+  }
+  el.toZhBtn.disabled = true;
+  el.enBox.textContent = '翻譯中…';
+  try {
+    const r = await api(API.translate, { text: src, to: 'zh' });
+    el.enBox.textContent = r.text || '（無翻譯結果）';
+  } catch (e) {
+    el.enBox.textContent = '翻譯失敗：' + e.message;
+  } finally {
+    el.toZhBtn.disabled = false;
+  }
+});
 
-                    // Top Bar Pill
-                    if (pillStatus && pillText) {
-                        pillStatus.style.display = 'flex';
-                        const batStr = data.battery_level !== null ? ` · 🔋${data.battery_level}%` : '';
-                        const sigStr = data.signal_level_pct !== null ? ` · 📶${data.signal_level_pct}%` : '';
-                        pillText.innerText = `${data.connected_name || '耳麥'}${batStr}${sigStr}`;
-                    }
-                } else {
-                    badge.className = 'bt-badge disconnected';
-                    badge.innerText = 'DISCONNECTED';
-                    name.innerText = data.default_name ? `預設設備: ${data.default_name}` : '未連線耳麥';
-                    mac.innerText = data.default_mac || '等待連線';
-                    if (headerBatPill) headerBatPill.style.display = 'none';
-                    if (telemRow) telemRow.style.display = 'none';
-                    if (pillStatus) pillStatus.style.display = 'none';
-                }
+el.ttsBtn.addEventListener('click', async () => {
+  const txt = el.enBox.textContent;
+  if (!txt || txt === '—' || txt.startsWith('翻譯') || !txt.trim()) {
+    toast('目前無內容可朗讀');
+    return;
+  }
+  el.ttsBtn.disabled = true;
+  try {
+    toast('正在耳麥朗讀...');
+    await api(API.tts, { text: txt });
+    toast('耳麥朗讀完成');
+  } catch (e) {
+    toast('播放失敗：' + e.message);
+  } finally {
+    el.ttsBtn.disabled = false;
+  }
+});
 
-                // Render Trusted Devices List (with Auto-Connect toggle)
-                const trustedListEl = document.getElementById('trustedDeviceList');
-                if (trustedListEl && data.trusted_devices) {
-                    if (data.trusted_devices.length === 0) {
-                        trustedListEl.innerHTML = `<div style="font-size: 0.78rem; color: var(--text-muted); padding: 0.4rem;">尚未記錄受信任設備。請使用下方「掃描」進行配對。</div>`;
-                    } else {
-                        trustedListEl.innerHTML = data.trusted_devices.map(dev => `
-                            <div class="trusted-dev-item">
-                                <div class="trusted-dev-info">
-                                    <div style="display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;">
-                                        <strong style="font-size: 0.85rem; color: #fff;">${dev.name || '未知設備'}</strong>
-                                        ${dev.connected ? '<span style="font-size: 0.65rem; background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 1px 5px; border-radius: 4px; border: 1px solid #10b981;">連線中</span>' : ''}
-                                        ${dev.is_default ? '<span style="font-size: 0.65rem; background: rgba(99, 102, 241, 0.2); color: #818cf8; padding: 1px 5px; border-radius: 4px; border: 1px solid #6366f1;">預設</span>' : ''}
-                                    </div>
-                                    <span style="font-size: 0.72rem; color: var(--text-muted); font-family: monospace;">${dev.mac}</span>
-                                </div>
-                                <div class="trusted-dev-actions">
-                                    <label class="toggle-switch" title="設定是否在範圍內自動連線此耳麥">
-                                        <input type="checkbox" ${dev.auto_connect ? 'checked' : ''} onchange="handleToggleAutoConnect('${dev.mac}', this.checked)">
-                                        <span class="toggle-slider"></span>
-                                        <span>自動連線</span>
-                                    </label>
-                                    ${!dev.connected ? `
-                                        <button class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.55rem;" onclick="handleConnectSpecificBT('${dev.mac}')">
-                                            連線
-                                        </button>
-                                    ` : ''}
-                                    ${!dev.is_default ? `
-                                        <button class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.55rem;" onclick="handleSetDefaultBT('${dev.mac}')" title="設為主要預設耳麥">
-                                            設為預設
-                                        </button>
-                                    ` : ''}
-                                </div>
-                            </div>
-                        `).join('');
-                    }
-                }
-            } catch (e) {
-                console.warn("BT status error:", e);
-            }
-        }
+/* ---------- 網路切換 ---------- */
+el.netSwitch.addEventListener('click', async () => {
+  const to = el.netSwitch.dataset.to || 'sta';
+  if (!el.netSwitch.dataset.armed) { el.netSwitch.dataset.armed = '1'; el.netSwitch.textContent = '再按一次確認切換'; setTimeout(() => { delete el.netSwitch.dataset.armed; refreshSystem(); }, 4000); return; }
+  try { await api(API.netSwitch, { mode: to }); toast('網路切換中，頁面可能短暫斷線'); } catch (e) { toast('切換失敗：' + e.message); }
+});
 
-        async function handleToggleAutoConnect(mac, autoConnect) {
-            try {
-                const res = await fetch('/api/bt/trusted/auto_connect', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ mac: mac, auto_connect: autoConnect })
-                });
-                const data = await res.json();
-                showToast(`⚙️ ${autoConnect ? '已啟用' : '已關閉'} 自動連線`);
-                fetchBTStatus();
-            } catch (err) {
-                alert("更新自動連線設定失敗: " + err.message);
-                fetchBTStatus();
-            }
-        }
+/* ---------- WebSocket 即時雙向推播 ---------- */
+function sendWsMessage(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
+  }
+}
 
-        async function handleSetDefaultBT(mac) {
-            try {
-                const res = await fetch('/api/bt/trusted/auto_connect', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ mac: mac, auto_connect: true, set_default: true })
-                });
-                const data = await res.json();
-                showToast(`⭐ 已將該耳麥設為首選預設`);
-                fetchBTStatus();
-            } catch (err) {
-                alert("設定預設失敗: " + err.message);
-            }
-        }
+function stopHttpFallbackPolling() {
+  if (httpSystemInterval) { clearInterval(httpSystemInterval); httpSystemInterval = null; }
+  if (httpBtInterval) { clearInterval(httpBtInterval); httpBtInterval = null; }
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+  stopBtHubHeartbeat();
+  console.log('[WS] WebSocket 連線正常，已關閉高頻 HTTP 輪詢');
+}
 
-        async function handleConnectSpecificBT(mac) {
-            try {
-                showToast("⏳ 正在連線至指定耳麥...");
-                const res = await fetch('/api/bt/connect', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ target: mac })
-                });
-                const data = await res.json();
-                showToast(data.message || "連線完成！");
-                fetchBTStatus();
-            } catch (e) {
-                alert("連線失敗: " + e.message);
-            }
-        }
+function startHttpFallbackPolling() {
+  if (!httpSystemInterval) {
+    refreshSystem();
+    httpSystemInterval = setInterval(refreshSystem, 2000);
+  }
+  if (!httpBtInterval) {
+    refreshBt();
+    httpBtInterval = setInterval(refreshBt, 5000);
+  }
+  if (!pollTimer) {
+    poll();
+  }
+  if (!el.viewBt.hidden) {
+    startBtHubHeartbeat();
+  }
+  console.log('[WS] 降級模式：已啟用 HTTP 備援輪詢');
+}
 
-        async function handleScanBT() {
-            const btn = document.getElementById('btnScanBT');
-            btn.disabled = true;
-            btn.innerHTML = `<span class="spinner"></span> 掃描中 (8s)...`;
+function initWebSocket() {
+  if (window.location.search.includes('mock=1')) {
+    startHttpFallbackPolling();
+    return;
+  }
 
-            try {
-                const res = await fetch('/api/bt/scan', { method: 'POST' });
-                const data = await res.json();
-                const container = document.getElementById('scanResultsContainer');
-                const list = document.getElementById('scanList');
-                list.innerHTML = '';
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${proto}//${window.location.host}/ws/status`;
 
-                if (data.devices && data.devices.length > 0) {
-                    data.devices.forEach(dev => {
-                        const item = document.createElement('div');
-                        item.className = 'bt-device-item';
-                        item.innerHTML = `
-                            <div class="bt-device-info">
-                                <strong>${dev.name || '未知耳麥'}</strong>
-                                <span>${dev.mac}</span>
-                            </div>
-                            <button class="btn-secondary" onclick="handlePairBT('${dev.mac}')">
-                                一鍵配對連線
-                            </button>
-                        `;
-                        list.appendChild(item);
-                    });
-                    container.style.display = 'block';
-                } else {
-                    list.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem; padding: 0.5rem;">未掃描到處於配對模式的設備，請將耳機重開並進入配對狀態。</div>';
-                    container.style.display = 'block';
-                }
-            } catch (err) {
-                alert("掃描失敗: " + err.message);
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = `<span>🔍</span> 掃描周圍耳麥 (Scan)`;
-            }
-        }
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch (err) {
+    console.warn('[WS] 初始化失敗:', err);
+    startHttpFallbackPolling();
+    scheduleWsReconnect();
+    return;
+  }
 
+  ws.onopen = () => {
+    console.log('[WS] Connected to status stream:', wsUrl);
+    wsConnected = true;
+    wsReconnectDelay = 1000;
+    stopHttpFallbackPolling();
 
-        // Voice Recording & Bilingual Translation
-        // Voice Recording & Bilingual Translation with Stepper Tracking
-        let currentAudioUrl = "";
-        let recCountdownInterval = null;
-        let stepperStopwatchInterval = null;
+    if (!el.viewBt.hidden) {
+      sendWsMessage({ action: 'subscribe_bt_hub', enable: true });
+    }
+  };
 
-        function setStepState(step, icon, tag, isHighlight = false, color = "var(--text-muted)") {
-            const iconEl = document.getElementById(`stepIcon${step}`);
-            const tagEl = document.getElementById(`stepTag${step}`);
-            const itemEl = document.getElementById(`stepItem${step}`);
-            if (iconEl) iconEl.innerHTML = icon;
-            if (tagEl) {
-                tagEl.innerHTML = tag;
-                tagEl.style.color = color;
-            }
-            if (itemEl) {
-                itemEl.style.background = isHighlight ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255, 255, 255, 0.02)';
-            }
-        }
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'status') {
+        handleStatusUpdate(msg.data);
+      } else if (msg.type === 'audio_ready') {
+        loadAudioWaveform(msg.data?.job_id, msg.data?.peaks, msg.data?.audio_url);
+      } else if (msg.type === 'transcript_stream') {
+        handleTranscriptStream(msg.data);
+      } else if (msg.type === 'transcript_ready') {
+        handleTranscriptReady(msg.data);
+      } else if (msg.type === 'summary_stream') {
+        handleSummaryStream(msg.data);
+      } else if (msg.type === 'system') {
+        updateSystemUI(msg.data);
+      } else if (msg.type === 'bt') {
+        updateBtUI(msg.data);
+      } else if (msg.type === 'bt_hub') {
+        updateBtHubUI(msg.data);
+      } else if (msg.type === 'vu') {
+        updateVuMeter(msg.data);
+      }
+    } catch (err) {
+      console.warn('[WS] 解析訊息錯誤:', err);
+    }
+  };
 
-        let currentStreamingSessionId = null;
-        let currentEventSource = null;
+  ws.onerror = (err) => {
+    console.warn('[WS] 連線異常:', err);
+  };
 
-        async function handleStopVoiceEarly() {
-            if (!currentStreamingSessionId) return;
-            const btnStop = document.getElementById('btnStopVoice');
-            if (btnStop) {
-                btnStop.disabled = true;
-                btnStop.innerHTML = `<span class="spinner"></span> 正在結算錄音...`;
-            }
-            try {
-                await fetch(`/api/voice/stream/${currentStreamingSessionId}/stop`, { method: 'POST' });
-            } catch (e) {
-                console.error("Stop voice error:", e);
-            }
-        }
+  ws.onclose = () => {
+    console.warn('[WS] 連線關閉，降級至 HTTP 輪詢');
+    wsConnected = false;
+    ws = null;
+    startHttpFallbackPolling();
+    scheduleWsReconnect();
+  };
+}
 
-        async function handleRecordBTVoice() {
-            const duration = parseInt(document.getElementById('selectDuration').value) || 5;
-            const btn = document.getElementById('btnRecordVoice');
-            const btnStop = document.getElementById('btnStopVoice');
-            const wave = document.getElementById('waveAnim');
-            const progressBox = document.getElementById('recProgressBox');
-            const timerTxt = document.getElementById('recTimerText');
-            const statusTitle = document.getElementById('recStatusTitle');
-            const barFill = document.getElementById('recBarFill');
-            const stepper = document.getElementById('pipelineStepper');
-            const stepperElapsed = document.getElementById('stepperElapsedText');
+function scheduleWsReconnect() {
+  if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+  wsReconnectTimer = setTimeout(() => {
+    console.log(`[WS] 嘗試重連 (${wsReconnectDelay}ms)...`);
+    wsReconnectDelay = Math.min(wsReconnectDelay * 1.5, 10000);
+    initWebSocket();
+  }, wsReconnectDelay);
+}
 
-            // Reset & Open Stepper
-            stepper.style.display = 'flex';
-            const pipelineStartTime = Date.now();
-            if (stepperStopwatchInterval) clearInterval(stepperStopwatchInterval);
-            stepperStopwatchInterval = setInterval(() => {
-                const sec = ((Date.now() - pipelineStartTime) / 1000).toFixed(1);
-                stepperElapsed.innerText = `總耗時: ${sec}s`;
-            }, 100);
+/* ---------- 啟動 ---------- */
+setState('idle');
+initWebSocket();
 
-            setStepState('Rec', '🔴', `串流錄音中 (${duration}s)`, true, '#ef4444');
-            setStepState('Stt', '⚪', '準備串流分塊 (6s/chunk)', false, 'var(--text-muted)');
-            setStepState('Tr', '⚪', '等待轉錄', false, 'var(--text-muted)');
-            setStepState('Done', '⚪', '待命', false, 'var(--text-muted)');
+/* ---------- Task 10: 註冊 Service Worker (PWA 離線支援) ---------- */
+if ('serviceWorker' in navigator && !window.location.search.includes('mock=1')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      .then(reg => {
+        console.log('[PWA] Service Worker registered with scope:', reg.scope);
+      })
+      .catch(err => {
+        console.warn('[PWA] Service Worker registration failed:', err);
+      });
+  });
+}
 
-            // 1. Enter Recording State
-            btn.disabled = true;
-            if (btnStop) {
-                btnStop.disabled = false;
-                btnStop.style.display = 'inline-flex';
-                btnStop.innerHTML = `<span>⏹️</span> 說完了立即轉錄`;
-            }
-            wave.style.display = 'flex';
-            progressBox.style.display = 'flex';
-            statusTitle.innerText = "STREAMING RECORDING";
-            statusTitle.style.color = "#ef4444";
-            btn.innerHTML = `<span class="spinner"></span> 🔴 ① 串流錄音中 (${duration}s)... 請對耳麥說話`;
-            document.getElementById('txtTranscribed').innerText = "⏳ 正在啟動串流分塊語音轉錄 (faster-whisper)...";
-            document.getElementById('txtTranslated').innerText = "尚未進行翻譯";
-
-            const startTime = Date.now();
-            const totalDurationMs = duration * 1000;
-
-            if (recCountdownInterval) clearInterval(recCountdownInterval);
-            recCountdownInterval = setInterval(() => {
-                const elapsed = Date.now() - startTime;
-                const remaining = Math.max(0, (totalDurationMs - elapsed) / 1000);
-                timerTxt.innerText = remaining.toFixed(1) + "s";
-                const progressPct = Math.min(100, (elapsed / totalDurationMs) * 100);
-                barFill.style.width = progressPct + "%";
-
-                if (elapsed >= totalDurationMs) {
-                    clearInterval(recCountdownInterval);
-                    timerTxt.innerText = "0.0s";
-                }
-            }, 100);
-
-            try {
-                // Start streaming session
-                const startRes = await fetch('/api/voice/stream/start', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ duration_sec: duration })
-                });
-
-                if (!startRes.ok) {
-                    const errData = await startRes.json().catch(() => ({}));
-                    setStepState('Rec', '❌', '錄音啟動失敗', false, '#ef4444');
-                    throw new Error(errData.detail || `HTTP ${startRes.status}`);
-                }
-
-                const startData = await startRes.json();
-                const sessionId = startData.session_id;
-                currentStreamingSessionId = sessionId;
-
-                // Establish Server-Sent Events (SSE) connection
-                if (currentEventSource) {
-                    currentEventSource.close();
-                }
-
-                await new Promise((resolve, reject) => {
-                    const es = new EventSource(`/api/voice/stream/${sessionId}/events`);
-                    currentEventSource = es;
-
-                    es.onmessage = (event) => {
-                        try {
-                            const data = JSON.parse(event.data);
-                            console.log("[SSE Event]", data);
-
-                            if (data.type === 'recording_progress') {
-                                setStepState('Rec', '<span class="spinner"></span>', `純淨錄音中 (${data.elapsed_s}s / ${data.duration_sec}s)...`, true, '#3b82f6');
-                                btn.innerHTML = `<span class="spinner"></span> 🎙️ ① 錄音中 (${data.elapsed_s}s / ${data.duration_sec}s)...`;
-                            }
-                            else if (data.type === 'chunk_transcribed') {
-                                // Progressive text output
-                                const chunkIdx = data.chunk_index;
-                                const fullText = data.full_text;
-                                const elStt = document.getElementById('txtTranscribed');
-                                elStt.innerText = fullText;
-                                elStt.scrollTop = elStt.scrollHeight;
-                                setStepState('Stt', '<span class="spinner"></span>', `分塊 ${chunkIdx + 1} 轉錄完成 (${data.chunk_cost_s}s)`, true, '#06b6d4');
-                            }
-                            else if (data.type === 'recording_done') {
-                                if (btnStop) btnStop.style.display = 'none';
-                                wave.style.display = 'none';
-                                setStepState('Rec', '✅', `錄音結束 (${data.rec_elapsed_s}s)`, false, '#10b981');
-                                setStepState('Stt', '<span class="spinner"></span>', '⚡ 高精度全文語音辨識中...', true, '#06b6d4');
-                                statusTitle.innerText = "HIGH-ACCURACY STT IN PROGRESS";
-                                statusTitle.style.color = "#06b6d4";
-                                btn.innerHTML = `<span class="spinner"></span> ⚡ ② 高精度全文語音辨識中...`;
-                            }
-                            else if (data.type === 'stt_completed') {
-                                setStepState('Stt', '✅', `轉錄完成 (尾端耗時 ${data.tail_stt_cost_s}s)`, false, '#10b981');
-                                const elStt = document.getElementById('txtTranscribed');
-                                if (data.full_text) {
-                                    elStt.innerText = data.full_text;
-                                    elStt.scrollTop = elStt.scrollHeight;
-                                    document.getElementById('audioHintBadge').innerText = "✅ 語音轉錄完成";
-                                    document.getElementById('ttsActionRow').style.display = 'flex';
-                                } else {
-                                    elStt.innerText = "未能辨識出清晰人聲語音。您可點擊上方播放器試聽耳麥是否有錄到聲音。";
-                                    document.getElementById('audioHintBadge').innerText = "⚠️ 未辨識到清晰文字";
-                                }
-
-                                if (data.audio_url) {
-                                    currentAudioUrl = data.audio_url;
-                                    const playbackBox = document.getElementById('playbackBox');
-                                    const player = document.getElementById('voiceAudioPlayer');
-                                    playbackBox.style.display = 'flex';
-                                    player.src = data.audio_url + '?t=' + Date.now();
-                                    player.load();
-                                    document.getElementById('audioHintBadge').innerText = "▶ 音訊就緒可試聽";
-                                }
-                            }
-                            else if (data.type === 'translating') {
-                                if (data.stage === 'first_token') {
-                                    setStepState('Tr', '<span class="spinner"></span>', `首字生成 (TTFT: ${data.ttft_s}s)...`, true, '#10b981');
-                                    btn.innerHTML = `<span class="spinner"></span> ⚡ ③ 首字生成 (${data.ttft_s}s) 正在串流輸出...`;
-                                } else {
-                                    setStepState('Tr', '<span class="spinner"></span>', data.message || '連線本地 Qwen 3B 模型中...', true, '#10b981');
-                                    statusTitle.innerText = "QWEN STREAMING TRANSLATION";
-                                    statusTitle.style.color = "#10b981";
-                                    btn.innerHTML = `<span class="spinner"></span> 🌐 ③ Qwen 排隊與載入權重中...`;
-                                }
-                                const txtTr = document.getElementById('txtTranslated');
-                                if (!txtTr.classList.contains('streaming-cursor')) {
-                                    txtTr.innerText = "";
-                                    txtTr.classList.add('streaming-cursor');
-                                }
-                            }
-                            else if (data.type === 'translate_token') {
-                                // Live streaming typewriter token display with TPS speed and auto-scroll!
-                                const txtTr = document.getElementById('txtTranslated');
-                                txtTr.innerText = data.accumulated;
-                                txtTr.scrollTop = txtTr.scrollHeight;
-                                const speedStr = data.speed_tps ? ` | ${data.speed_tps} tok/s` : '';
-                                setStepState('Tr', '<span class="spinner"></span>', `產出第 ${data.token_index} 字${speedStr}`, true, '#10b981');
-                                btn.innerHTML = `<span class="spinner"></span> 🌐 ③ 串流口譯中 (${data.token_index} tok${speedStr})`;
-                            }
-                            else if (data.type === 'translate_timeout') {
-                                const txtTr = document.getElementById('txtTranslated');
-                                txtTr.classList.remove('streaming-cursor');
-                                txtTr.innerText = "⚠️ 口譯生成逾時，請點擊右方手動翻譯重試。";
-                                setStepState('Tr', '⚠️', 'Qwen 逾時 (CPU 負載過高)', false, '#f59e0b');
-                            }
-                            else if (data.type === 'translation_completed') {
-                                const txtTr = document.getElementById('txtTranslated');
-                                txtTr.classList.remove('streaming-cursor');
-                                txtTr.innerText = data.english_translation || "(無翻譯結果)";
-                                txtTr.scrollTop = txtTr.scrollHeight;
-                                const speedInfo = data.avg_speed_tps ? `, ${data.avg_speed_tps} tok/s` : '';
-                                setStepState('Tr', '✅', `口譯完成 (${data.tr_cost_s}s, ${data.token_count || 0} tok${speedInfo})`, false, '#10b981');
-                                document.getElementById('audioHintBadge').innerText = "✅ 雙語對照全部就緒";
-                            }
-                            else if (data.type === 'session_completed') {
-                                setStepState('Done', '🎯', `全部完成 (總耗時 ${data.total_time_s}s)`, true, '#10b981');
-                                if (stepperStopwatchInterval) clearInterval(stepperStopwatchInterval);
-                                es.close();
-                                currentEventSource = null;
-                                currentStreamingSessionId = null;
-                                resolve(data);
-                            }
-                            else if (data.type === 'error') {
-                                if (stepperStopwatchInterval) clearInterval(stepperStopwatchInterval);
-                                es.close();
-                                reject(new Error(data.detail || "串流處理發生異常"));
-                            }
-                        } catch (parseErr) {
-                            console.error("Failed to parse SSE data:", parseErr);
-                        }
-                    };
-
-                    es.onerror = (err) => {
-                        console.warn("[SSE Connection Notice]", err);
-                        if (es.readyState === EventSource.CLOSED) {
-                            es.close();
-                            resolve();
-                        }
-                    };
-                });
-
-            } catch (e) {
-                alert("耳麥串流錄音或處理失敗: " + e.message + "\n請確認藍牙耳麥已連線且麥克風開啟。");
-            } finally {
-                if (recCountdownInterval) clearInterval(recCountdownInterval);
-                if (stepperStopwatchInterval) clearInterval(stepperStopwatchInterval);
-                if (currentEventSource) {
-                    currentEventSource.close();
-                    currentEventSource = null;
-                }
-                currentStreamingSessionId = null;
-                btn.disabled = false;
-                if (btnStop) btnStop.style.display = 'none';
-                wave.style.display = 'none';
-                progressBox.style.display = 'none';
-                btn.innerHTML = `<span>🎙️</span> 開始耳麥錄音 (Record Voice)`;
-            }
-        }
-
-        async function playCurrentTTS(onSpeaker) {
-            const text = document.getElementById('txtTranscribed').innerText;
-            if (!text || text.includes("尚未進行")) return;
-
-            try {
-                const res = await fetch('/api/voice/tts', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: text, play_on_speaker: onSpeaker })
-                });
-                const data = await res.json();
-                if (!onSpeaker && data.audio_url) {
-                    const audio = document.getElementById('browserAudioPlayer');
-                    audio.src = data.audio_url;
-                    audio.play();
-                }
-            } catch (e) {
-                alert("TTS 播放失敗: " + e.message);
-            }
-        }
-
-        // Manual Text Translate & TTS
-        async function handleManualTranslate(direction) {
-            const input = document.getElementById('txtManualInput').value.trim();
-            if (!input) {
-                alert("請先輸入欲翻譯之內容！");
-                return;
-            }
-
-            try {
-                const res = await fetch('/api/voice/translate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: input, direction: direction })
-                });
-                const data = await res.json();
-                document.getElementById('txtManualInput').value = `${input}\n\n【翻譯結果】:\n${data.translated_text}`;
-            } catch (e) {
-                alert("翻譯失敗: " + e.message);
-            }
-        }
-
-        async function handleManualTTS() {
-            const input = document.getElementById('txtManualInput').value.trim();
-            if (!input) {
-                alert("請先輸入欲朗讀之文字！");
-                return;
-            }
-            try {
-                const res = await fetch('/api/voice/tts', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: input, play_on_speaker: true })
-                });
-                const data = await res.json();
-                alert("🔊 正在藍牙耳麥播放語音朗讀！");
-            } catch (e) {
-                alert("TTS 播放失敗: " + e.message);
-            }
-        }
-
-        // Network Switcher
-        let currentNetMode = "sta";
-        let currentHotspotSSID = 'raspi543_AI';
-        let currentHostname = 'raspi543';
-
-        async function fetchNetworkStatus() {
-            try {
-                const res = await fetch('/api/network/status');
-                if (!res.ok) return;
-                const data = await res.json();
-                currentNetMode = data.mode;
-                if (data.hotspot_ssid) currentHotspotSSID = data.hotspot_ssid;
-                if (data.hostname) currentHostname = data.hostname;
-
-                const badge = document.getElementById('netBadge');
-                const title = document.getElementById('netModeTitle');
-                const details = document.getElementById('netModeDetails');
-                const btnText = document.getElementById('btnNetSwitchText');
-                const btnIcon = document.getElementById('btnNetSwitchIcon');
-
-                if (currentNetMode === 'ap') {
-                    badge.className = 'net-badge ap';
-                    badge.innerText = 'AP 獨立熱點';
-                    title.innerText = '戶外 / 飛航獨立熱點模式 (Offline Edge)';
-                    details.innerText = `熱點 IP: ${data.current_ip || '10.20.0.1'} | SSID: ${currentHotspotSSID}`;
-                    btnText.innerText = '切換回家用 Wi-Fi';
-                    btnIcon.innerText = '🏠';
-                } else {
-                    badge.className = 'net-badge sta';
-                    badge.innerText = 'STA 家用連線';
-                    title.innerText = `家用 Wi-Fi 模式 (${currentHostname})`;
-                    details.innerText = `區域 IP: ${data.current_ip || '192.168.50.228'} | 連線: ${data.active_connection}`;
-                    btnText.innerText = `切換為方案 A 熱點 (${currentHotspotSSID})`;
-                    btnIcon.innerText = '📡';
-                }
-            } catch (e) {
-                console.warn("Network status fetch failed:", e);
-            }
-        }
-
-        // Keep-alive heartbeat for AP Watchdog
-        setInterval(() => {
-            if (currentNetMode === 'ap') {
-                fetch('/api/network/keepalive', { method: 'POST' }).catch(() => {});
-            }
-        }, 15000);
-
-        // Continuous Web Keepalive: Signal Watchdog every 30s to maintain AP session while user is active
-        setInterval(async () => {
-            try {
-                await fetch('/api/network/keepalive', { method: 'POST' });
-            } catch (e) {
-                // Ignore transient network errors
-            }
-        }, 30000);
-
-        async function handleNetworkToggle() {
-            const targetMode = currentNetMode === 'sta' ? 'ap' : 'sta';
-            const btn = document.getElementById('btnNetSwitch');
-
-            let confirmMsg = targetMode === 'ap'
-                ? `即將切換至【獨立熱點模式 (10.20.0.1)】！\n\n🛡️【防失聯看門狗已啟動】\n• 系統配有 180 秒故障保險：若 3 分鐘內未有手機連線，樹莓派將自動回退連回家中 Wi-Fi，絕不失聯！\n\n切換後操作：\n1. 手機連線 Wi-Fi：${currentHotspotSSID} (密碼 ${currentHostname})\n2. 瀏覽器造訪：http://10.20.0.1 (免打 :8000)\n\n確定切換嗎？`
-                : `即將切換回【家用 Wi-Fi 模式】！\n\n確定切換嗎？`;
-
-            if (!confirm(confirmMsg)) return;
-
-            btn.disabled = true;
-            btn.innerHTML = `<span class="spinner"></span> 🛡️ 防失聯切換中...`;
-
-            try {
-                const res = await fetch('/api/network/switch', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ target_mode: targetMode })
-                });
-                const data = await res.json();
-                alert(`✅ ${data.message || '切換指令已接收！'}\n\n• 若切至熱點：請連線 ${currentHotspotSSID}，造訪 http://10.20.0.1\n• 🛡️ 若 3 分鐘內未連線，系統將自動復歸家用 Wi-Fi！`);
-            } catch (err) {
-                alert(`📡 網路指令已送出！\n\n• 若切至熱點：請連線 ${currentHotspotSSID}，造訪 http://10.20.0.1\n• 🛡️ 若 3 分鐘內未連線，系統將自動復歸家用 Wi-Fi！`);
-            } finally {
-                setTimeout(fetchNetworkStatus, 3000);
-            }
-        }
-
-        // Code Arena
-        async function submitTask() {
-            const prompt = document.getElementById('txtPrompt').value;
-            const code = document.getElementById('txtCode').value;
-            const model = document.getElementById('selectModel').value;
-            const btn = document.getElementById('btnSubmit');
-
-            btn.disabled = true;
-            btn.innerHTML = `<span class="spinner"></span> 任務推論中...`;
-
-            try {
-                const res = await fetch('/api/tasks', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt: prompt, code: code, model: model })
-                });
-                const data = await res.json();
-                pollArenaTask(data.task_id);
-            } catch (e) {
-                alert("提交失敗: " + e.message);
-                btn.disabled = false;
-                btn.innerHTML = `<span>🚀 送入 Redis 佇列並開始推論</span>`;
-            }
-        }
-
-        async function pollArenaTask(taskId) {
-            try {
-                const res = await fetch(`/api/tasks/${taskId}`);
-                const data = await res.json();
-                if (data.status === 'finished') {
-                    const out = document.getElementById('markdownOutput');
-                    const text = data.result ? (data.result.result || data.result.response || "") : "";
-                    out.innerHTML = window.marked ? marked.parse(text) : text;
-                    document.getElementById('btnCopy').style.display = 'block';
-                    const btn = document.getElementById('btnSubmit');
-                    btn.disabled = false;
-                    btn.innerHTML = `<span>🚀 送入 Redis 佇列並開始推論</span>`;
-                } else if (data.status === 'failed') {
-                    alert("任務失敗: " + data.error);
-                } else {
-                    setTimeout(() => pollArenaTask(taskId), 2500);
-                }
-            } catch (e) {
-                console.error("Poll task error:", e);
-            }
-        }
-
-        function copyResponse() {
-            const text = document.getElementById('markdownOutput').innerText;
-            navigator.clipboard.writeText(text).then(() => alert("已複製！"));
-        }
-
-        // Telemetry
-        async function fetchTelemetry() {
-            if (currentStreamingSessionId) return; // 錄音進行中暫停非必要進程輪詢
-            try {
-                const res = await fetch('/health');
-                const data = await res.json();
-                if (data.cpu_temperature_c) {
-                    document.getElementById('valTemp').innerText = `${data.cpu_temperature_c.toFixed(1)}°C`;
-                }
-                if (data.ram_available_mb && data.ram_total_mb) {
-                    document.getElementById('valRam').innerText = `${(data.ram_available_mb / 1024).toFixed(1)} / ${(data.ram_total_mb / 1024).toFixed(1)} GB`;
-                }
-            } catch (e) {}
-        }
-
-        // In-Memory Storage Stats
-        async function fetchMemoryStorageStats() {
-            if (currentStreamingSessionId) return; // 錄音進行中暫停記憶體輪詢
-            try {
-                const res = await fetch('/api/system/memory_cache');
-                if (!res.ok) return;
-                const data = await res.json();
-                const badge = document.getElementById('badgeMemoryStorage');
-                if (badge && data) {
-                    if (data.is_ramfs) {
-                        badge.innerText = `⚡ RAM-Disk: ${data.total_mb}MB / ${data.quota_mb}MB (0 磁碟寫入)`;
-                        badge.style.color = '#6ee7b7';
-                        badge.style.background = 'rgba(16, 185, 129, 0.15)';
-                    } else {
-                        badge.innerText = `💾 快取: ${data.total_mb}MB / ${data.quota_mb}MB`;
-                        badge.style.color = '#94a3b8';
-                        badge.style.background = 'rgba(255, 255, 255, 0.05)';
-                    }
-                }
-            } catch (e) {}
-        }
-
-        // Init
-        applyBtCollapseState();
-        fetchTelemetry();
-        fetchNetworkStatus();
-        fetchBTStatus();
-        fetchMemoryStorageStats();
-        setInterval(fetchTelemetry, 10000);
-        setInterval(fetchNetworkStatus, 10000);
-        setInterval(fetchBTStatus, 2500); // Reactive auto-refresh when BT state changes
-        setInterval(fetchMemoryStorageStats, 5000);
-    </script>
+/* ---------- 假後端（?mock=1 預覽用） ---------- */
+let M = {
+  state: 'idle', t0: 0, total: 90, job: 0,
+  connectedMac: 'E8:07:BF:22:A1:99', connectedName: 'RichChipAN',
+  mockTrusted: [
+    { mac: 'E8:07:BF:22:A1:99', name: 'RichChipAN', is_default: true, auto_connect: true, battery_level: 85, rssi: -56 },
+    { mac: '00:1B:66:88:99:AA', name: 'Sony WH-1000XM4', is_default: false, auto_connect: true, battery_level: 90, rssi: -62 },
+    { mac: '44:5C:E9:12:34:56', name: 'AirPods Pro 2', is_default: false, auto_connect: false, battery_level: 75, rssi: -70 }
+  ]
+};
+function mock(path, body) {
+  const now = Date.now();
+  if (path === API.system) return { offline: true, cpu: M.state === 'processing' ? 97 : 6, temp: M.state === 'processing' ? 52 : 44, mode: 'ap', ssid: 'raspi543_AI', host: 'localnote.local' };
+  if (path === API.bt) return { connected: !!M.connectedMac, name: M.connectedName || '' };
+  if (path === API.btStatus) {
+    const isConn = !!M.connectedMac;
+    return {
+      connected: isConn, connected_name: M.connectedName, connected_mac: M.connectedMac,
+      battery_level: isConn ? 85 : null, signal_level_pct: isConn ? 92 : 0, rssi: isConn ? -56 : null,
+      trusted_devices: M.mockTrusted.map(d => ({
+        ...d,
+        connected: d.mac === M.connectedMac
+      }))
+    };
+  }
+  if (path === API.btScan) return {
+    ok: true, count: 2, msg: '找到 2 個周圍設備',
+    devices: [
+      { mac: 'A4:C1:38:99:88:77', name: 'Bose QuietComfort 45', rssi: -58, battery_level: 70 },
+      { mac: 'B8:D5:0B:44:33:22', name: 'Jabra Evolve2 65', rssi: -72, battery_level: 45 }
+    ]
+  };
+  if (path === API.btPair) {
+    if (body?.target && !M.mockTrusted.some(d => d.mac === body.target)) {
+      M.mockTrusted.push({ mac: body.target, name: '新耳麥', is_default: false, auto_connect: true, battery_level: 80, rssi: -60 });
+    }
+    return { ok: true, msg: '已成功配對並信任設備' };
+  }
+  if (path === API.btConnect) {
+    const target = body?.target || M.mockTrusted[0]?.mac;
+    M.connectedMac = target;
+    const found = M.mockTrusted.find(d => d.mac === target);
+    M.connectedName = found ? found.name : '耳麥';
+    return { ok: true, msg: `🎧 已成功切換連線至耳麥：${M.connectedName}` };
+  }
+  if (path === API.btDisconnect) {
+    M.connectedMac = null;
+    M.connectedName = null;
+    return { ok: true, msg: '已中斷連線' };
+  }
+  if (path === API.btAuto) {
+    const d = M.mockTrusted.find(item => item.mac === body?.mac);
+    if (d) {
+      if (body.auto_connect !== undefined) d.auto_connect = !!body.auto_connect;
+      if (body.set_default) {
+        M.mockTrusted.forEach(item => item.is_default = (item.mac === body.mac));
+      }
+    }
+    return { ok: true, msg: '已更新設定' };
+  }
+  if (path === API.record) { M = { state: 'recording', t0: now, total: Math.min(body.seconds, 8), job: M.job + 1 }; return { job: 'j' + M.job }; }
+  if (path === API.regenerate) { M.state = 'processing'; M.t0 = now; M.job++; return { job: 'j' + M.job }; }
+  if (path === API.status) {
+    const e = (now - M.t0) / 1000;
+    if (M.state === 'recording') { if (e >= M.total) { M.state = 'processing'; M.t0 = now; } else return { state: 'recording', elapsed: e, total: M.total }; }
+    if (M.state === 'processing') { const e2 = (now - M.t0) / 1000; if (e2 >= 6) M.state = 'done'; else return { state: 'processing', phase: e2 < 3 ? 'transcribe' : 'summarize', progress: Math.round(e2 / 6 * 100), eta: Math.round(6 - e2), job: 'j' + M.job }; }
+    return { state: M.state, job: 'j' + M.job };
+  }
+  if (path === API.result) return { job: 'j' + M.job, title: '客戶會議', started_at: new Date().toISOString(), duration: 90, summary: ['客戶要 200 台樣機，11 月前交貨', '對單價有異議，要求降 8%', '同意先簽 50 台試單'], todos: [{ item: '發修訂報價', owner: '張三', due: '週五' }, { item: '確認樣機產能', owner: '李四', due: '下週一' }], decisions: ['先簽 50 台試單，價格按新報價'], transcript: '[00:00] 發言人1：我們這邊希望 11 月前能拿到 200 台樣機……\n[00:21] 發言人2：單價還是偏高，能不能降 8%……', markdown: '# 客戶會議 · 10-07 10:50 · 1 分 30 秒\n\n## 摘要\n- 客戶要 200 台樣機，11 月前交貨\n- 對單價有異議，要求降 8%\n- 同意先簽 50 台試單\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 發修訂報價 | 張三 | 週五 |\n| 確認樣機產能 | 李四 | 下週一 |\n\n## 決議\n先簽 50 台試單，價格按新報價' };
+  if (path === API.translate) return { text: body.to === 'en' ? '# Client meeting\n\n## Summary\n- Client wants 200 sample units before November\n- Objects to unit price, asks for 8% off\n- Agrees to a 50-unit trial order first' : '（中文翻譯預覽）' };
+  if (path === API.tts) return { ok: true };
+  if (path === API.netSwitch) return { ok: true };
+  return {};
+}
+</script>
 </body>
 </html>

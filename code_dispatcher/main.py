@@ -1447,9 +1447,8 @@ def get_hailo_system_status() -> Dict[str, Any]:
     return get_hailo10_stats()
 
 
-@app.get("/api/system", tags=["Demo UI"])
-def get_demo_system() -> Dict[str, Any]:
-    """Retrieve simplified system status for LocalNote client dashboard."""
+def get_system_telemetry_payload() -> Dict[str, Any]:
+    """Compile comprehensive system and Hailo-10H telemetry for HTTP and WebSocket."""
     from meeting_minutes import minutes_manager
     qr_path = os.path.join(STATIC_DIR, "wifi.png")
 
@@ -1465,7 +1464,8 @@ def get_demo_system() -> Dict[str, Any]:
             "temp_c": hailo10.get("temp_c"),
             "nnc_util_pct": hailo10.get("nnc_util_pct"),
             "ram_usage_mb": hailo10.get("ram_usage_mb"),
-            "ram_util_pct": hailo10.get("ram_util_pct")
+            "ram_util_pct": hailo10.get("ram_util_pct"),
+            "voltage_mv": hailo10.get("voltage_mv")
         }
     else:
         try:
@@ -1497,6 +1497,12 @@ def get_demo_system() -> Dict[str, Any]:
         "hailo": hailo10,
         "bypass_summary": getattr(minutes_manager, "bypass_summary", False)
     }
+
+
+@app.get("/api/system", tags=["Demo UI"])
+def get_demo_system() -> Dict[str, Any]:
+    """Retrieve simplified system status for LocalNote client dashboard."""
+    return get_system_telemetry_payload()
 
 
 @app.get("/api/bt", tags=["Demo UI"])
@@ -1692,17 +1698,8 @@ async def ws_telemetry_loop():
             if not ws_manager.active_connections:
                 continue
 
-            # 1. 廣播系統硬體指標 (System Telemetry)
-            sys_data = {
-                "offline": minutes_manager.offline_detector.is_offline,
-                "cpu": minutes_manager.get_cpu_load(),
-                "temp": minutes_manager.get_temperature(),
-                "mode": minutes_manager.get_network_mode(),
-                "hostname": SYSTEM_HOSTNAME,
-                "ssid": DEFAULT_HOTSPOT_SSID,
-                "host": f"{SYSTEM_HOSTNAME}.local",
-                "wifi_qr": "/static/wifi.png" if os.path.exists(qr_path) else None
-            }
+            # 1. 廣播系統與 Hailo-10H 硬體指標 (System & Hailo Telemetry)
+            sys_data = get_system_telemetry_payload()
             await ws_manager.broadcast("system", sys_data)
 
             # 2. 廣播藍牙基本狀態 (Bluetooth Status)
@@ -1746,21 +1743,11 @@ async def websocket_status_endpoint(websocket: WebSocket):
     """Bidirectional WebSocket endpoint for zero-latency status push."""
     from ws_manager import ws_manager
     from meeting_minutes import minutes_manager
-    qr_path = os.path.join(STATIC_DIR, "wifi.png")
 
     await ws_manager.connect(websocket)
     try:
         # 連線建立瞬間，立即回傳一筆當前全量狀態快照 (Immediate initial snapshot)
-        sys_data = {
-            "offline": minutes_manager.offline_detector.is_offline,
-            "cpu": minutes_manager.get_cpu_load(),
-            "temp": minutes_manager.get_temperature(),
-            "mode": minutes_manager.get_network_mode(),
-            "hostname": SYSTEM_HOSTNAME,
-            "ssid": DEFAULT_HOTSPOT_SSID,
-            "host": f"{SYSTEM_HOSTNAME}.local",
-            "wifi_qr": "/static/wifi.png" if os.path.exists(qr_path) else None
-        }
+        sys_data = get_system_telemetry_payload()
         await ws_manager.send_personal(websocket, "system", sys_data)
         await ws_manager.send_personal(websocket, "status", minutes_manager.status.model_dump())
         bt_data = get_bt_status()
@@ -1777,8 +1764,10 @@ async def websocket_status_endpoint(websocket: WebSocket):
                 if act == "ping":
                     await websocket.send_text(json.dumps({"type": "pong", "ts": int(time.time())}))
                 elif act == "refresh":
+                    sys_data = get_system_telemetry_payload()
                     await ws_manager.send_personal(websocket, "system", sys_data)
                     await ws_manager.send_personal(websocket, "status", minutes_manager.status.model_dump())
+                    bt_data = get_bt_status()
                     await ws_manager.send_personal(websocket, "bt", {
                         "connected": bool(bt_data.get("connected", False)),
                         "name": bt_data.get("connected_name") or ""

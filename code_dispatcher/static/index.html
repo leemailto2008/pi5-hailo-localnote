@@ -184,7 +184,7 @@ details[open] summary::after{content:"收起 ▴"}
   <span class="spacer"></span>
   <div class="topbar-pills" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
     <span class="pill net" id="netPill"><span class="dot"></span><span id="netText">檢查連線狀態…</span></span>
-    <span class="pill npu" id="npuPill" style="display:none;background:#e0f2fe;color:#0369a1;font-weight:700;border:1px solid #bae6fd">⚡ AI NPU</span>
+    <span class="pill npu" id="npuPill" style="display:inline-flex;background:linear-gradient(135deg,#0284c7 0%,#0369a1 100%);color:#fff;font-weight:700;box-shadow:0 2px 6px rgba(2,132,199,0.3);border:1px solid #38bdf8;cursor:help" title="Hailo-10H (40 TOPS) 邊緣 AI 加速晶片">⚡ Hailo-10H: --°C</span>
     <span class="pill sys" id="sysPill">盒子：—</span>
     <button class="pill" id="btnToggleMetrics" style="cursor:pointer;background:var(--card);border:1px solid var(--line);font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;" title="點擊切換顯示/隱藏核心效能與耗時指標（預設隱藏，Demo 給客戶時不露餡）">📊 效能指標</button>
   </div>
@@ -327,7 +327,57 @@ details[open] summary::after{content:"收起 ▴"}
 
       <!-- ================= 設定 ================= -->
       <section class="col set">
-        <span class="tag set">設定</span>
+        <span class="tag set">設定與硬體狀態</span>
+        <!-- ⚡ Hailo-10H 40 TOPS 硬體即時監控看板 (Live Telemetry Card) -->
+        <div class="card set" id="hailoMonitorCard" style="background:#0f172a;border:1px solid #1e293b;border-radius:14px;padding:14px 16px;color:#f8fafc;box-shadow:0 4px 14px rgba(0,0,0,0.2);">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;border-bottom:1px solid #334155;padding-bottom:8px;">
+            <span style="font-weight:700;font-size:13.5px;color:#38bdf8;display:inline-flex;align-items:center;gap:6px">
+              ⚡ Hailo-10H AI 加速晶片 <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:#0369a1;color:#fff;font-weight:700">40 TOPS</span>
+            </span>
+            <span id="hailoLiveBadge" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(16,185,129,0.2);color:#34d399;border:1px solid #059669">
+              ● 待命就緒
+            </span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <!-- 1. 晶圓溫度 -->
+            <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+              <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                <span>🌡️ 晶片溫度 (Die Temp)</span>
+                <span id="hailoTempStatus" style="color:#34d399;font-weight:700">低溫良好</span>
+              </div>
+              <div style="font-size:15px;font-weight:700;margin-top:2px;font-family:monospace;color:#38bdf8;" id="hailoTempDisplay">-- °C</div>
+              <div style="color:#64748b;font-size:10px;margin-top:2px;">溫控閾值 &le; 75°C</div>
+            </div>
+            <!-- 2. NNC 核心運算負載 -->
+            <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+              <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                <span>⚙️ NNC 運算負載 (Load)</span>
+                <span id="hailoNncStatus" style="color:#94a3b8">待命</span>
+              </div>
+              <div style="font-size:15px;font-weight:700;margin-top:2px;font-family:monospace;color:#f8fafc;" id="hailoNncDisplay">0 %</div>
+              <div style="color:#64748b;font-size:10px;margin-top:2px;">推論中自動拉升</div>
+            </div>
+            <!-- 3. NPU 專屬記憶體 (LPDDR4X) -->
+            <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+              <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                <span>🧠 專屬記憶體 (RAM)</span>
+                <span id="hailoRamPct" style="color:#a78bfa">-- %</span>
+              </div>
+              <div style="font-size:13px;font-weight:700;margin-top:2px;font-family:monospace;color:#f8fafc;" id="hailoRamDisplay">-- / 7,221 MB</div>
+              <div style="color:#64748b;font-size:10px;margin-top:2px;">Hailo-10H 8GB LPDDR4X</div>
+            </div>
+            <!-- 4. 工作電壓與邊緣模型 -->
+            <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
+              <div style="color:#94a3b8;font-size:11px;display:flex;justify-content:space-between;">
+                <span>⚡ 供電電壓與模型</span>
+                <span id="hailoVoltDisplay" style="color:#fbbf24">799 mV</span>
+              </div>
+              <div style="font-size:12px;font-weight:700;margin-top:2px;color:#f8fafc;" id="hailoModelBadge">Whisper-Small + Qwen3</div>
+              <div style="color:#64748b;font-size:10px;margin-top:2px;">PCIe Gen2 x1 · 零磁碟 I/O</div>
+            </div>
+          </div>
+        </div>
+
         <div class="card set">
           <div class="row">
             <div style="flex:1 1 220px;min-width:0">
@@ -455,6 +505,24 @@ details[open] summary::after{content:"收起 ▴"}
           </div>
           <div class="row">
             <button class="btn ghost danger" id="hubBtnDisconnect" disabled>中斷連線</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ⚡ Hailo-10H 狀態卡片 (Bluetooth Hub 檢視專用) -->
+      <div class="card" style="background:#0f172a;border:1px solid #1e293b;color:#f8fafc;padding:12px 16px;">
+        <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <div style="display:inline-flex;align-items:center;gap:8px">
+            <span style="font-size:20px">⚡</span>
+            <div>
+              <b style="font-size:14px;color:#38bdf8">Hailo-10H AI 加速晶片 (40 TOPS)</b>
+              <span style="font-size:11px;color:#94a3b8;margin-left:6px">PCIe 邊緣 AI 硬體推論</span>
+            </div>
+          </div>
+          <div class="row" style="gap:8px;flex-wrap:wrap">
+            <span class="chip" style="background:#1e293b;color:#38bdf8;font-family:monospace;font-size:12px;font-weight:700">🌡️ 晶片溫度: <span id="btHubHailoTempDisplay">-- °C</span></span>
+            <span class="chip" style="background:#1e293b;color:#34d399;font-family:monospace;font-size:12px;font-weight:700">⚙️ 核心負載: <span id="btHubHailoNncDisplay">0 %</span></span>
+            <span class="chip" style="background:#1e293b;color:#a78bfa;font-family:monospace;font-size:12px;font-weight:700">🧠 RAM: <span id="btHubHailoRamDisplay">--</span></span>
           </div>
         </div>
       </div>
@@ -710,17 +778,53 @@ function updateSystemUI(s) {
     el.netText.textContent = s.offline ? '離線運作 · 資料不出盒子' : '維護模式 · 有外網';
     el.sysPill.textContent = `盒子：${state === 'processing' ? '整理中' : state === 'recording' ? '錄音中' : '待命'} · 負載 ${Math.round(s.cpu)}% · ${Math.round(s.temp)}°C`;
   }
-  if (el.npuPill) {
-    if (s.npu && s.npu.detected) {
+  const npu = (s && s.npu && s.npu.detected) ? s.npu : (s && s.hailo && s.hailo.detected ? s.hailo : (lastSystemData && lastSystemData.npu && lastSystemData.npu.detected ? lastSystemData.npu : null));
+  if (npu) {
+    if (el.npuPill) {
       el.npuPill.style.display = 'inline-flex';
-      const devName = s.npu.device || 'Hailo NPU';
-      const tempStr = s.npu.temp_c != null ? ` · ${Math.round(s.npu.temp_c)}°C` : '';
-      const utilStr = s.npu.nnc_util_pct != null ? ` (${Math.round(s.npu.nnc_util_pct)}%)` : '';
-      el.npuPill.textContent = `⚡ ${devName}${utilStr}${tempStr}`;
-      el.npuPill.title = `NPU: ${devName} (${s.npu.tops || 40} TOPS) | 核心負載: ${s.npu.nnc_util_pct ?? 0}% | 晶片溫度: ${s.npu.temp_c ?? '--'}°C | RAM: ${s.npu.ram_usage_mb || '--'}`;
-    } else {
-      el.npuPill.style.display = 'none';
+      const devName = npu.device || 'Hailo-10H';
+      const tempVal = npu.temp_c != null ? `${Math.round(npu.temp_c)}°C` : '--';
+      const utilVal = npu.nnc_util_pct != null ? `${Math.round(npu.nnc_util_pct)}%` : '0%';
+      el.npuPill.textContent = `⚡ ${devName}: ${tempVal} · 負載 ${utilVal}`;
+      el.npuPill.title = `NPU: ${devName} (${npu.tops || 40} TOPS)\n核心負載: ${utilVal}\n晶片溫度: ${npu.temp_c ?? '--'}°C\nRAM: ${npu.ram_usage_mb || '--'}\n電壓: ${npu.voltage_mv || '--'} mV`;
     }
+    const tDisp = $('hailoTempDisplay');
+    const nncDisp = $('hailoNncDisplay');
+    const ramDisp = $('hailoRamDisplay');
+    const ramPct = $('hailoRamPct');
+    const voltDisp = $('hailoVoltDisplay');
+    const tempStatus = $('hailoTempStatus');
+    const nncStatus = $('hailoNncStatus');
+    const liveBadge = $('hailoLiveBadge');
+    if (tDisp && npu.temp_c != null) {
+      tDisp.textContent = `${npu.temp_c.toFixed(1)} °C`;
+      if (tempStatus) {
+        tempStatus.textContent = npu.temp_c < 65 ? '低溫良好' : npu.temp_c < 75 ? '正常' : '偏高';
+        tempStatus.style.color = npu.temp_c < 65 ? '#34d399' : npu.temp_c < 75 ? '#fbbf24' : '#f87171';
+      }
+    }
+    if (nncDisp && npu.nnc_util_pct != null) {
+      nncDisp.textContent = `${Math.round(npu.nnc_util_pct)} %`;
+      if (nncStatus) {
+        nncStatus.textContent = npu.nnc_util_pct > 5 ? '推論加速中 🚀' : (state === 'recording' ? '錄音待命中' : '待命');
+        nncStatus.style.color = npu.nnc_util_pct > 5 ? '#38bdf8' : '#94a3b8';
+      }
+    }
+    if (liveBadge) {
+      liveBadge.textContent = (npu.nnc_util_pct > 5) ? '● 正在推論加速' : '● 待命就緒';
+      liveBadge.style.color = (npu.nnc_util_pct > 5) ? '#38bdf8' : '#34d399';
+      liveBadge.style.borderColor = (npu.nnc_util_pct > 5) ? '#0284c7' : '#059669';
+    }
+    if (ramDisp && npu.ram_usage_mb) ramDisp.textContent = `${npu.ram_usage_mb} MB`;
+    if (ramPct && npu.ram_util_pct != null) ramPct.textContent = `${npu.ram_util_pct.toFixed(1)} %`;
+    if (voltDisp && npu.voltage_mv) voltDisp.textContent = `${npu.voltage_mv} mV`;
+
+    const btTDisp = $('btHubHailoTempDisplay');
+    const btNncDisp = $('btHubHailoNncDisplay');
+    const btRamDisp = $('btHubHailoRamDisplay');
+    if (btTDisp && npu.temp_c != null) btTDisp.textContent = `${npu.temp_c.toFixed(1)} °C`;
+    if (btNncDisp && npu.nnc_util_pct != null) btNncDisp.textContent = `${Math.round(npu.nnc_util_pct)} %`;
+    if (btRamDisp && npu.ram_usage_mb) btRamDisp.textContent = `${npu.ram_usage_mb} MB`;
   }
   if (s.ssid) el.ssid.textContent = s.ssid;
   if (s.host) el.host.textContent = s.host;
