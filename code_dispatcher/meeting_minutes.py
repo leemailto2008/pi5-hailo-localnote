@@ -206,6 +206,7 @@ class MeetingJobManager:
         self.result: Optional[MeetingResult] = None
         self._current_task: Optional[asyncio.Task] = None
         self._record_task: Optional[asyncio.Task] = None
+        self._chunk_worker_task: Optional[asyncio.Task] = None
         self._main_loop: Optional[asyncio.AbstractEventLoop] = None
         self.offline_detector = OfflineDetector(check_interval=10.0)
         self._last_cpu_time: float = 0.0
@@ -307,11 +308,15 @@ class MeetingJobManager:
                 print(f"[MeetingMinutes] Error terminating ffmpeg process: {pe}")
             self._current_ffmpeg_proc = None
 
-        # 2. Cancel record sub-task if active
+        # 2. Cancel record sub-task and chunk worker if active
         if self._record_task and not self._record_task.done():
             self._record_task.cancel()
             self._record_task = None
             print("[MeetingMinutes] Active recording sub-task cancelled.")
+
+        if self._chunk_worker_task and not self._chunk_worker_task.done():
+            self._chunk_worker_task.cancel()
+            self._chunk_worker_task = None
 
         # 3. Cancel asyncio pipeline task
         if self._current_task and not self._current_task.done():
@@ -560,6 +565,7 @@ class MeetingJobManager:
                     chunk_worker_done.set()
 
             chunk_worker_task = asyncio.create_task(_chunk_stt_worker())
+            self._chunk_worker_task = chunk_worker_task
 
             async def _on_pcm_slice(slice_data: bytes, is_final: bool):
                 """PCM 滑動切片即時投遞至隊列"""

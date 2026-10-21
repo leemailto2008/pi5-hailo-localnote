@@ -344,34 +344,42 @@ def pair_and_trust(target: str) -> Tuple[bool, str]:
 
 
 def _switch_pipewire_default_sink(device_name_hint: str) -> str:
-    """Attempt to route PipeWire default sink to the newly connected Bluetooth device."""
+    """Attempt to route PipeWire default sink and source to the newly connected Bluetooth device."""
     try:
         wp_status = subprocess.run(["wpctl", "status"], capture_output=True, text=True, timeout=5)
         lines = wp_status.stdout.split("\n")
-        in_sinks = False
+        section = None
         target_sink_id = None
+        target_source_id = None
 
         for line in lines:
             if "Sinks:" in line:
-                in_sinks = True
+                section = "sinks"
                 continue
-            if in_sinks:
-                if line.strip() == "" or "Sources:" in line or "Filters:" in line:
-                    break
-                # Format: │  *   53. Built-in Audio Stereo          [vol: 1.00]
-                # Format: │      72. BlueZ 5.82 ... [vol: 0.80]
+            elif "Sources:" in line:
+                section = "sources"
+                continue
+            elif "Filters:" in line or "Streams:" in line:
+                section = None
+                continue
+
+            if section in ("sinks", "sources"):
                 m = re.search(r"(\d+)\.\s+(.*)", line)
                 if m:
-                    sink_id = m.group(1)
-                    sink_name = m.group(2)
-                    if "bluez" in sink_name.lower() or device_name_hint.lower() in sink_name.lower():
-                        target_sink_id = sink_id
-                        break
+                    node_id = m.group(1)
+                    node_desc = m.group(2)
+                    if "bluez" in node_desc.lower() or (device_name_hint and device_name_hint.lower() in node_desc.lower()):
+                        if section == "sinks" and not target_sink_id:
+                            target_sink_id = node_id
+                        elif section == "sources" and not target_source_id:
+                            target_source_id = node_id
 
         if target_sink_id:
             subprocess.run(["wpctl", "set-default", target_sink_id], capture_output=True, timeout=3)
+        if target_source_id:
+            subprocess.run(["wpctl", "set-default", target_source_id], capture_output=True, timeout=3)
 
-        # 確保藍牙音訊輸入處於 16kHz mSBC 模式 (headset-head-unit)
+        # 檢驗藍牙設定檔：若未具備語音能力且明確支援 headset-head-unit，才進行切換
         try:
             import json
             dump_proc = subprocess.run(["pw-dump"], capture_output=True, text=True, timeout=3)
@@ -383,21 +391,31 @@ def _switch_pipewire_default_sink(device_name_hint: str) -> str:
                         dev_id = n.get("id")
                         params = n.get("info", {}).get("params", {})
                         active_profiles = params.get("Profile", [])
-                        if not any(p.get("name") == "headset-head-unit" for p in active_profiles):
-                            msbc_idx = 196865
+                        is_voice_profile = any(
+                            p.get("name") in ("headset-head-unit", "bap-duplex", "bap-source", "hsp-hs")
+                            for p in active_profiles
+                        )
+                        if not is_voice_profile:
                             for ep in params.get("EnumProfile", []):
                                 if ep.get("name") == "headset-head-unit":
-                                    msbc_idx = ep.get("index", 196865)
+                                    msbc_idx = ep.get("index")
+                                    if msbc_idx is not None:
+                                        subprocess.run(["wpctl", "set-profile", str(dev_id), str(msbc_idx)], capture_output=True, timeout=3)
                                     break
-                            subprocess.run(["wpctl", "set-profile", str(dev_id), str(msbc_idx)], capture_output=True, timeout=3)
         except Exception:
             pass
 
+        msg_parts = []
         if target_sink_id:
-            return "已自動將 PipeWire 音訊輸出切換為該耳麥並鎖定 16kHz mSBC"
+            msg_parts.append(f"耳麥揚聲器 (ID {target_sink_id})")
+        if target_source_id:
+            msg_parts.append(f"耳麥麥克風 (ID {target_source_id})")
+
+        if msg_parts:
+            return f"已自動將 PipeWire 預設導向 {' 與 '.join(msg_parts)}"
         return "PipeWire 已識別該藍牙音訊端點"
     except Exception as e:
-        return f"音訊輸出切換略過: {e}"
+        return f"音訊路由略過: {e}"
 
 
 def connect_default_device() -> Tuple[bool, str]:

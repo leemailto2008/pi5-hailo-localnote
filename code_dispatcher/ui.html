@@ -846,12 +846,18 @@ async function refreshSystem() {
   }
 }
 
+let lastBtData = null;
+
 function updateBtUI(b) {
   if (!b) return;
+  lastBtData = b;
   el.btChip.classList.toggle('off', !b.connected);
   el.btText.textContent = b.connected ? `耳麥 ${b.name || ''} 已連線` : '耳麥未連線';
   el.btDetail.textContent = b.connected ? `${b.name || ''} · 已連線` : '未連線。按「找耳麥 / 管理」。';
-  el.recBtn.disabled = !b.connected && state === 'idle';
+  if (state === 'idle') {
+    el.recBtn.disabled = false;
+    el.recBtn.classList.toggle('disconnected', !b.connected);
+  }
 }
 
 async function refreshBt() {
@@ -1588,6 +1594,11 @@ function updateMetricsUI(m) {
 
 el.recBtn.addEventListener('click', async () => {
   if (state === 'recording' || state === 'processing') return;
+  if (lastBtData && !lastBtData.connected) {
+    toast('⚠️ 耳麥未連線！請先至藍牙管理頁面連線耳麥', 3000);
+    openBtView();
+    return;
+  }
   try {
     el.recBtn.disabled = true;
     const durSec = +el.dur.value;

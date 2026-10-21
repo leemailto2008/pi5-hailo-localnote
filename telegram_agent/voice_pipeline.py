@@ -538,21 +538,29 @@ def text_to_speech(text: str, output_ogg_path: str, voice: str = DEFAULT_TTS_VOI
         return False
 
 
+def _ensure_process_affinities():
+    """Background helper to renice and taskset pipewire/bluetooth processes without blocking event loop."""
+    try:
+        subprocess.run(
+            "sudo renice -n -18 -p $(pgrep -d, -x 'bluetoothd|pipewire|wireplumber') 2>/dev/null; "
+            "for p in $(pgrep -x 'bluetoothd|pipewire|wireplumber'); do sudo taskset -apc 0,1 $p 2>/dev/null; done",
+            shell=True,
+            timeout=2
+        )
+    except Exception:
+        pass
+
+
 async def ensure_bluetooth_recording_ready() -> str:
     """
-    Ensure active Bluetooth headset is ready in mSBC mode and return exact PulseAudio source name.
-    Uses non-blocking pw-dump to parse PipeWire topology accurately.
+    Ensure PipeWire/WirePlumber and Bluetooth process affinities are isolated to CPU 0,1.
+    Verify and lock active Bluetooth headset profile to 16kHz mSBC / LE Audio wideband.
+    Returns the exact hardware source node to record from.
     Never interrupts an already active headset source.
     """
-    # 自動將藍牙與 PipeWire 關鍵音訊服務提升至實時優先級 (-18) 並綁定 CPU 0,1，杜絕 UART 封包丟失
+    # 異步非阻塞在背景執行實時優先級提升與 CPU 綁定，杜絕阻塞主事件迴圈 (0 延遲啟動錄音)
     try:
-        import subprocess
-        for p in ['bluetoothd', 'pipewire', 'wireplumber', 'pipewire-pulse']:
-            out = subprocess.getoutput(f"pgrep {p}")
-            for pid in out.split():
-                if pid.isdigit():
-                    subprocess.run(f"sudo renice -n -18 -p {pid} 2>/dev/null", shell=True)
-                    subprocess.run(f"sudo taskset -apc 0,1 {pid} 2>/dev/null", shell=True)
+        asyncio.create_task(asyncio.to_thread(_ensure_process_affinities))
     except Exception:
         pass
 
@@ -568,54 +576,56 @@ async def ensure_bluetooth_recording_ready() -> str:
         nodes = json.loads(stdout.decode("utf-8", errors="ignore"))
 
         bt_device_id = None
-        is_msbc_active = False
-        msbc_profile_index = 196865
 
-        # 1. 檢驗藍牙設備節點及其設定檔 (嚴格確保鎖定 16kHz mSBC 寬頻語音)
+        # 1. 檢驗藍牙設備節點及其設定檔 (嚴格確保鎖定 16kHz mSBC 寬頻語音或 LE Audio)
         for n in nodes:
             props = n.get("info", {}).get("props", {})
             if props.get("device.api") == "bluez5" and n.get("type") == "PipeWire:Interface:Device":
                 bt_device_id = n.get("id")
                 params = n.get("info", {}).get("params", {})
                 active_profiles = params.get("Profile", [])
-                is_msbc_active = any(p.get("name") == "headset-head-unit" for p in active_profiles)
+                is_voice_profile_active = any(
+                    p.get("name") in ("headset-head-unit", "bap-duplex", "bap-source", "hsp-hs")
+                    for p in active_profiles
+                )
 
+                msbc_profile_index = None
                 for ep in params.get("EnumProfile", []):
                     if ep.get("name") == "headset-head-unit":
-                        msbc_profile_index = ep.get("index", 196865)
+                        msbc_profile_index = ep.get("index")
                         break
+
+                # 僅在未啟用任何語音設定檔且明確支援 headset-head-unit 時切換 (杜絕 LE Audio 誤切斷線)
+                if bt_device_id and not is_voice_profile_active and msbc_profile_index is not None:
+                    print(f"[VoicePipeline] 將藍牙設備 {bt_device_id} 切換為 16kHz mSBC 模式 (Profile {msbc_profile_index})...")
+                    set_prof = await asyncio.create_subprocess_exec(
+                        "wpctl", "set-profile", str(bt_device_id), str(msbc_profile_index),
+                        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                    )
+                    await set_prof.communicate()
+                    await asyncio.sleep(0.3)
+
+                    # 重新獲取拓撲資訊
+                    proc2 = await asyncio.create_subprocess_exec(
+                        "pw-dump", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+                    )
+                    stdout2, _ = await proc2.communicate()
+                    nodes = json.loads(stdout2.decode("utf-8", errors="ignore"))
                 break
 
-        # 2. 若發現藍牙設備但未處於 mSBC 設定檔，立即強制切換至 headset-head-unit (杜絕 CVSD 8kHz 悶音)
-        if bt_device_id and not is_msbc_active:
-            print(f"[VoicePipeline] 強制將藍牙設備 {bt_device_id} 切換為 16kHz mSBC 模式 (Profile {msbc_profile_index})...")
-            set_prof = await asyncio.create_subprocess_exec(
-                "wpctl", "set-profile", str(bt_device_id), str(msbc_profile_index),
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-            )
-            await set_prof.communicate()
-            await asyncio.sleep(0.6)
-
-            # 重新獲取拓撲資訊
-            proc2 = await asyncio.create_subprocess_exec(
-                "pw-dump", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
-            )
-            stdout2, _ = await proc2.communicate()
-            nodes = json.loads(stdout2.decode("utf-8", errors="ignore"))
-
-        # 3. 尋找最佳藍牙 Source 節點 (優先鎖定原生 mSBC 16kHz 硬體節點，杜絕虛擬 Loopback 濾波降頻)
+        # 2. 尋找最佳藍牙 Source 節點 (優先鎖定原生寬頻硬體節點，杜絕虛擬 Loopback 濾波降頻)
         bt_source_node = None
         bt_source_id = None
 
-        # 第一優先：尋找原生硬體 mSBC SCO 節點 (Audio/Source/Internal 且 codec == msbc)
+        # 第一優先：尋找原生硬體 mSBC/LC3 SCO 節點 (bluez_input_internal)
         for n in nodes:
             props = n.get("info", {}).get("props", {})
             node_name = props.get("node.name", "")
             codec = props.get("api.bluez5.codec", "")
-            if codec == "msbc" or "bluez_input_internal" in node_name:
+            if "bluez_input_internal" in node_name:
                 bt_source_node = node_name
                 bt_source_id = n.get("id")
-                print(f"[VoicePipeline] 🎯 鎖定原生 16kHz mSBC 麥克風節點: {node_name} (ID: {bt_source_id}, Codec: {codec})")
+                print(f"[VoicePipeline] 🎯 鎖定原生藍牙麥克風節點: {node_name} (ID: {bt_source_id}, Codec: {codec})")
                 break
 
         # 第二優先：若無 internal 節點，則尋找一般藍牙 Source
@@ -624,9 +634,10 @@ async def ensure_bluetooth_recording_ready() -> str:
                 props = n.get("info", {}).get("props", {})
                 media_class = props.get("media.class", "")
                 node_name = props.get("node.name", "")
-                if "Audio/Source" in media_class and ("bluez_input" in node_name or "bluez" in node_name):
+                if "Audio/Source" in media_class and "bluez" in node_name:
                     bt_source_node = node_name
                     bt_source_id = n.get("id")
+                    print(f"[VoicePipeline] 🎯 鎖定藍牙 Source 節點: {node_name} (ID: {bt_source_id})")
                     break
 
         if bt_source_node and bt_source_id:
