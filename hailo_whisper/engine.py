@@ -240,12 +240,16 @@ class HailoWhisperEngine(WhisperEngineInterface):
         """Trim leading silence/background noise to prevent Whisper acoustic hallucination loops."""
         if audio is None or len(audio) < sr:
             return audio
+        # 2026-10-22 e2e 實測：把開頭靜音剪到只剩 200 ms 會讓 Whisper 誤判第一個字 (例：「測試的部分」→「estory的部分」)。
+        # 改為只在開頭靜音 >= 1.5 s 時修剪，且保留 500 ms 前導；同一測試集 CER 32.5% → 28.9%。
         frame_len = int(sr * 0.1)  # 100ms frames
         max_scan = min(len(audio) - frame_len, sr * 8)  # scan up to first 8 seconds
         for i in range(0, max_scan, frame_len):
             rms = np.sqrt(np.mean(audio[i : i + frame_len] ** 2))
             if rms > thresh:
-                lead_idx = max(0, i - int(sr * 0.2))  # preserve 200ms lead-in
+                if i < int(sr * 1.5):
+                    return audio
+                lead_idx = max(0, i - int(sr * 0.5))  # preserve 500ms lead-in
                 return audio[lead_idx:]
         return audio
 

@@ -585,6 +585,19 @@ async def ensure_bluetooth_recording_ready() -> str:
     Returns the exact hardware source node to record from.
     Never interrupts an already active headset source.
     """
+    # 🧪 E2E 測試注入點：若 /dev/shm/ln_force_source 存在，直接錄製其指定的 PipeWire 節點
+    # (例如 null sink 的 monitor)，供已知內容的測試音檔驅動完整流程。平常此檔不存在，行為不變。
+    try:
+        with open("/dev/shm/ln_force_source") as _f:
+            _forced = _f.read().strip()
+        if _forced:
+            print(f"[VoicePipeline] 🧪 TEST MODE: recording from forced source '{_forced}'")
+            return _forced
+    except FileNotFoundError:
+        pass
+    except Exception as _e:
+        print(f"[VoicePipeline] forced-source read error: {_e}")
+
     # 異步非阻塞在背景執行實時優先級提升與 CPU 綁定，杜絕阻塞主事件迴圈 (0 延遲啟動錄音)
     try:
         asyncio.create_task(asyncio.to_thread(_ensure_process_affinities))
@@ -696,181 +709,212 @@ async def record_audio_from_mic(
 ) -> bool:
     """
     Record audio from Bluetooth headset mic using ffmpeg with explicit hardware source routing.
-    Uses clean 16kHz resampling with highpass filter to eliminate sub-bass rumble and avoid clipping.
-    If vu_callback or pcm_chunk_callback is supplied, streams raw 16kHz PCM to stdout for 50ms VU and concurrent streaming STT chunk slicing.
+
+    Two-process pipeline (2026-10-22):
+      capture ffmpeg (PipeWire pulse -> raw 16 kHz s16le) -> Python ZeroSplicer -> encoder ffmpeg
+      (highpass/lowpass + libopus master OGG); the same spliced PCM feeds VU and streaming STT slices.
+
+    PipeWire 1.4.x bluez5 has no mSBC PLC: every mSBC decode failure underruns its decode buffer and
+    it re-buffers by emitting whole graph cycles of digital silence (~40 ms blocks). Ground truth
+    (btsnoop + libsbc) shows these blocks are inserted, not lost audio, so removing them before
+    filtering/encoding restores continuous speech (see audio_splice.py).
     Supports cancellation_event token for immediate hardware abort and finish_early_event for graceful early wrap-up.
     """
+    from audio_splice import ZeroSplicer, pause_cut_index
+
     source_node = await ensure_bluetooth_recording_ready()
 
-    cmd = [
+    cap_cmd = [
         "taskset", "-c", "0,1",
         "nice", "-n", "-18",
-        "ffmpeg", "-y",
+        "ffmpeg", "-nostdin", "-y",
         "-thread_queue_size", "16384",
         "-f", "pulse",
         "-ar", "16000",
         "-ac", "1",
         "-i", source_node,
         "-t", str(duration_sec),
-        "-af", "highpass=f=80,lowpass=f=7600",
+        "-f", "s16le",
+        "-ac", "1",
+        "-ar", "16000",
+        "pipe:1"
+    ]
+    enc_cmd = [
+        "ffmpeg", "-y",
+        "-f", "s16le",
         "-ar", "16000",
         "-ac", "1",
+        "-i", "pipe:0",
+        "-af", "highpass=f=80,lowpass=f=7600",
         "-c:a", "libopus",
         "-b:a", "64k",
         output_path
     ]
 
-    need_stdout_pcm = bool(vu_callback or pcm_chunk_callback)
-    if need_stdout_pcm:
-        cmd += [
-            "-t", str(duration_sec),
-            "-f", "s16le",
-            "-ac", "1",
-            "-ar", "16000",
-            "-c:a", "pcm_s16le",
-            "pipe:1"
-        ]
+    band_slices = [
+        (4, 13),    # 80-250 Hz (Sub-bass & fundamental pitch)
+        (13, 25),   # 250-500 Hz (Low-mid vowels)
+        (25, 50),   # 500-1000 Hz (Mid resonance)
+        (50, 100),  # 1000-2000 Hz (High-mid clarity)
+        (100, 175), # 2000-3500 Hz (Consonants & presence)
+        (175, 250), # 3500-5000 Hz (Sibilance & fricatives)
+        (250, 325), # 5000-6500 Hz (High harmonics)
+        (325, 380)  # 6500-7600 Hz (Brilliance & air)
+    ]
+    vu_frame_bytes = 1600  # 50ms @ 16kHz mono (800 samples * 2 bytes)
+    # STT 切片改為「停頓處切點」：在 [min, max] 秒內找能量最低處下刀，避免切在句中 (Whisper 輸入窗口 10 s)
+    slice_min_s = max(3.0, chunk_sec - 4.0)
+    slice_max_s = min(chunk_sec + 1.5, 9.5)
+    slice_max_bytes = int(slice_max_s * 32000)
+    splicer = ZeroSplicer(sr=16000)
+    chunk_buffer = bytearray()
+    vu_buffer = bytearray()
+    cap = None
+    enc = None
+
+    def _stop(proc, kill: bool = False):
+        if proc and proc.returncode is None:
+            try:
+                proc.kill() if kill else proc.terminate()
+            except Exception:
+                pass
+
+    async def _deliver(clean: bytes):
+        nonlocal chunk_buffer
+        if not clean:
+            return
+        # 1) master OGG encoder
+        if enc and enc.stdin and not enc.stdin.is_closing():
+            try:
+                enc.stdin.write(clean)
+                await enc.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError) as pipe_err:
+                print(f"[VoicePipeline] encoder pipe closed: {pipe_err}")
+        # 2) streaming STT slices
+        if pcm_chunk_callback:
+            chunk_buffer.extend(clean)
+            while len(chunk_buffer) >= slice_max_bytes:
+                window = np.frombuffer(bytes(chunk_buffer[:slice_max_bytes]), dtype="<i2")
+                cut = pause_cut_index(window, 16000, slice_min_s, slice_max_s) * 2
+                slice_data = bytes(chunk_buffer[:cut])
+                chunk_buffer = chunk_buffer[cut:]
+                try:
+                    if asyncio.iscoroutinefunction(pcm_chunk_callback):
+                        await pcm_chunk_callback(slice_data, False)
+                    else:
+                        pcm_chunk_callback(slice_data, False)
+                except Exception as c_err:
+                    print(f"[VoicePipeline] pcm_chunk_callback error: {c_err}")
+        # 3) VU meter (50 ms frames)
+        if vu_callback:
+            vu_buffer.extend(clean)
+            while len(vu_buffer) >= vu_frame_bytes:
+                frame = bytes(vu_buffer[:vu_frame_bytes])
+                del vu_buffer[:vu_frame_bytes]
+                samples = np.frombuffer(frame, dtype="<i2").astype(np.float32) / 32768.0
+                rms = float(np.sqrt(np.mean(samples ** 2)))
+                peak = float(np.max(np.abs(samples)))
+                db = float(20 * np.log10(max(1e-5, rms)))
+                level_pct = min(100, int(rms * 280))
+                fft_mag = np.abs(np.fft.rfft(samples))
+                bands = []
+                for s_start, s_end in band_slices:
+                    b_val = float(np.mean(fft_mag[s_start:s_end])) if s_end <= len(fft_mag) else 0.0
+                    bands.append(min(100, int(b_val * 65)))
+                status_label = "active" if peak >= 0.03 else ("weak" if peak >= 0.01 else "silent")
+                vu_payload = {
+                    "rms": round(rms, 4),
+                    "peak": round(peak, 4),
+                    "db": round(db, 1),
+                    "level_pct": level_pct,
+                    "status": status_label,
+                    "bands": bands,
+                    "active": True
+                }
+                try:
+                    if asyncio.iscoroutinefunction(vu_callback):
+                        await vu_callback(vu_payload)
+                    else:
+                        vu_callback(vu_payload)
+                except Exception as v_err:
+                    print(f"[VoicePipeline] vu_callback error: {v_err}")
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE if vu_callback else asyncio.subprocess.DEVNULL,
+        cap = await asyncio.create_subprocess_exec(
+            *cap_cmd,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL
+        )
+        enc = await asyncio.create_subprocess_exec(
+            *enc_cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL
         )
 
         if on_proc_started:
             try:
-                on_proc_started(proc)
+                on_proc_started(cap)
             except Exception:
                 pass
 
-        if need_stdout_pcm and proc.stdout:
-            chunk_bytes = 1600  # 50ms @ 16kHz mono (800 samples * 2 bytes)
-            target_slice_bytes = int(chunk_sec * 32000)
-            chunk_buffer = bytearray()
+        stopping = False
+        while True:
+            if not stopping and cancellation_event and cancellation_event.is_set():
+                print("[VoicePipeline] Microphone recording aborting due to cancellation event.")
+                _stop(cap, kill=True)
+                _stop(enc, kill=True)
+                return False
 
-            band_slices = [
-                (4, 13),    # 80-250 Hz (Sub-bass & fundamental pitch)
-                (13, 25),   # 250-500 Hz (Low-mid vowels)
-                (25, 50),   # 500-1000 Hz (Mid resonance)
-                (50, 100),  # 1000-2000 Hz (High-mid clarity)
-                (100, 175), # 2000-3500 Hz (Consonants & presence)
-                (175, 250), # 3500-5000 Hz (Sibilance & fricatives)
-                (250, 325), # 5000-6500 Hz (High harmonics)
-                (325, 380)  # 6500-7600 Hz (Brilliance & air)
-            ]
+            if not stopping and finish_early_event and finish_early_event.is_set():
+                print("[VoicePipeline] Microphone recording finishing early upon user request.")
+                _stop(cap)          # ffmpeg flushes its output on SIGTERM; keep draining until EOF
+                stopping = True
+
             try:
-                while True:
-                    if cancellation_event and cancellation_event.is_set():
-                        print("[VoicePipeline] Microphone recording aborting due to cancellation event.")
-                        try:
-                            proc.terminate()
-                        except Exception:
-                            pass
-                        return False
+                chunk = await asyncio.wait_for(cap.stdout.read(3200), timeout=0.25)
+            except asyncio.TimeoutError:
+                continue
+            if not chunk:
+                break
+            await _deliver(splicer.feed(chunk))
 
-                    if finish_early_event and finish_early_event.is_set():
-                        print("[VoicePipeline] Microphone recording finishing early upon user request.")
-                        try:
-                            proc.terminate()
-                        except Exception:
-                            pass
-                        break
+        await _deliver(splicer.flush())
 
-                    try:
-                        chunk = await asyncio.wait_for(proc.stdout.read(chunk_bytes), timeout=0.25)
-                    except asyncio.TimeoutError:
-                        if cancellation_event and cancellation_event.is_set():
-                            print("[VoicePipeline] Microphone recording aborting due to cancellation event (timeout).")
-                            try:
-                                proc.terminate()
-                                proc.kill()
-                            except Exception:
-                                pass
-                            return False
-                        if finish_early_event and finish_early_event.is_set():
-                            print("[VoicePipeline] Microphone recording finishing early upon user request (timeout).")
-                            try:
-                                proc.terminate()
-                            except Exception:
-                                pass
-                            break
-                        continue
-                    if not chunk:
-                        break
+        # 錄音退出後派發尾端剩餘音訊（>=0.5 秒）
+        if pcm_chunk_callback and len(chunk_buffer) >= 16000:
+            tail_data = bytes(chunk_buffer)
+            chunk_buffer.clear()
+            try:
+                if asyncio.iscoroutinefunction(pcm_chunk_callback):
+                    await pcm_chunk_callback(tail_data, True)
+                else:
+                    pcm_chunk_callback(tail_data, True)
+            except Exception as c_err:
+                print(f"[VoicePipeline] pcm_chunk_callback tail error: {c_err}")
 
-                    # 收集滑動切片 PCM
-                    if pcm_chunk_callback:
-                        chunk_buffer.extend(chunk)
-                        if len(chunk_buffer) >= target_slice_bytes:
-                            slice_data = bytes(chunk_buffer[:target_slice_bytes])
-                            chunk_buffer = chunk_buffer[target_slice_bytes:]
-                            try:
-                                if asyncio.iscoroutinefunction(pcm_chunk_callback):
-                                    await pcm_chunk_callback(slice_data, False)
-                                else:
-                                    pcm_chunk_callback(slice_data, False)
-                            except Exception as c_err:
-                                print(f"[VoicePipeline] pcm_chunk_callback error: {c_err}")
+        if splicer.runs:
+            print(f"[VoicePipeline] 🩹 zero-splice: removed {splicer.runs} PipeWire-inserted silence runs "
+                  f"({splicer.removed_ms / 1000:.2f}s) before encoding/STT")
 
-                    # VU 表計算
-                    if vu_callback:
-                        num_samples = len(chunk) // 2
-                        if num_samples >= 160:
-                            samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
-                            rms = float(np.sqrt(np.mean(samples ** 2)))
-                            peak = float(np.max(np.abs(samples)))
-                            db = float(20 * np.log10(max(1e-5, rms)))
-                            level_pct = min(100, int(rms * 280))
+        # Finalize encoder (EOF on stdin -> ffmpeg writes OGG trailer)
+        if enc.stdin and not enc.stdin.is_closing():
+            enc.stdin.close()
+        try:
+            await asyncio.wait_for(enc.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            print("[VoicePipeline] encoder did not finish in 30s, killing")
+            _stop(enc, kill=True)
+        try:
+            await asyncio.wait_for(cap.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            _stop(cap, kill=True)
 
-                            # 8-band FFT spectrum
-                            fft_mag = np.abs(np.fft.rfft(samples))
-                            bands = []
-                            for s_start, s_end in band_slices:
-                                b_val = float(np.mean(fft_mag[s_start:s_end])) if s_end <= len(fft_mag) else 0.0
-                                bands.append(min(100, int(b_val * 65)))
-
-                            status_label = "active" if peak >= 0.03 else ("weak" if peak >= 0.01 else "silent")
-                            vu_payload = {
-                                "rms": round(rms, 4),
-                                "peak": round(peak, 4),
-                                "db": round(db, 1),
-                                "level_pct": level_pct,
-                                "status": status_label,
-                                "bands": bands,
-                                "active": True
-                            }
-                            if asyncio.iscoroutinefunction(vu_callback):
-                                await vu_callback(vu_payload)
-                            else:
-                                vu_callback(vu_payload)
-
-                # 錄音退出後派發尾端剩餘音訊（>=0.5 秒）
-                if pcm_chunk_callback and len(chunk_buffer) >= 16000:
-                    tail_data = bytes(chunk_buffer)
-                    chunk_buffer.clear()
-                    try:
-                        if asyncio.iscoroutinefunction(pcm_chunk_callback):
-                            await pcm_chunk_callback(tail_data, True)
-                        else:
-                            pcm_chunk_callback(tail_data, True)
-                    except Exception as c_err:
-                        print(f"[VoicePipeline] pcm_chunk_callback tail error: {c_err}")
-
-            except Exception as stream_err:
-                print(f"[VoicePipeline] Streaming loop notice: {stream_err}")
-
-        # Check cancellation before waiting
         if cancellation_event and cancellation_event.is_set():
-            try:
-                proc.terminate()
-            except Exception:
-                pass
             return False
 
-        await proc.wait()
-        is_early = bool(finish_early_event and finish_early_event.is_set())
-        if (proc.returncode in (0, 255, -15) or is_early) and os.path.exists(output_path) and os.path.getsize(output_path) > 500:
+        if enc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 500:
             return True
 
         # Fallback to default if explicit node failed
@@ -898,6 +942,10 @@ async def record_audio_from_mic(
     except Exception as e:
         print(f"[VoicePipeline] Microphone recording failed: {e}")
         return False
+    finally:
+        # Covers asyncio task cancellation (CancelledError) and any early exit
+        _stop(cap, kill=True)
+        _stop(enc, kill=True)
 
 
 def transcribe_pcm_chunk(pcm_bytes: bytes) -> Optional[str]:

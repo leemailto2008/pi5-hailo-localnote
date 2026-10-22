@@ -38,6 +38,34 @@ AUDIO_CACHE_DIR = get_in_memory_cache_dir()
 from llm_backend import achat_complete, aiter_chat_stream, LLMError
 
 
+
+def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) -> str:
+    """LLM 紀要後處理：移除重複行 (小模型偶發重複迴圈直到 num_predict 用盡)，並限制摘要/決議點數。"""
+    limits = max_items or {"摘要": 5, "決議": 3}
+    out, seen, section, count = [], set(), None, 0
+    for line in (md or "").splitlines():
+        s = line.strip()
+        if s.startswith("## "):
+            section, count = s[3:].strip(), 0
+            out.append(s)
+            continue
+        if not s:
+            out.append("")
+            continue
+        is_item = s.startswith(("-", "*", "•")) or re.match(r"^\d+[\.、)]", s) is not None
+        is_row = s.startswith("|") and not set(s) <= set("|-: ")
+        if is_item or is_row:
+            if s in seen:
+                continue
+            seen.add(s)
+        if is_item:
+            count += 1
+            lim = limits.get(section or "")
+            if lim and count > lim:
+                continue
+        out.append(line.rstrip())
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+
 class MeetingResult(BaseModel):
     job: str
     title: str = "會議紀要"
@@ -367,8 +395,9 @@ class MeetingJobManager:
         if self.status.state in ("recording", "processing"):
             raise ValueError(f"盒子目前正處於 {self.status.state} 狀態，請等待完成或點擊取消。")
 
-        if bypass_summary is not None:
-            self.bypass_summary = bool(bypass_summary)
+        # 單次請求的 bypass_summary 只作用於本次錄音，不覆寫全域設定 (全域設定僅由 /api/config/bypass_summary 修改)。
+        # 2026-10-22：舊行為會把一次性的 bypass=true 寫回全域，導致之後從 UI 發起的錄音都被跳過 AI 總結。
+        job_bypass = self.bypass_summary if bypass_summary is None else bool(bypass_summary)
 
         # Capture running loop for thread-safe cross-thread calls
         try:
@@ -394,7 +423,7 @@ class MeetingJobManager:
             job=job_id,
             msg="正在進行耳麥錄音..."
         )
-        self._current_task = asyncio.create_task(self._pipeline_worker(job_id, duration_sec, self.bypass_summary))
+        self._current_task = asyncio.create_task(self._pipeline_worker(job_id, duration_sec, job_bypass))
         self.notify_status_update()
         return job_id
 
@@ -833,6 +862,8 @@ class MeetingJobManager:
             total_lat = round(time.time() - rec_finish_time, 2)
             self.status.metrics["llm_status"] = "done"
             self.status.metrics["llm_duration"] = llm_dur
+            _tok = self.status.metrics.get("llm_tokens") or 0
+            self.status.metrics["llm_tps"] = round(_tok / llm_dur, 2) if llm_dur and _tok else 0.0
             self.status.metrics["total_latency"] = max(0.0, total_lat)
 
             if self._cancellation_token.is_set():
@@ -1044,25 +1075,21 @@ class MeetingJobManager:
         import json
         from ws_manager import ws_manager
 
-        prompt = (
-            "你是專業筆記與會議記錄員。請嚴格根據下面的逐字稿，使用台灣繁體中文輸出結構化紀要。\n"
-            "請嚴格依序輸出以下三個區塊標題（包含 ## 符號），嚴禁加入任何開場白或問候語：\n\n"
-            "## 摘要\n"
-            "1. （核心重點 1，每條不超過 30 字，忠實呈現對話討論實況）\n"
-            "2. （核心重點 2）\n\n"
-            "## 待辦\n"
-            "| 事項 | 負責人 | 時間 |\n"
-            "| --- | --- | --- |\n"
-            "| （若無具體待辦請填「無具體待辦事項」） | 待定 | 待定 |\n\n"
-            "## 決議\n"
-            "1. （只寫真正定案的事項；若純為經驗交流請寫「無特定決議事項（經驗分享與交流）」）\n\n"
-            f"逐字稿內容：\n{transcript}"
+        # 2026-10-22 e2e 提示詞 A/B (Hailo qwen3:1.7b，同一份含辨識錯誤的逐字稿)：
+        # 舊版把「（核心重點 1…）」等佔位說明寫在輸出範本內，小模型會照抄且 num_predict=220 讓待辦/決議被截斷 (事實命中 6/9)；
+        # 改為規則放 system、範本不含佔位文字、摘要依議題分點並要求保留數字/日期/金額/人名 → 8/9。
+        system_msg = (
+            "你是會議記錄員，只用台灣繁體中文輸出精簡的 Markdown 會議紀要，依序只有三段：## 摘要、## 待辦、## 決議。"
+            "規則：摘要依議題分點，每個議題一點，最多 5 點，每點 40 字以內，並寫出該議題的關鍵數字、日期、金額與人名；"
+            "待辦用表格「| 事項 | 負責人 | 時間 |」每個待辦一列，沒有待辦就寫一列「| 無 | - | - |」；"
+            "決議最多 3 點，每點 30 字以內，沒有就寫「- 無」。不要開場白，不要解釋，不要重複規則，三段寫完就結束。"
         )
+        prompt = f"逐字稿：\n{transcript}\n\n請輸出會議紀要："
 
         accumulated = []
         used_backend_label = "n/a"
         try:
-            async for token, _done, backend in aiter_chat_stream(prompt, temperature=0.2, num_predict=220, timeout=90.0):
+            async for token, _done, backend in aiter_chat_stream(prompt, system=system_msg, temperature=0.2, num_predict=380, timeout=150.0):
                 used_backend_label = backend.label
                 if self._cancellation_token and self._cancellation_token.is_set():
                     print("[MeetingMinutes] LLM generation aborted by cancellation token.")
@@ -1080,7 +1107,7 @@ class MeetingJobManager:
                             "accumulated": curr_text
                         })
 
-            full_text = "".join(accumulated).strip()
+            full_text = clean_summary_markdown("".join(accumulated))
             if full_text:
                 self.status.summary_stream = full_text
                 self.status.metrics["llm_tokens"] = len(accumulated)
@@ -1097,7 +1124,7 @@ class MeetingJobManager:
             print(f"[MeetingMinutes] Streaming LLM error ({used_backend_label}): {e}")
 
         if accumulated:
-            return "".join(accumulated).strip()
+            return clean_summary_markdown("".join(accumulated))
         return "## 摘要\n- 會議內容已完整保留於逐字稿\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 確認逐字稿細節 | 全體 | 待定 |\n\n## 決議\n- 錄音與逐字稿存檔完成"
 
     async def transcribe_region(self, job_id: Optional[str], start_sec: float, end_sec: float) -> Dict[str, Any]:

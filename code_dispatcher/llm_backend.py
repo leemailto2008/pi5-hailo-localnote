@@ -39,6 +39,9 @@ CPU_MODEL = "qwen2.5:3b-opt"
 CPU_FALLBACK_MODEL = "qwen2.5:3b"
 
 PREFERRED_BACKEND = os.environ.get("PI5_LLM_BACKEND", "hailo").strip().lower()
+# hailo-ollama keep_alive (seconds, integer only). 0 = release the NPU right after each request so that
+# HailoWhisper (STT) can open the VDevice during recording. Override with env PI5_HAILO_KEEP_ALIVE.
+HAILO_KEEP_ALIVE = int(os.environ.get("PI5_HAILO_KEEP_ALIVE", "0"))
 _HEALTH_TTL_SEC = 20.0
 
 
@@ -94,6 +97,10 @@ class LLMBackend:
         }
         if self.is_hailo:
             payload["think"] = False
+            # NPU 仲裁 (2026-10-22 e2e 實測)：Hailo-10H 的 VDevice 為單一行程獨占。hailo-ollama 未帶 keep_alive 時
+            # 模型常駐 NPU 5 分鐘，期間 HailoWhisper 一律 HAILO_OUT_OF_PHYSICAL_DEVICES → STT 全部退回 CPU (錄音中 CPU ~100%)。
+            # keep_alive=0：回應完成後約 3 秒即卸載並釋放 NPU，代價為每次冷載入約 +7~8 秒。
+            payload["keep_alive"] = HAILO_KEEP_ALIVE
         else:
             payload["keep_alive"] = "24h"
             options["num_thread"] = 4
