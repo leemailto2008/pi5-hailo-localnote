@@ -551,6 +551,33 @@ def _ensure_process_affinities():
         pass
 
 
+async def _wait_for_live_audio(source_node: str, attempts: int = 4, probe_sec: float = 0.6) -> bool:
+    """
+    Probe the PipeWire source until it delivers non-zero PCM (SCO link established).
+    Returns True when live audio was observed; False after all attempts (caller still records).
+    """
+    for i in range(1, attempts + 1):
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-nostdin", "-v", "error",
+                "-f", "pulse", "-i", source_node, "-t", str(probe_sec),
+                "-f", "s16le", "-ac", "1", "-ar", "16000", "pipe:1",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+            )
+            pcm, _ = await asyncio.wait_for(proc.communicate(), timeout=probe_sec + 3.0)
+        except (asyncio.TimeoutError, OSError) as e:
+            print(f"[VoicePipeline] SCO probe {i}/{attempts} failed: {e}")
+            pcm = b""
+        if pcm and any(b != 0 for b in pcm):
+            if i > 1:
+                print(f"[VoicePipeline] SCO link live after {i} probes.")
+            return True
+        print(f"[VoicePipeline] SCO probe {i}/{attempts}: source '{source_node}' silent, retrying...")
+        await asyncio.sleep(1.0)
+    print(f"[VoicePipeline] ⚠️ source '{source_node}' still silent after {attempts} probes; recording anyway.")
+    return False
+
+
 async def ensure_bluetooth_recording_ready() -> str:
     """
     Ensure PipeWire/WirePlumber and Bluetooth process affinities are isolated to CPU 0,1.
@@ -646,6 +673,9 @@ async def ensure_bluetooth_recording_ready() -> str:
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
             )
             await set_def.communicate()
+            # SCO 鏈路要等第一個 client 連上節點才會建立；profile 剛切換或耳麥剛重連時，
+            # ffmpeg 若立刻開錄會錄到整段數位靜音 (2026-10-22 實測)。先以短探測確認有活音訊。
+            await _wait_for_live_audio(bt_source_node)
             return bt_source_node
 
     except Exception as e:
