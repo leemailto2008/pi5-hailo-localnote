@@ -45,7 +45,7 @@
 
 ## 3. 樹莓派主機環境與 SSH 連線資訊 (Raspberry Pi 5 Environment)
 
-- **硬體平台:** Raspberry Pi 5 (raspi543: 16GB RAM / raspi678: 8GB RAM), Debian 13 (Trixie)
+- **硬體平台:** Raspberry Pi 5 (raspi543: 16GB RAM / raspi678: 8GB RAM), Debian 13 (Trixie), kernel 6.18.50 (raspi543 於 2026-10-22 升級；Hailo 驅動 `hailo1x_pci` 走 DKMS)
 - **網路 IP 位址 (兩台主機):**
   - `raspi543` 家用 Wi-Fi (STA): `192.168.50.229` (Web UI: `http://192.168.50.229:8000/`，Uvicorn 實際監聽 80，由 `pi5-port8000-proxy.service` 轉發)
   - `raspi678` 家用 Wi-Fi (STA): `192.168.50.228`（常處於熱點模式供測試人員使用）
@@ -108,6 +108,15 @@
 - 並行請求會在 server 端排隊（不會錯），但會拉長 TTFT。
 - `curl` 測試務必帶 `-H "Content-Type: application/json"`，否則 oatpp 回 `No suitable mapper`。
 
+### ⚠️ [重點八] 藍牙耳麥錄音靜音/破碎的真正根因：mSBC (EDR 2-EV3) 位元錯誤 → 強制 CVSD (2026-10-22 實測結案)
+- **症狀:** 錄音檔 20–70% 樣本為數位零值（100–500ms 整段空洞），wireplumber 大量 `spa.bluez5.source.sco: decode failed: -3`，Whisper 輸出幻覺。
+- **已排除（全部實測）:** CPU 爭搶、Wi-Fi 共存（含完全關閉）、PipeWire/bluez/核心版本、Hailo HAT（拆除仍壞）、PCIe Gen1/ASPM、sniff 模式、SCO 雙向保活、AFH 頻道圖、耳麥本身（iPhone 錄音乾淨）。
+- **硬證據:** btmon 顯示 SCO 封包 1333/10s **一個不少**地到達主機；但開啟 Erroneous Data Reporting (`hcitool cmd 0x03 0x005B 01`) 後控制器標記 **65% 封包 pkt_status=1（資料損壞）**；payload 的 mSBC H2 標頭有 1–3 bit 隨機錯誤、SBC CRC 失敗。即此 CYW43455 ↔ 耳麥鏈路的 **EDR π/4-DQPSK (2-EV3)** 封包位元錯誤率過高，mSBC 只能走 2-EV3，解碼失敗即補零。
+- **解法:** `deploy/wireplumber.conf.d/51-bluez-cvsd.conf` → `bluez5.enable-msbc = false`，HFP 固定 **CVSD（基本速率 GFSK EV3，8kHz）**。profile 名稱仍為 `headset-head-unit`，`voice_pipeline.ensure_bluetooth_recording_ready()` 不需修改。實測零值降至 2–20%，逐字稿恢復可讀。
+- **注意:** `hcitool rssi` 對 BR/EDR 回傳的是相對黃金接收範圍的差值，不是 dBm；此板子回報值不隨距離變化，不可作為訊號強度依據。
+- **殘餘限制:** CVSD 下仍有 10–20% 封包 `pkt_status=2`（無資料）→ 零值空洞最長可達 1s。這是該射頻鏈路的物理上限；要再改善只能換射頻路徑（USB 藍牙 dongle）或換耳麥。
+- **除錯工具:** `tools/pi_scostat` 系列腳本（btsnoop 解析 H2 標頭/CRC/旗標）、`/tmp/analyze.py`（零值統計）。
+
 ---
 
 ## 5. 目錄與模組結構對照 (Module Directory Mapping)
@@ -116,5 +125,6 @@
 - `models/`: Ollama 口譯模型定義檔 (`Modelfile.qwen2.5-3b-opt`)、自動預熱腳本 (`setup_models.sh`) 與模型 Manifests 清單。
 - `gpio_driver/`: 樹莓派 5 實體微動按鍵與雙色 LED 狀態指示驅動程式 (`key_led_driver.py`)。
 - `telegram_agent/`: Telegram 語音助理 (`agent.py`)、無螢幕藍牙配對管理模組 (`bluetooth_manager.py`) 與自我進化引擎。
+- `deploy/`: 樹莓派系統層設定檔（WirePlumber CVSD 強制、systemd 日誌 drop-in），安裝方式見各檔案開頭註解。
 - `hotspot.md`: 戶外獨立熱點方案與 nftables 防火牆封包隔離設定指引。
 - `todo_tasks.md` & `SPEC.md`: 系統工程規格文件與 30 項模組改良任務追蹤清單。
