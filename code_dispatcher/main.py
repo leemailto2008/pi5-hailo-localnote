@@ -630,6 +630,7 @@ def get_bt_status() -> Dict[str, Any]:
         connected_name = None
         battery_level = None
         rssi = None
+        rssi_kind = None  # "dbm" (BlueZ RSSI property) | "golden_delta" (HCI Read_RSSI: dB relative to Golden Receive Power Range)
         signal_level_pct = 0
         link_quality = 0
 
@@ -669,6 +670,7 @@ def get_bt_status() -> Dict[str, Any]:
             m_rssi = re.search(r"RSSI:\s*(-?\d+)", res_dev_info.stdout)
             if m_rssi:
                 rssi = int(m_rssi.group(1))
+                rssi_kind = "dbm"
 
             # 錄音未進行時，若 BlueZ 未回報 RSSI 且具備 hcitool，嘗試安全獲取
             if rssi is None and not is_any_recording_active():
@@ -677,12 +679,17 @@ def get_bt_status() -> Dict[str, Any]:
                     m_h_rssi = re.search(r"RSSI return value:\s*(-?\d+)", res_hcitool.stdout)
                     if m_h_rssi:
                         rssi = int(m_h_rssi.group(1))
+                        # NOTE: for BR/EDR links HCI Read_RSSI is NOT dBm. It is the offset from the
+                        # Golden Receive Power Range: 0 = inside the range (ideal), negative = dB below it.
+                        rssi_kind = "golden_delta"
                 except Exception:
                     pass
 
-            # 計算訊號百分比 (若有 RSSI 則依 -100 ~ -40 dBm 轉換；若無則依連線狀態給予預設值)
-            if rssi is not None:
+            # 計算訊號百分比：dBm 依 -100 ~ -40 轉換；golden_delta 以 0 為滿分、每低 1 dB 扣 3%
+            if rssi is not None and rssi_kind == "dbm":
                 signal_level_pct = max(10, min(100, int((rssi + 100) * 1.8)))
+            elif rssi is not None and rssi_kind == "golden_delta":
+                signal_level_pct = max(5, min(100, 100 + rssi * 3)) if rssi <= 0 else 100
             else:
                 signal_level_pct = 90
             link_quality = int(signal_level_pct * 2.55)
@@ -709,7 +716,8 @@ def get_bt_status() -> Dict[str, Any]:
                         "is_default": is_def,
                         "auto_connect": auto_conn,
                         "battery_level": battery_level if is_conn else None,
-                        "rssi": rssi if is_conn else None
+                        "rssi": rssi if is_conn else None,
+                        "rssi_kind": rssi_kind if is_conn else None
                     })
         except Exception as e_t:
             logger.warning(f"Error fetching trusted devices: {e_t}")
@@ -723,6 +731,7 @@ def get_bt_status() -> Dict[str, Any]:
             "link_quality": link_quality,
             "signal_level_pct": signal_level_pct,
             "rssi": rssi,
+            "rssi_kind": rssi_kind,
             "state_hash": state_hash,
             "default_mac": config.get("default_mac"),
             "default_name": config.get("default_name"),

@@ -877,6 +877,18 @@ function getRssiQualityText(rssi) {
   return '微弱';
 }
 
+// HCI Read_RSSI on a BR/EDR link is NOT dBm: it is the dB offset from the controller's
+// Golden Receive Power Range (0 = inside range = ideal; negative = that many dB below it).
+function formatRssi(rssi, kind) {
+  if (rssi == null) return '';
+  if (kind === 'golden_delta') {
+    if (rssi >= 0) return '鏈路 0 dB (黃金範圍內)';
+    if (rssi >= -10) return `鏈路 ${rssi} dB (略低於黃金範圍)`;
+    return `鏈路 ${rssi} dB (低於黃金範圍，訊號弱)`;
+  }
+  return `${rssi} dBm (${getRssiQualityText(rssi)})`;
+}
+
 function updateBtHubUI(b) {
   if (!b) return;
   const conn = !!b.connected;
@@ -903,9 +915,8 @@ function updateBtHubUI(b) {
   // 訊號強度顯示
   if (conn) {
     el.hubSignalPill.className = 'chip';
-    if (b.rssi != null && b.rssi !== 0) {
-      const q = getRssiQualityText(b.rssi);
-      el.hubSignalVal.textContent = `${b.rssi} dBm (${q})`;
+    if (b.rssi != null) {
+      el.hubSignalVal.textContent = formatRssi(b.rssi, b.rssi_kind);
     } else if (b.signal_level_pct) {
       el.hubSignalVal.textContent = `訊號良好 (${b.signal_level_pct}%)`;
     } else {
@@ -945,8 +956,8 @@ function renderTrustedDevices(list) {
     const batBadge = (isConn && dev.battery_level != null)
       ? `<span class="chip ${dev.battery_level <= 20 ? 'err' : 'out'}" style="font-size:11px">🔋 ${dev.battery_level}%</span>`
       : '';
-    const rssiBadge = (isConn && dev.rssi)
-      ? `<span class="chip" style="font-size:11px">📶 ${dev.rssi} dBm</span>`
+    const rssiBadge = (isConn && dev.rssi != null)
+      ? `<span class="chip" style="font-size:11px">📶 ${formatRssi(dev.rssi, dev.rssi_kind)}</span>`
       : '';
     return `
       <div class="bt-item">
