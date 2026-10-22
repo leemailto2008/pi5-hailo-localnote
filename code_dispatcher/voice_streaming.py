@@ -154,21 +154,13 @@ class StreamingVoiceSession:
                 pass
 
     async def _speculative_prewarm(self, text: str):
-        """Speculative pre-warm of Ollama weights while recording is ongoing."""
+        """Speculative pre-warm of the active LLM backend's weights while recording is ongoing."""
         def _hit():
+            from llm_backend import chat_complete, LLMError
             try:
-                requests.post(
-                    "http://127.0.0.1:11434/api/generate",
-                    json={
-                        "model": "qwen2.5:3b-opt",
-                        "prompt": f"Translate to English: {text[:30]}",
-                        "stream": False,
-                        "keep_alive": "24h"
-                    },
-                    timeout=15
-                )
-            except Exception:
-                pass
+                chat_complete(text[:30], system="Translate to English. Output English only.", num_predict=8, timeout=15)
+            except LLMError as e:
+                print(f"[StreamingSession {self.session_id}] speculative prewarm skipped: {e}")
         await asyncio.to_thread(_hit)
 
     async def _monitor_and_transcribe_loop(self):
@@ -293,50 +285,31 @@ class StreamingVoiceSession:
         if self.full_text:
             await self.emit_event("translating", {
                 "stage": "queueing",
-                "message": "已排入本地 Qwen 3B 佇列，正在連線大模型服務..."
+                "message": "已排入本地 LLM 佇列 (Hailo-10H Qwen3 優先)，正在連線大模型服務..."
             })
             tr_start = time.time()
 
-            prompt = (
+            system_prompt = (
                 "You are a professional bilingual interpreter. "
-                "Translate the following Traditional Chinese speech into natural, fluent, idiomatic English. "
-                "Output ONLY the translated English sentence without explanations, notes, or Chinese characters:\n\n"
-                f"{self.full_text}"
+                "Translate the user's Traditional Chinese speech into natural, fluent, idiomatic English. "
+                "Output ONLY the translated English text without explanations, notes, or Chinese characters."
             )
 
             token_queue = asyncio.Queue()
             loop = asyncio.get_running_loop()
 
             def run_stream():
+                from llm_backend import iter_chat_stream, LLMError
                 try:
-                    with requests.post(
-                        "http://127.0.0.1:11434/api/generate",
-                        json={
-                            "model": "qwen2.5:3b-opt",
-                            "prompt": prompt,
-                            "stream": True,
-                            "options": {
-                                "temperature": 0.1,
-                                "top_p": 0.9,
-                                "num_predict": 128
-                            },
-                            "keep_alive": "24h"
-                        },
-                        stream=True,
-                        timeout=40
-                    ) as resp:
-                        for line in resp.iter_lines():
-                            if line:
-                                try:
-                                    chunk = json.loads(line.decode("utf-8"))
-                                    tok = chunk.get("response", "")
-                                    is_done = chunk.get("done", False)
-                                    asyncio.run_coroutine_threadsafe(token_queue.put((tok, is_done)), loop)
-                                    if is_done:
-                                        break
-                                except Exception:
-                                    pass
-                except Exception as err:
+                    for tok, is_done, backend in iter_chat_stream(
+                        self.full_text, system=system_prompt,
+                        temperature=0.1, top_p=0.9, num_predict=160, timeout=40
+                    ):
+                        asyncio.run_coroutine_threadsafe(token_queue.put((tok, is_done)), loop)
+                        if is_done:
+                            print(f"[StreamingSession {self.session_id}] Translation served by {backend.label}")
+                            break
+                except LLMError as err:
                     print(f"[StreamingSession {self.session_id}] Translation stream error: {err}")
                 finally:
                     asyncio.run_coroutine_threadsafe(token_queue.put((None, True)), loop)

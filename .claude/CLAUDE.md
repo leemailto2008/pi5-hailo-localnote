@@ -83,7 +83,9 @@
 
 ### ⚠️ [重點四] 即時串流分塊轉譯與打字機動效 (Streaming STT & Speculative LLM)
 - 單路 segment 切片錄音 (6s/chunk)，錄音結束後以 ffmpeg concat demuxer copy 合併母帶。
-- Ollama `qwen2.5:3b-opt` 專為雙語口譯最佳化（System Prompt 約束僅輸出英文、temperature 0.2），首字延遲 TTFT 僅 0.18 秒，以 SSE 事件即時逐 Token 串流輸出並顯示 TPS 速率。
+- **LLM 後端統一走 `code_dispatcher/llm_backend.py`**（2026-10-22 起）：`hailo`（hailo-ollama `127.0.0.1:11435` / `qwen3:1.7b` on Hailo-10H，CPU 歸零）優先，健康檢查 20s 快取，失敗自動退避 `cpu`（Ollama `11434` / `qwen2.5:3b-opt` → `qwen2.5:3b`）。環境變數 `PI5_LLM_BACKEND=cpu` 可強制切回。`/health` 回傳 `llm_backend` 顯示當前後端。
+- 實測效能：Hailo qwen3:1.7b TTFT ≈ 0.6s、≈ 4.5 tok/s；CPU qwen2.5:3b-opt TTFT ≈ 0.2s、≈ 6 tok/s。**Hailo 版的價值是 CPU 零占用（藍牙零爭搶），不是速度。**
+- 所有 LLM 呼叫一律用 `chat_complete / iter_chat_stream / achat_complete / aiter_chat_stream`，嚴禁再直接 `requests.post("…11434/api/generate")`。
 
 ### ⚠️ [重點五] 手機端 Web 控制台最佳化 (Mobile Responsive Web UX)
 - **文字捲軸 (Scrollbar):** 語音轉錄與即時英文雙語卡片設定 `max-height: 165px; overflow-y: auto;`，並在 SSE 更新時自動 `scrollTop = scrollHeight` 平滑跟隨最新文字。
@@ -98,11 +100,19 @@
 - **順序原則:** `pair` 成功後才 `trust`，杜絕 trusted-but-unpaired 幽靈。
 - **除錯工具:** `tools/pi_run.cmd <ip> <script.sh>`、`tools/pi_push.cmd <ip> <local> <remote> [script.sh]`，輸出在 `tools/pi_probe_out/`（已 gitignore）。
 
+### ⚠️ [重點七] hailo-ollama (0.5.1) API 相容性陷阱 (2026-10-22 實測)
+- 只有 `/api/chat` 會遵守 system message；`/api/generate` 的 `system` 欄位被忽略。
+- `keep_alive` 必須是整數或省略，Ollama 風格字串 `"24h"` → HTTP 500 `Value is NOT a Primitive type`。
+- 回應沒有 `eval_duration / prompt_eval_duration`，TPS 必須在客戶端計時。
+- **prompt 內含原始換行 / Tab / 反斜線 → HTTP 500 `Failed to render prompt (status=8)`**（它內部組 JSON 只跳脫引號）。`llm_backend._sanitize_for_hailo()` 把 `\n`→字面`\n`、`\t`→字面`\t`、`\`→`\\`，模型端會還原成真正的換行。
+- 並行請求會在 server 端排隊（不會錯），但會拉長 TTFT。
+- `curl` 測試務必帶 `-H "Content-Type: application/json"`，否則 oatpp 回 `No suitable mapper`。
+
 ---
 
 ## 5. 目錄與模組結構對照 (Module Directory Mapping)
 
-- `code_dispatcher/`: FastAPI 後端 (`main.py`)、語音串流核心 (`voice_streaming.py`)、音訊記憶體緩衝區 (`voice_memory.py`) 與前端儀表板 (`ui.html`)。
+- `code_dispatcher/`: FastAPI 後端 (`main.py`)、語音串流核心 (`voice_streaming.py`)、音訊記憶體緩衝區 (`voice_memory.py`)、LLM 後端選擇層 (`llm_backend.py`)、藍牙管理 (`bluetooth_manager.py`) 與前端儀表板 (`ui.html`)。
 - `models/`: Ollama 口譯模型定義檔 (`Modelfile.qwen2.5-3b-opt`)、自動預熱腳本 (`setup_models.sh`) 與模型 Manifests 清單。
 - `gpio_driver/`: 樹莓派 5 實體微動按鍵與雙色 LED 狀態指示驅動程式 (`key_led_driver.py`)。
 - `telegram_agent/`: Telegram 語音助理 (`agent.py`)、無螢幕藍牙配對管理模組 (`bluetooth_manager.py`) 與自我進化引擎。

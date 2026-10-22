@@ -34,10 +34,8 @@ from voice_pipeline import record_audio_from_mic, speech_to_text
 
 AUDIO_CACHE_DIR = get_in_memory_cache_dir()
 
-# System configuration defaults
-DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
-DEFAULT_MODEL = "qwen2.5:3b-opt"
-FALLBACK_MODEL = "qwen2.5:3b"
+# LLM backend selection (Hailo-10H qwen3:1.7b preferred, CPU Ollama fallback) lives in llm_backend.py
+from llm_backend import achat_complete, aiter_chat_stream, LLMError
 
 
 class MeetingResult(BaseModel):
@@ -933,7 +931,6 @@ class MeetingJobManager:
         1. Map: Split transcript into logical chunks (~1500 chars) and extract bullet points per chunk.
         2. Reduce: Synthesize the extracted points into the final structured meeting minutes.
         """
-        import httpx
         import json
         from ws_manager import ws_manager
 
@@ -978,24 +975,9 @@ class MeetingJobManager:
             )
             chunk_res = []
             try:
-                async with httpx.AsyncClient(timeout=60.0) as client:
-                    resp = await client.post(
-                        DEFAULT_OLLAMA_URL,
-                        json={
-                            "model": DEFAULT_MODEL,
-                            "prompt": map_prompt,
-                            "stream": False,
-                            "keep_alive": "24h",
-                            "options": {
-                                "temperature": 0.2,
-                                "num_predict": 150,
-                                "num_thread": 4
-                            }
-                        }
-                    )
-                    if resp.status_code == 200:
-                        chunk_res.append(resp.json().get("response", "").strip())
-            except Exception as e:
+                chunk_text, _ = await achat_complete(map_prompt, temperature=0.2, num_predict=150, timeout=60.0)
+                chunk_res.append(chunk_text)
+            except LLMError as e:
                 print(f"[MeetingMinutes] Chunk {idx} map summary note: {e}")
 
             if chunk_res and chunk_res[0]:
@@ -1028,50 +1010,25 @@ class MeetingJobManager:
 
         accumulated = []
         try:
-            async with httpx.AsyncClient(timeout=90.0) as client:
-                async with client.stream(
-                    "POST",
-                    DEFAULT_OLLAMA_URL,
-                    json={
-                        "model": DEFAULT_MODEL,
-                        "prompt": reduce_prompt,
-                        "stream": True,
-                        "keep_alive": "24h",
-                        "options": {
-                            "temperature": 0.2,
-                            "num_predict": 260,
-                            "num_thread": 4
-                        }
-                    }
-                ) as resp:
-                    if resp.status_code == 200:
-                        async for line in resp.aiter_lines():
-                            if self._cancellation_token and self._cancellation_token.is_set():
-                                return ""
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                chunk = json.loads(line)
-                                token = chunk.get("response", "")
-                                if token:
-                                    accumulated.append(token)
-                                    curr_text = "".join(accumulated)
-                                    self.status.summary_stream = curr_text
-                                    self.status.metrics["llm_tokens"] = len(accumulated)
-                                    if job_id:
-                                        await ws_manager.broadcast("summary_stream", {
-                                            "job_id": job_id,
-                                            "token": token,
-                                            "accumulated": curr_text
-                                        })
-                            except Exception:
-                                pass
+            async for token, _done, _backend in aiter_chat_stream(reduce_prompt, temperature=0.2, num_predict=260, timeout=90.0):
+                if self._cancellation_token and self._cancellation_token.is_set():
+                    return ""
+                if token:
+                    accumulated.append(token)
+                    curr_text = "".join(accumulated)
+                    self.status.summary_stream = curr_text
+                    self.status.metrics["llm_tokens"] = len(accumulated)
+                    if job_id:
+                        await ws_manager.broadcast("summary_stream", {
+                            "job_id": job_id,
+                            "token": token,
+                            "accumulated": curr_text
+                        })
 
-                        full_text = "".join(accumulated).strip()
-                        if full_text:
-                            return full_text
-        except Exception as re:
+            full_text = "".join(accumulated).strip()
+            if full_text:
+                return full_text
+        except LLMError as re:
             print(f"[MeetingMinutes] Reduce stage error: {re}")
 
         if accumulated:
@@ -1084,7 +1041,6 @@ class MeetingJobManager:
         if len(clean_transcript) > 2500:
             return await self._generate_hierarchical_summary_llm(clean_transcript, job_id=job_id)
 
-        import httpx
         import json
         from ws_manager import ws_manager
 
@@ -1104,66 +1060,41 @@ class MeetingJobManager:
         )
 
         accumulated = []
-        target_models = [DEFAULT_MODEL, FALLBACK_MODEL]
+        used_backend_label = "n/a"
+        try:
+            async for token, _done, backend in aiter_chat_stream(prompt, temperature=0.2, num_predict=220, timeout=90.0):
+                used_backend_label = backend.label
+                if self._cancellation_token and self._cancellation_token.is_set():
+                    print("[MeetingMinutes] LLM generation aborted by cancellation token.")
+                    return ""
+                if token:
+                    accumulated.append(token)
+                    # 逐 Token 打字機串流廣播
+                    curr_text = "".join(accumulated)
+                    self.status.summary_stream = curr_text
+                    self.status.metrics["llm_tokens"] = len(accumulated)
+                    if job_id:
+                        await ws_manager.broadcast("summary_stream", {
+                            "job_id": job_id,
+                            "token": token,
+                            "accumulated": curr_text
+                        })
 
-        for model_name in target_models:
-            accumulated.clear()
-            try:
-                async with httpx.AsyncClient(timeout=90.0) as client:
-                    async with client.stream(
-                        "POST",
-                        DEFAULT_OLLAMA_URL,
-                        json={
-                            "model": model_name,
-                            "prompt": prompt,
-                            "stream": True,
-                            "keep_alive": "24h",
-                            "options": {
-                                "temperature": 0.2,
-                                "num_predict": 220,
-                                "num_thread": 4
-                            }
-                        }
-                    ) as resp:
-                        if resp.status_code == 200:
-                            async for line in resp.aiter_lines():
-                                if self._cancellation_token and self._cancellation_token.is_set():
-                                    print("[MeetingMinutes] LLM generation aborted by cancellation token.")
-                                    return ""
-                                line = line.strip()
-                                if not line:
-                                    continue
-                                try:
-                                    chunk = json.loads(line)
-                                    token = chunk.get("response", "")
-                                    if token:
-                                        accumulated.append(token)
-                                        # 逐 Token 打字機串流廣播
-                                        curr_text = "".join(accumulated)
-                                        self.status.summary_stream = curr_text
-                                        self.status.metrics["llm_tokens"] = len(accumulated)
-                                        if job_id:
-                                            await ws_manager.broadcast("summary_stream", {
-                                                "job_id": job_id,
-                                                "token": token,
-                                                "accumulated": curr_text
-                                            })
-                                except Exception:
-                                    pass
-
-                            full_text = "".join(accumulated).strip()
-                            if full_text:
-                                self.status.summary_stream = full_text
-                                self.status.metrics["llm_tokens"] = len(accumulated)
-                                if job_id:
-                                    await ws_manager.broadcast("summary_stream", {
-                                        "job_id": job_id,
-                                        "token": "",
-                                        "accumulated": full_text
-                                    })
-                                return full_text
-            except Exception as e:
-                print(f"[MeetingMinutes] Streaming Ollama error with model {model_name}: {e}")
+            full_text = "".join(accumulated).strip()
+            if full_text:
+                self.status.summary_stream = full_text
+                self.status.metrics["llm_tokens"] = len(accumulated)
+                self.status.metrics["llm_backend"] = used_backend_label
+                if job_id:
+                    await ws_manager.broadcast("summary_stream", {
+                        "job_id": job_id,
+                        "token": "",
+                        "accumulated": full_text
+                    })
+                print(f"[MeetingMinutes] Summary generated by {used_backend_label} ({len(accumulated)} tokens)")
+                return full_text
+        except LLMError as e:
+            print(f"[MeetingMinutes] Streaming LLM error ({used_backend_label}): {e}")
 
         if accumulated:
             return "".join(accumulated).strip()

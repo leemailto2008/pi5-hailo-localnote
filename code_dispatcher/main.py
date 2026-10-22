@@ -106,18 +106,13 @@ async def startup_event():
 
     try:
         def prewarm_ollama():
-            print("[Startup] Pre-warming Ollama qwen2.5:3b-opt model...")
-            requests.post(
-                "http://127.0.0.1:11434/api/generate",
-                json={
-                    "model": "qwen2.5:3b-opt",
-                    "prompt": "Hello",
-                    "stream": False,
-                    "keep_alive": "24h"
-                },
-                timeout=45
-            )
-            print("[Startup] Ollama qwen2.5:3b-opt pre-warmed successfully (pinned 24h).")
+            from llm_backend import prewarm as llm_prewarm
+            print("[Startup] Pre-warming LLM backend (Hailo-10H qwen3:1.7b preferred, CPU Ollama fallback)...")
+            backend = llm_prewarm()
+            if backend is not None:
+                print(f"[Startup] LLM backend ready: {backend.label}")
+            else:
+                print("[Startup] LLM prewarm failed on every backend; will retry lazily on first request.")
         asyncio.create_task(asyncio.to_thread(prewarm_ollama))
     except Exception as e:
         print(f"[Startup] Ollama preload notice: {e}")
@@ -343,10 +338,18 @@ def get_system_health() -> Dict[str, Any]:
     except Exception:
         pass
 
+    llm_backend_label = "n/a"
+    try:
+        from llm_backend import get_backend
+        llm_backend_label = get_backend().label
+    except Exception as e:
+        print(f"[Health] llm backend probe failed: {e}")
+
     return {
         "status": "healthy" if (redis_ok and ollama_ok) else "degraded",
         "redis_connected": redis_ok,
         "ollama_running": ollama_ok,
+        "llm_backend": llm_backend_label,
         "available_models_count": len(active_models),
         "cpu_temperature_c": temp_c,
         "ram_available_mb": free_ram_mb,
@@ -1115,30 +1118,19 @@ async def transcribe_and_translate_endpoint(req: VoiceProcessRequest) -> Dict[st
             "message": "未能辨識出清晰人聲語音。您可點擊上方播放器試聽耳麥是否有收到聲音。"
         }
 
-    # 2. Run Ollama translation in worker thread (non-blocking)
+    # 2. Run LLM translation in worker thread (non-blocking; Hailo-10H preferred, CPU fallback)
     def do_translate(text: str) -> str:
-        prompt = (
+        from llm_backend import chat_complete, LLMError
+        system = (
             "You are a professional bilingual interpreter. "
-            "Translate the following Traditional Chinese speech into natural, fluent, idiomatic English. "
-            "Output ONLY the translated English sentence without explanations, notes, or Chinese characters:\n\n"
-            f"{text}"
+            "Translate the user's Traditional Chinese speech into natural, fluent, idiomatic English. "
+            "Output ONLY the translated English text without explanations, notes, or Chinese characters."
         )
         try:
-            resp = requests.post(
-                "http://127.0.0.1:11434/api/generate",
-                json={
-                    "model": "qwen2.5:3b",
-                    "prompt": prompt,
-                    "stream": False,
-                    "keep_alive": "24h"
-                },
-                timeout=60
-            )
-            if resp.status_code == 200:
-                return resp.json().get("response", "").strip()
-            return f"[翻譯狀態碼 {resp.status_code}]"
-        except Exception as e:
-            return f"[翻譯超時/失敗: {str(e)}]"
+            translated, _ = chat_complete(text, system=system, temperature=0.2, num_predict=256, timeout=60)
+            return translated
+        except LLMError as e:
+            return f"[翻譯失敗: {str(e)}]"
 
     english_translation = await asyncio.to_thread(do_translate, transcribed_text)
 
@@ -1192,29 +1184,19 @@ async def record_and_transcribe(req: VoiceRecordRequest) -> Dict[str, Any]:
             "message": "未能辨識出清晰人聲語音，但錄音已完成。您可點擊下方播放器試聽錄音內容。"
         }
 
-    # 4. Ollama translation in worker thread
+    # 4. LLM translation in worker thread (Hailo-10H preferred, CPU fallback)
     def do_translate(text: str) -> str:
-        prompt = (
+        from llm_backend import chat_complete, LLMError
+        system = (
             "You are a professional bilingual interpreter. "
-            "Translate the following Traditional Chinese speech into natural, fluent, idiomatic English. "
-            "Output ONLY the translated English sentence without explanations, notes, or Chinese characters:\n\n"
-            f"{text}"
+            "Translate the user's Traditional Chinese speech into natural, fluent, idiomatic English. "
+            "Output ONLY the translated English text without explanations, notes, or Chinese characters."
         )
         try:
-            resp = requests.post(
-                "http://127.0.0.1:11434/api/generate",
-                json={
-                    "model": "qwen2.5:3b-opt",
-                    "prompt": prompt,
-                    "stream": False,
-                    "keep_alive": "24h"
-                },
-                timeout=60
-            )
-            if resp.status_code == 200:
-                return resp.json().get("response", "").strip()
-            return ""
-        except Exception:
+            translated, _ = chat_complete(text, system=system, temperature=0.2, num_predict=256, timeout=60)
+            return translated
+        except LLMError as e:
+            print(f"[Voice] translation failed: {e}")
             return ""
 
     english_translation = await asyncio.to_thread(do_translate, transcribed_text)
@@ -1287,28 +1269,13 @@ async def translate_text(req: VoiceTranslateRequest) -> Dict[str, Any]:
         )
 
     def do_call():
+        from llm_backend import chat_complete, LLMError
         try:
-            resp = requests.post(
-                "http://127.0.0.1:11434/api/generate",
-                json={
-                    "model": "qwen2.5:3b-opt",
-                    "prompt": prompt,
-                    "stream": False,
-                    "keep_alive": "24h",
-                    "options": {
-                        "num_predict": 250,
-                        "temperature": 0.2
-                    }
-                },
-                timeout=90
-            )
-            if resp.status_code == 200:
-                out = resp.json().get("response", "").strip()
-                return out if out else "（模型未輸出翻譯內容）"
-            return f"[LLM 狀態碼 {resp.status_code}]"
-        except requests.exceptions.Timeout:
-            return "[翻譯逾時：模型推論忙碌中，請稍後重試]"
-        except Exception as e:
+            out, _ = chat_complete(prompt, temperature=0.2, num_predict=250, timeout=90)
+            return out if out else "（模型未輸出翻譯內容）"
+        except LLMError as e:
+            if "timed out" in str(e).lower() or "timeout" in str(e).lower():
+                return "[翻譯逾時：模型推論忙碌中，請稍後重試]"
             return f"[翻譯失敗: {str(e)}]"
 
     translated = await asyncio.to_thread(do_call)
