@@ -15,6 +15,8 @@ import json
 import time
 import logging
 import subprocess
+import pty
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Optional, Tuple, Any
 
@@ -28,6 +30,14 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 # Mutual exclusion lock to prevent auto_reconnect_worker from colliding with pair_and_trust
 _is_pairing_lock: bool = False
+
+# How long pair_and_trust keeps BR/EDR inquiry running while waiting for the headset to answer.
+PAIR_DISCOVERY_WAIT_SEC: int = 12
+
+# Held during scan_devices() and pair_and_trust(). auto_reconnect_tick() must not issue
+# `connect` while a discovery/pairing session is running: a premature connect to a headset
+# that is in pairing mode kicks it OUT of pairing mode (observed with RichChip headsets).
+_bt_exclusive = threading.Lock()
 
 
 def load_bt_config() -> Dict:
@@ -85,129 +95,268 @@ def get_controller_status() -> Tuple[bool, str]:
         return False, f"藍牙控制器異常: {e}"
 
 
-def scan_devices(timeout_sec: int = 6) -> List[Dict[str, Any]]:
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\r")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
+
+
+class BluetoothctlSession:
     """
-    Scan for nearby Bluetooth devices for a given duration.
-    Filters and formats devices, caching them for convenient selection.
-    Uses 'scan on' to capture both Dual-Mode BR/EDR and BLE Audio devices in real time.
-    Uses ThreadPoolExecutor for concurrent info querying and filters out raw MAC advertisement noise.
+    Long-lived interactive bluetoothctl session driven through a pseudo-terminal (pty).
+
+    Why: BlueZ discards temporary (unpaired) devices as soon as the discovery client
+    disconnects from D-Bus, so "scan" and "pair" issued as separate bluetoothctl
+    processes race against that purge and fail with "Device not available".
+    Keeping scan -> pair -> trust -> connect inside ONE session removes the race.
+    A pty is used because bluetoothctl is readline-based and block-buffers stdout
+    when attached to a plain pipe.
     """
+
+    def __init__(self) -> None:
+        self._master_fd: Optional[int] = None
+        self._proc: Optional[subprocess.Popen] = None
+        self._lines: List[str] = []
+        self._cond = threading.Condition()
+        self._reader: Optional[threading.Thread] = None
+        self._closed = False
+
+    def start(self) -> None:
+        master_fd, slave_fd = pty.openpty()
+        self._master_fd = master_fd
+        self._proc = subprocess.Popen(
+            ["bluetoothctl"],
+            stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
+            start_new_session=True, close_fds=True,
+        )
+        os.close(slave_fd)
+        self._reader = threading.Thread(target=self._read_loop, daemon=True, name="btctl-reader")
+        self._reader.start()
+        # Wait for the prompt so the first command is not swallowed.
+        self.wait_for([r"\[bluetooth\]#|Agent registered|Waiting to connect"], timeout=3)
+
+    def _read_loop(self) -> None:
+        buf = ""
+        while True:
+            try:
+                chunk = os.read(self._master_fd, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            buf += chunk.decode("utf-8", errors="replace")
+            parts = buf.split("\n")
+            buf = parts.pop()
+            with self._cond:
+                self._lines.extend(_strip_ansi(l) for l in parts)
+                self._cond.notify_all()
+        if buf:
+            with self._cond:
+                self._lines.append(_strip_ansi(buf))
+                self._cond.notify_all()
+
+    def send(self, cmd: str) -> None:
+        if self._master_fd is None or self._closed:
+            raise RuntimeError("bluetoothctl session not started")
+        os.write(self._master_fd, (cmd + "\n").encode("utf-8"))
+
+    def wait_for(self, patterns: List[str], timeout: float, start_index: int = 0) -> Optional[str]:
+        """Block until a line (from start_index on) matches any pattern, or timeout. Returns the line."""
+        compiled = [re.compile(pt) for pt in patterns]
+        deadline = time.monotonic() + timeout
+        idx = start_index
+        with self._cond:
+            while True:
+                while idx < len(self._lines):
+                    line = self._lines[idx]
+                    idx += 1
+                    if any(c.search(line) for c in compiled):
+                        return line
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._cond.wait(remaining)
+
+    def lines_since(self, start_index: int) -> List[str]:
+        with self._cond:
+            return list(self._lines[start_index:])
+
+    def cursor(self) -> int:
+        with self._cond:
+            return len(self._lines)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            if self._master_fd is not None:
+                os.write(self._master_fd, b"quit\n")
+        except OSError:
+            pass
+        if self._proc is not None:
+            try:
+                self._proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+                self._proc.wait(timeout=3)
+        if self._master_fd is not None:
+            try:
+                os.close(self._master_fd)
+            except OSError:
+                pass
+            self._master_fd = None
+
+    def __enter__(self) -> "BluetoothctlSession":
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+
+_DEVICE_EVENT_RE = re.compile(r"\[(?:NEW|CHG)\]\s+Device\s+([0-9A-Fa-f:]{17})\s+(.+)$")
+_MAC_AS_NAME_RE = re.compile(r"^[0-9A-Fa-f:-]{17}$")
+
+
+def _parse_discovery_lines(lines: List[str], discovered_map: Dict[str, str]) -> None:
+    """Fill discovered_map[mac] = name from bluetoothctl [NEW]/[CHG] events (ANSI already stripped)."""
+    for line in lines:
+        m = _DEVICE_EVENT_RE.search(line)
+        if not m:
+            continue
+        mac = m.group(1).upper()
+        rest = m.group(2).strip()
+        if "[NEW]" in line:
+            name = rest
+        else:
+            m_name = re.match(r"(?:Name|Alias):\s*(.+)$", rest)
+            if not m_name:
+                # Device already in BlueZ cache only emits [CHG] (RSSI/Connected/...): remember the
+                # MAC, the name is resolved later via `bluetoothctl info`.
+                discovered_map.setdefault(mac, "")
+                continue
+            name = m_name.group(1).strip()
+        if name and not _MAC_AS_NAME_RE.match(name) and ":" not in name.split(" ")[0]:
+            discovered_map[mac] = name
+
+
+def _list_devices(filter_name: str) -> Dict[str, str]:
+    """bluetoothctl devices <Paired|Trusted|Connected> -> {mac: name}"""
+    out: Dict[str, str] = {}
+    try:
+        res = subprocess.run(["bluetoothctl", "devices", filter_name], capture_output=True, text=True, timeout=3)
+        for line in res.stdout.splitlines():
+            m = re.match(r"^Device\s+([0-9A-Fa-f:]{17})\s+(.*)$", line.strip())
+            if m:
+                out[m.group(1).upper()] = m.group(2).strip()
+    except (subprocess.SubprocessError, OSError) as e:
+        logger.warning(f"bluetoothctl devices {filter_name} failed: {e}")
+    return out
+
+
+def scan_devices(timeout_sec: int = 10) -> List[Dict[str, Any]]:
+    """
+    Scan for nearby Bluetooth HEADSETS (BR/EDR only) for a given duration.
+
+    Design notes (see CLAUDE.md gotcha on BT scanning):
+    - HFP/A2DP headsets live on classic BR/EDR. `scan on` (transport auto) interleaves
+      LE and BR/EDR inquiry and in practice misses headsets in an 8s window, while the
+      same headset's BLE companion advertisement (random address, e.g. "Air Shutter")
+      is always seen and misleads the user. `scan bredr` fixes both.
+    - Unpaired BLE random-address entries are never listed.
+    """
+    if not _bt_exclusive.acquire(blocking=False):
+        logger.info("scan_devices skipped: another scan/pair session is running, returning cache")
+        return load_scan_cache()
+    try:
+        return _scan_devices_locked(timeout_sec)
+    finally:
+        _bt_exclusive.release()
+
+
+def _scan_devices_locked(timeout_sec: int) -> List[Dict[str, Any]]:
     get_controller_status()
-    logger.info(f"Starting Bluetooth scan for {timeout_sec} seconds...")
+    logger.info(f"Starting Bluetooth BR/EDR scan for {timeout_sec} seconds...")
     discovered_map: Dict[str, str] = {}
 
     try:
-        # 1. 執行全域掃描 (scan on)，捕獲即時發現的設備 (包含 BLE 與傳統藍牙雙模設備)
-        proc = subprocess.Popen(
-            ["bluetoothctl", "--timeout", str(timeout_sec), "scan", "on"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        try:
-            stdout_data, _ = proc.communicate(timeout=timeout_sec + 2)
-            EXCLUDE_PROPS = (
-                "RSSI:", "ManufacturerData", "TxPower:", "UUID", "ServicesResolved:",
-                "Connected:", "Paired:", "Trusted:", "Modalias:", "Class:", "Icon:",
-                "Blocked:", "LegacyPairing:", "Adapter:"
-            )
-            for line in stdout_data.splitlines():
-                if "[NEW] Device" in line:
-                    m_new = re.search(r"Device\s+([0-9A-Fa-f:]{17})\s+(.+)$", line)
-                    if m_new:
-                        mac = m_new.group(1).upper()
-                        name = m_new.group(2).strip()
-                        if name and not any(name.startswith(p) for p in EXCLUDE_PROPS) and not re.match(r"^[0-9A-Fa-f:-]{17}$", name):
-                            discovered_map[mac] = name
-                elif "Name:" in line or "Alias:" in line:
-                    m_name = re.search(r"Device\s+([0-9A-Fa-f:]{17})\s+(?:Name|Alias):\s*(.+)$", line)
-                    if m_name:
-                        mac = m_name.group(1).upper()
-                        name = m_name.group(2).strip()
-                        if name and not any(name.startswith(p) for p in EXCLUDE_PROPS) and not re.match(r"^[0-9A-Fa-f:-]{17}$", name):
-                            discovered_map[mac] = name
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.communicate()
-    except Exception as e:
-        logger.warning(f"Bluetooth scan timeout/interrupted: {e}")
+        with BluetoothctlSession() as sess:
+            start_idx = sess.cursor()
+            sess.send("scan bredr")
+            started = sess.wait_for([r"Discovery started", r"Failed to start discovery", r"Invalid argument"], timeout=4)
+            if started and "Discovery started" not in started:
+                logger.warning(f"scan bredr rejected ({started}), falling back to 'scan on'")
+                sess.send("scan on")
+                sess.wait_for([r"Discovery started"], timeout=4)
+            time.sleep(timeout_sec)
+            sess.send("scan off")
+            sess.wait_for([r"Discovery stopped", r"Discovering: no"], timeout=3)
+            _parse_discovery_lines(sess.lines_since(start_idx), discovered_map)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as e:
+        logger.warning(f"Bluetooth scan session failed: {e}")
 
-    # 2. 結合 bluetoothctl devices 中的所有設備 (僅納入具可讀名稱者，避免數十個無名 BLE 廣播干擾)
-    try:
-        res = subprocess.run(["bluetoothctl", "devices"], capture_output=True, text=True, timeout=3)
-        for line in res.stdout.strip().split("\n"):
-            match = re.match(r"^Device\s+([0-9A-Fa-f:]{17})\s+(.*)$", line.strip())
-            if match:
-                mac = match.group(1).upper()
-                name = match.group(2).strip()
-                if name and not re.match(r"^[0-9A-Fa-f:-]{17}$", name):
-                    if mac not in discovered_map or not discovered_map[mac]:
-                        discovered_map[mac] = name
-    except Exception as e:
-        logger.error(f"Error querying bluetoothctl devices: {e}")
+    paired_map = _list_devices("Paired")
+    connected_map = _list_devices("Connected")
+    trusted_map = _list_devices("Trusted")
 
-    # 結合已配對裝置 (確保已配對設備必被列入)
-    try:
-        res_paired = subprocess.run(["bluetoothctl", "devices", "Paired"], capture_output=True, text=True, timeout=2)
-        for line in res_paired.stdout.strip().split("\n"):
-            match = re.match(r"^Device\s+([0-9A-Fa-f:]{17})\s+(.*)$", line.strip())
-            if match:
-                mac = match.group(1).upper()
-                name = match.group(2).strip()
-                if mac not in discovered_map:
-                    discovered_map[mac] = name if (name and not re.match(r"^[0-9A-Fa-f:-]{17}$", name)) else "已配對設備"
-    except Exception:
-        pass
+    # Paired devices are always listed (even when out of range)
+    for mac, name in paired_map.items():
+        if mac not in discovered_map:
+            discovered_map[mac] = name if (name and not _MAC_AS_NAME_RE.match(name)) else "已配對設備"
 
-    # 3. 並行查詢設備詳情 (ThreadPoolExecutor 提速 20 倍，杜絕前端請求逾時)
     def _inspect_device(item: Tuple[str, str]) -> Optional[Dict[str, Any]]:
         mac, name = item
+        is_paired = mac in paired_map
+        is_connected = mac in connected_map
+        is_trusted = mac in trusted_map
+        rssi: Optional[int] = None
+        battery: Optional[int] = None
         try:
+            # Best effort only: BlueZ may already have purged a temporary device.
             info_res = subprocess.run(["bluetoothctl", "info", mac], capture_output=True, text=True, timeout=2)
             info_out = info_res.stdout
-            is_connected = "Connected: yes" in info_out
-            is_paired = "Paired: yes" in info_out
-            is_trusted = "Trusted: yes" in info_out
-
+            first_line = info_out.splitlines()[0] if info_out else ""
+            if "(random)" in first_line and not is_paired:
+                return None  # BLE companion advertisement (e.g. "Air Shutter"), not a headset endpoint
             m_real_name = re.search(r"Name:\s*(.+)", info_out) or re.search(r"Alias:\s*(.+)", info_out)
             if m_real_name:
-                resolved_name = m_real_name.group(1).strip()
-                if resolved_name and not re.match(r"^[0-9A-Fa-f:-]{17}$", resolved_name):
-                    name = resolved_name
-
+                resolved = m_real_name.group(1).strip()
+                if resolved and not _MAC_AS_NAME_RE.match(resolved):
+                    name = resolved
             rssi_m = re.search(r"RSSI:\s*(-?\d+)", info_out)
             rssi = int(rssi_m.group(1)) if rssi_m else None
             bat_m = re.search(r"Battery Percentage:\s*.*\((\d+)\)", info_out) or re.search(r"Battery Percentage:\s*(\d+)", info_out)
             battery = int(bat_m.group(1)) if bat_m else None
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug(f"info {mac} unavailable: {e}")
 
-            has_readable_name = bool(name and not re.match(r"^[0-9A-Fa-f:-]{17}$", name))
-            if is_paired or is_connected or has_readable_name:
-                return {
-                    "mac": mac,
-                    "name": name if name else "未知音訊設備",
-                    "connected": is_connected,
-                    "paired": is_paired,
-                    "trusted": is_trusted,
-                    "rssi": rssi,
-                    "battery_level": battery
-                }
-        except Exception:
-            pass
-        return None
+        has_readable_name = bool(name and not _MAC_AS_NAME_RE.match(name))
+        if not (is_paired or is_connected or has_readable_name):
+            return None
+        return {
+            "mac": mac,
+            "name": name if name else "未知音訊設備",
+            "connected": is_connected,
+            "paired": is_paired,
+            "trusted": is_trusted,
+            "rssi": rssi,
+            "battery_level": battery,
+        }
 
     devices: List[Dict[str, Any]] = []
     if discovered_map:
         with ThreadPoolExecutor(max_workers=8) as pool:
             devices = list(filter(None, pool.map(_inspect_device, discovered_map.items())))
 
-    # 排序：連線中 > 已配對 > 訊號強度由強到弱
     devices.sort(key=lambda d: (
         1 if d["connected"] else (2 if d["paired"] else 3),
         -(d["rssi"] if d["rssi"] is not None else -999)
     ))
 
     save_scan_cache(devices)
-    logger.info(f"Scan finished in record time, found {len(devices)} devices")
+    logger.info(f"Scan finished, found {len(devices)} headset candidates")
     return devices
 
 
@@ -221,6 +370,8 @@ def pair_and_trust(target: str) -> Tuple[bool, str]:
     if _is_pairing_lock:
         return False, "⚠️ 系統目前正有另一項藍牙配對任務進行中，請稍候 10 秒後再試。"
 
+    if not _bt_exclusive.acquire(blocking=False):
+        return False, "⚠️ 藍牙掃描進行中，請等掃描結束後再配對。"
     _is_pairing_lock = True
     try:
         target = target.strip()
@@ -254,23 +405,54 @@ def pair_and_trust(target: str) -> Tuple[bool, str]:
 
         logger.info(f"Starting Headless Pairing for: {target_name} ({target_mac})...")
 
-        # Step 1: Ensure controller powered on & agent registered
-        subprocess.run(["bluetoothctl", "power", "on"], capture_output=True, timeout=3)
-        subprocess.run(["bluetoothctl", "agent", "NoInputNoOutput"], capture_output=True, timeout=3)
-        subprocess.run(["bluetoothctl", "default-agent"], capture_output=True, timeout=3)
+        # Steps 1-3 run inside ONE bluetoothctl session: scan (BR/EDR) -> pair -> trust -> connect.
+        # Separate processes race against BlueZ purging temporary devices when discovery ends.
+        combined_log = ""
+        pair_ok = False
+        try:
+            with BluetoothctlSession() as sess:
+                sess.send("power on")
+                sess.send("agent NoInputNoOutput")
+                sess.send("default-agent")
+                sess.wait_for([r"Default agent request successful", r"Agent registered"], timeout=3)
 
-        # Step 2: Ensure device is discovered in BlueZ BR/EDR
-        dev_check = subprocess.run(["bluetoothctl", "info", target_mac], capture_output=True, text=True, timeout=3)
-        if "Device " not in dev_check.stdout:
-            logger.info(f"Target {target_mac} not in BlueZ cache, performing 4s scan...")
-            subprocess.run(["bluetoothctl", "--timeout", "4", "scan", "on"], capture_output=True, text=True, timeout=6)
+                mac_re = re.escape(target_mac)
+                already_known = subprocess.run(["bluetoothctl", "info", target_mac], capture_output=True, text=True, timeout=3).stdout
+                if "Paired: yes" not in already_known:
+                    sess.send("scan bredr")
+                    sess.wait_for([r"Discovery started"], timeout=4)
+                    seen = sess.wait_for([rf"Device\s+{mac_re}"], timeout=PAIR_DISCOVERY_WAIT_SEC)
+                    if not seen:
+                        sess.send("scan off")
+                        return False, (
+                            f"❌ **找不到 {target_name}** (`{target_mac}`)\n"
+                            f"{PAIR_DISCOVERY_WAIT_SEC} 秒內未收到耳麥的傳統藍牙 (BR/EDR) 回應。\n"
+                            f"• 耳麥一旦連上任何裝置就會離開配對模式，請**重新長按配對鍵**至指示燈閃爍後再試。\n"
+                            f"• 若耳麥仍連著手機/電腦，請先在該裝置上斷開。"
+                        )
 
-        # Step 3: Trust, Pair and Connect in sequence
-        subprocess.run(["bluetoothctl", "trust", target_mac], capture_output=True, text=True, timeout=5)
-        pair_res = subprocess.run(["bluetoothctl", "pair", target_mac], capture_output=True, text=True, timeout=12)
-        conn_res = subprocess.run(["bluetoothctl", "connect", target_mac], capture_output=True, text=True, timeout=10)
+                cur = sess.cursor()
+                sess.send(f"pair {target_mac}")
+                pair_line = sess.wait_for(
+                    [r"Pairing successful", r"Already Paired", r"Failed to pair", r"not available",
+                     r"AuthenticationFailed", r"AuthenticationCanceled", r"ConnectionAttemptFailed", r"AlreadyExists"],
+                    timeout=20, start_index=cur)
+                sess.send("scan off")
+                pair_ok = bool(pair_line) and ("Pairing successful" in pair_line or "Already Paired" in pair_line or "AlreadyExists" in pair_line)
 
-        combined_log = (pair_res.stdout + "\n" + pair_res.stderr + "\n" + conn_res.stdout + "\n" + conn_res.stderr).strip()
+                if pair_ok:
+                    # Trust ONLY after a successful pairing (never leave trusted-but-unpaired ghosts)
+                    cur = sess.cursor()
+                    sess.send(f"trust {target_mac}")
+                    sess.wait_for([r"trust succeeded", r"Failed to set trust"], timeout=5, start_index=cur)
+                    cur = sess.cursor()
+                    sess.send(f"connect {target_mac}")
+                    sess.wait_for([r"Connection successful", r"Failed to connect"], timeout=15, start_index=cur)
+
+                combined_log = "\n".join(sess.lines_since(0)).strip()
+        except (OSError, RuntimeError, subprocess.SubprocessError) as e:
+            logger.error(f"bluetoothctl session error during pairing: {e}")
+            combined_log = str(e)
 
         # Step 3: Check device state
         time.sleep(1)
@@ -286,7 +468,7 @@ def pair_and_trust(target: str) -> Tuple[bool, str]:
             target_name = name_match.group(1).strip()
 
         # Step 4: If paired but not connected, try one direct connect
-        if (is_paired or is_trusted) and not is_connected:
+        if is_paired and not is_connected:
             conn_res = subprocess.run(["bluetoothctl", "connect", target_mac], capture_output=True, text=True, timeout=8)
             time.sleep(1)
             info_res = subprocess.run(["bluetoothctl", "info", target_mac], capture_output=True, text=True, timeout=3)
@@ -311,7 +493,7 @@ def pair_and_trust(target: str) -> Tuple[bool, str]:
                 f"• 自動秒連：已寫入設定，耳機開機靠近時樹莓派將自動連線！"
             )
 
-        elif is_paired or is_trusted:
+        elif is_paired:
             config = load_bt_config()
             config["default_mac"] = target_mac
             config["default_name"] = target_name
@@ -341,6 +523,7 @@ def pair_and_trust(target: str) -> Tuple[bool, str]:
 
     finally:
         _is_pairing_lock = False
+        _bt_exclusive.release()
 
 
 def _switch_pipewire_default_sink(device_name_hint: str) -> str:
@@ -545,7 +728,7 @@ def auto_reconnect_tick() -> Optional[str]:
     """
     global _is_pairing_lock, _last_connection_state
 
-    if _is_pairing_lock:
+    if _is_pairing_lock or _bt_exclusive.locked():
         return None
 
     config = load_bt_config()
@@ -572,7 +755,14 @@ def auto_reconnect_tick() -> Optional[str]:
             if enabled and mac_u not in candidates:
                 candidates.append(mac_u)
 
+        # Never `connect` an unpaired device: BlueZ would open an SDP-only link that is dropped
+        # immediately, and the headset leaves pairing mode, so the user can never pair it via the UI.
+        paired_macs = _list_devices("Paired")
+        candidates = [m for m in candidates if m in paired_macs]
+
         for cand_mac in candidates:
+            if _bt_exclusive.locked():
+                break
             try:
                 res = subprocess.run(["bluetoothctl", "connect", cand_mac], capture_output=True, text=True, timeout=6)
                 if "Connection successful" in res.stdout or is_device_connected(cand_mac):

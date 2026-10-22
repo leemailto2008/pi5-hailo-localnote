@@ -23,3 +23,6 @@ telegram_agent/temp/
 *.mp3
 *.wav
 *.ogg
+
+# Raspberry Pi remote probe outputs
+tools/pi_probe_out/

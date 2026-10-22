@@ -741,7 +741,7 @@ def get_bt_status() -> Dict[str, Any]:
 
 
 @app.post("/api/bt/scan", tags=["Bluetooth"])
-def scan_bt_devices(timeout_sec: int = 8) -> Dict[str, Any]:
+def scan_bt_devices(timeout_sec: int = 10) -> Dict[str, Any]:
     """Scan for nearby Bluetooth audio devices."""
     try:
         from bluetooth_manager import scan_devices

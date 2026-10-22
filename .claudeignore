@@ -1,0 +1,60 @@
+# .claudeignore - Claude Code & Agent Context Ignore Rules
+# 遵循 gitignore 語法，防止非必要的大型檔案、二進位模型、音訊與機密資訊消耗 Context Window
+
+# 版本控制與 IDE 快取 (Version Control & IDE Caches)
+.git/
+.vscode/
+.idea/
+.pytest_cache/
+.agents/
+
+# 虛擬環境與 Python 快取 (Virtual Environments & Python Bytecode)
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# 機密與憑證資訊 (Secrets & Credentials)
+.env
+*.env
+*.pem
+*.key
+id_rsa*
+telegram_agent/.env
+
+# 音訊與媒體測試檔案 (Audio & Media Files)
+*.mp3
+*.wav
+*.ogg
+*.flac
+*.m4a
+*.aac
+*.jpg
+*.jpeg
+*.png
+*.webp
+
+# 大型模型檔案、權重與備份 (Large Models & Backups)
+raspi5_ollama_backup/
+*.hef
+*.bin
+*.safetensors
+*.onnx
+models/blobs/
+models/manifests/
+
+# 資料庫、暫存與日誌檔案 (Databases, Temporary Files & Logs)
+*.log
+*.db
+*.sqlite
+*.sqlite3
+telegram_agent/data/
+telegram_agent/temp/
+*.tmp
+
+# 本地草稿筆記 (Local Draft Notes)
+note1.txt
+plan1.md
+plan2.md
