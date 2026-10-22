@@ -185,7 +185,8 @@ details[open] summary::after{content:"收起 ▴"}
   <div class="topbar-pills" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">
     <span class="pill net" id="netPill"><span class="dot"></span><span id="netText">檢查連線狀態…</span></span>
     <span class="pill sys" id="sysPill">盒子：—</span>
-    <span class="pill npu" id="npuPill" style="display:inline-flex;background:linear-gradient(135deg,#0284c7 0%,#0369a1 100%);color:#fff;font-weight:700;box-shadow:0 2px 6px rgba(2,132,199,0.3);border:1px solid #38bdf8;cursor:help" title="Hailo-10H (40 TOPS) 邊緣 AI 加速晶片">⚡ Hailo-10H：負載 0% · --°C</span>
+    <span class="pill npu" id="npuPill" style="display:inline-flex;background:linear-gradient(135deg,#0284c7 0%,#0369a1 100%);color:#fff;font-weight:700;box-shadow:0 2px 6px rgba(2,132,199,0.3);border:1px solid #38bdf8;cursor:help" title="AI 加速晶片 (NPU)">⚡ NPU：負載 0% · --°C</span>
+    <button class="pill" id="btnToggleNpu" style="cursor:pointer;background:var(--card);border:1px solid var(--line);font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;" title="點擊切換顯示/隱藏 AI 加速晶片 (NPU) 狀態卡片">⚡ NPU 狀態</button>
     <button class="pill" id="btnToggleMetrics" style="cursor:pointer;background:var(--card);border:1px solid var(--line);font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;" title="點擊切換顯示/隱藏核心效能與耗時指標（預設隱藏，Demo 給客戶時不露餡）">📊 效能指標</button>
   </div>
 </header>
@@ -328,11 +329,11 @@ details[open] summary::after{content:"收起 ▴"}
       <!-- ================= 設定 ================= -->
       <section class="col set">
         <span class="tag set">設定與硬體狀態</span>
-        <!-- ⚡ Hailo-10H 40 TOPS 硬體即時監控看板 (Live Telemetry Card) -->
-        <div class="card set" id="hailoMonitorCard" style="background:#0f172a;border:1px solid #1e293b;border-radius:14px;padding:14px 16px;color:#f8fafc;box-shadow:0 4px 14px rgba(0,0,0,0.2);">
+        <!-- ⚡ AI 加速晶片 (NPU) 硬體即時監控看板 (Live Telemetry Card) -->
+        <div class="card set npu-card" id="hailoMonitorCard" style="background:#0f172a;border:1px solid #1e293b;border-radius:14px;padding:14px 16px;color:#f8fafc;box-shadow:0 4px 14px rgba(0,0,0,0.2);">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;border-bottom:1px solid #334155;padding-bottom:8px;">
             <span style="font-weight:700;font-size:13.5px;color:#38bdf8;display:inline-flex;align-items:center;gap:6px">
-              ⚡ Hailo-10H AI 加速晶片 <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:#0369a1;color:#fff;font-weight:700">40 TOPS</span>
+              ⚡ AI加速晶片(NPU)
             </span>
             <span id="hailoLiveBadge" style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:rgba(16,185,129,0.2);color:#34d399;border:1px solid #059669">
               ● 待命就緒
@@ -364,7 +365,7 @@ details[open] summary::after{content:"收起 ▴"}
                 <span id="hailoRamPct" style="color:#a78bfa">-- %</span>
               </div>
               <div style="font-size:13px;font-weight:700;margin-top:2px;font-family:monospace;color:#f8fafc;" id="hailoRamDisplay">-- / 7,221 MB</div>
-              <div style="color:#64748b;font-size:10px;margin-top:2px;">Hailo-10H 8GB LPDDR4X</div>
+              <div style="color:#64748b;font-size:10px;margin-top:2px;">NPU 板載 8GB LPDDR4X</div>
             </div>
             <!-- 4. 工作電壓與邊緣模型 -->
             <div style="background:#1e293b;border-radius:8px;padding:8px 10px;">
@@ -509,13 +510,13 @@ details[open] summary::after{content:"收起 ▴"}
         </div>
       </div>
 
-      <!-- ⚡ Hailo-10H 狀態卡片 (Bluetooth Hub 檢視專用) -->
-      <div class="card" style="background:#0f172a;border:1px solid #1e293b;color:#f8fafc;padding:12px 16px;">
+      <!-- ⚡ AI 加速晶片 (NPU) 狀態卡片 (Bluetooth Hub 檢視專用) -->
+      <div class="card npu-card" style="background:#0f172a;border:1px solid #1e293b;color:#f8fafc;padding:12px 16px;">
         <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
           <div style="display:inline-flex;align-items:center;gap:8px">
             <span style="font-size:20px">⚡</span>
             <div>
-              <b style="font-size:14px;color:#38bdf8">Hailo-10H AI 加速晶片 (40 TOPS)</b>
+              <b style="font-size:14px;color:#38bdf8">AI加速晶片(NPU)</b>
               <span style="font-size:11px;color:#94a3b8;margin-left:6px">PCIe 邊緣 AI 硬體推論</span>
             </div>
           </div>
@@ -782,15 +783,15 @@ function updateSystemUI(s) {
   if (npu) {
     if (el.npuPill) {
       el.npuPill.style.display = 'inline-flex';
-      const devName = npu.device || 'Hailo-10H';
+      const devName = 'NPU';
       const tempVal = npu.temp_c != null ? `${Math.round(npu.temp_c)}°C` : '--';
       const utilVal = npu.nnc_util_pct != null ? `${Math.round(npu.nnc_util_pct)}%` : '0%';
       if (isNarrow) {
         el.npuPill.textContent = `⚡ NPU ${utilVal} · ${tempVal}`;
       } else {
-        el.npuPill.textContent = `⚡ ${devName}：負載 ${utilVal} · ${tempVal}`;
+        el.npuPill.textContent = `⚡ NPU：負載 ${utilVal} · ${tempVal}`;
       }
-      el.npuPill.title = `NPU: ${devName} (${npu.tops || 40} TOPS)\n核心負載: ${utilVal}\n晶片溫度: ${npu.temp_c ?? '--'}°C\nRAM: ${npu.ram_usage_mb || '--'}\n電壓: ${npu.voltage_mv || '--'} mV`;
+      el.npuPill.title = `AI 加速晶片 (NPU)\n核心負載: ${utilVal}\n晶片溫度: ${npu.temp_c ?? '--'}°C\nRAM: ${npu.ram_usage_mb || '--'}\n電壓: ${npu.voltage_mv || '--'} mV`;
     }
     const tDisp = $('hailoTempDisplay');
     const nncDisp = $('hailoNncDisplay');
@@ -1404,6 +1405,30 @@ if (btnToggleMetrics) {
   });
 }
 updateMetricsToggleUI();
+
+// ---- AI 加速晶片 (NPU) 狀態卡片顯示開關 (與效能指標同款，localStorage 持久化，預設顯示) ----
+const btnToggleNpu = $('btnToggleNpu');
+let showNpuCards = localStorage.getItem('localnote_show_npu') !== '0';
+
+function updateNpuToggleUI() {
+  document.querySelectorAll('.npu-card').forEach(c => { c.hidden = !showNpuCards; });
+  if (btnToggleNpu) {
+    btnToggleNpu.style.color = showNpuCards ? 'var(--op)' : 'var(--muted)';
+    btnToggleNpu.style.borderColor = showNpuCards ? 'var(--op)' : 'var(--line)';
+    btnToggleNpu.style.background = showNpuCards ? 'var(--op-soft)' : 'var(--card)';
+    btnToggleNpu.innerHTML = showNpuCards ? '⚡ NPU 狀態 (開)' : '⚡ NPU 狀態';
+  }
+}
+
+if (btnToggleNpu) {
+  btnToggleNpu.addEventListener('click', () => {
+    showNpuCards = !showNpuCards;
+    localStorage.setItem('localnote_show_npu', showNpuCards ? '1' : '0');
+    updateNpuToggleUI();
+    toast(showNpuCards ? '已顯示 AI 加速晶片 (NPU) 狀態卡片' : '已隱藏 AI 加速晶片 (NPU) 狀態卡片');
+  });
+}
+updateNpuToggleUI();
 
 function updateMetricsUI(m) {
   if (!m) return;
