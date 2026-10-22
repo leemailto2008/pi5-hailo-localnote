@@ -15,7 +15,8 @@
 - **KISS 原則 (Keep It Simple, Stupid) & 拒絕自幹 (No DIY):**
   - 最簡邏輯、可讀性至上。避免過度設計 (Over-engineering)。
   - 優先使用現成標準套件或工具，絕不重新發明輪子 (Don't Reinvent the Wheel)。
-- **No Hallucinations:** 嚴禁編造代碼或不存在的 API 參數；不確定時明確告知。
+- **No Hallucinations (嚴禁幻覺與自行編造):** 嚴禁編造代碼、不存在的 API 參數、未量測到的數據或未驗證的結論。每個「根因」「已修好」「正常」的陳述都必須對應到實際執行過的指令輸出或日誌；推測必須明確標示為推測。不確定時直說「不確定」並提出可驗證的下一步，不得用猜測填補空白。
+- **定時回饋進度 (Progress Reporting):** 任何超過 3 分鐘的任務，必須每 **3～15 分鐘**主動回報一次進度：目前在做什麼、已確認的事實、下一步、預估剩餘時間。背景長任務要輪詢結果並回報，不得讓使用者等待而沒有訊息。
 - **No Placeholders:** 嚴禁留下 `// TODO` 或未完成區塊，程式碼產出必須完整且可執行 (Production-ready)。
 - **Error Handling:** 顯式錯誤處理 (Explicit Error Handling)，嚴禁使用 bare `try: ... except: pass`。
 - **Async First:** 涉及 I/O (網路請求、DB) 一律使用 `async/await`。
