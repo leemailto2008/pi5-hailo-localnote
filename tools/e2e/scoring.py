@@ -8,7 +8,8 @@ try:
 except Exception:  # CI 環境可能沒有 OpenCC
     _CC = None
 
-PLACEHOLDERS = ("（核心重點", "若無具體待辦", "只寫真正定案", "不要重複規則", "每點 40 字以內", "依議題分點")
+PLACEHOLDERS = ("（核心重點", "若無具體待辦", "只寫真正定案", "不要重複規則", "每點 40 字以內", "依議題分點",
+                "模型輸出長度不足")   # ensure_sections() 的截斷標記也算失敗
 SECTIONS = ("## 摘要", "## 待辦", "## 決議")
 
 
@@ -69,14 +70,20 @@ def summary_body(markdown: str) -> str:
     return md[:i] if i >= 0 else md
 
 
-def summary_checks(summary: str, fixture: dict) -> dict:
+def summary_checks(summary: str, fixture: dict, transcript: str = None) -> dict:
+    """transcript 有給時，另算 recap_recall_rel：只以逐字稿中確實出現的總結事實為分母 (ASR 聽錯的字 LLM 不可能寫對)。"""
     s = summary or ""
     kws = fixture.get("topic_keywords") or []
     kw_hit = [k for k in kws if k in s]
     denom = min(len(kws), 5) or 1
     lines = [l.strip() for l in s.splitlines() if l.strip() and not l.strip().startswith(("## ", "|---", "| ---"))]
     rh = fact_hits(s, fixture.get("recap_facts") or {})
-    return {
+    rel = {}
+    if transcript is not None:
+        possible = [k for k, v in fact_hits(transcript, fixture.get("recap_facts") or {}).items() if v]
+        rel = {"recap_in_transcript": len(possible),
+               "recap_recall_rel": round(sum(rh[k] for k in possible) / len(possible), 4) if possible else None}
+    return {**rel,
         "summary_chars": len(s),
         "sections_ok": all(x in s for x in SECTIONS),
         "placeholder_echo": any(p in s for p in PLACEHOLDERS),
@@ -117,7 +124,8 @@ def evaluate(result: dict, th: dict) -> list:
             chk("summary_sections", s["sections_ok"], True, s["sections_ok"])
             chk("summary_no_placeholder", not s["placeholder_echo"], True, not s["placeholder_echo"])
             chk("summary_no_duplicate_lines", s["duplicate_lines"], f"<= {th['summary_duplicate_lines_max']}", s["duplicate_lines"] <= th["summary_duplicate_lines_max"])
-            chk("summary_recap_recall", s["recap_recall"], f">= {th['summary_recap_recall_min']}", s["recap_recall"] >= th["summary_recap_recall_min"])
+            rr = s["recap_recall_rel"] if s.get("recap_recall_rel") is not None else s["recap_recall"]
+            chk("summary_recap_recall", rr, f">= {th['summary_recap_recall_min']}", rr >= th["summary_recap_recall_min"])
             chk("summary_topic_coverage", s["topic_coverage"], f">= {th['summary_topic_coverage_min']}", s["topic_coverage"] >= th["summary_topic_coverage_min"])
         lat = result.get("summary_latency_s")
         lim = th["summary_latency_base_s"] + th["summary_latency_per_min_s"] * result.get("audio_s", 0) / 60.0
@@ -136,6 +144,10 @@ def evaluate(result: dict, th: dict) -> list:
     thr_ok = r.get("throttled_start") in (None, "throttled=0x0") and r.get("throttled_end") in (None, "throttled=0x0")
     chk("not_throttled", f"{r.get('throttled_start')}/{r.get('throttled_end')}", "throttled=0x0", thr_ok)
     chk("no_app_errors", len(result.get("errors") or []), "== 0", not result.get("errors"))
+    a = result.get("api")
+    if a is not None and "api_max_gap_s_max" in th:
+        gap = a.get("max_gap_s")
+        chk("api_max_gap_s", gap, f"<= {th['api_max_gap_s_max']}", gap is not None and gap <= th["api_max_gap_s_max"])
     return out
 
 

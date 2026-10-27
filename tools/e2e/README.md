@@ -30,13 +30,17 @@
 
 - 三種聲線：`zh-TW-HsiaoChenNeural`、`zh-TW-YunJheNeural`、`zh-TW-HsiaoYuNeural`；聲線被限流時自動改用備援聲線，實際使用的聲線記錄在 `timeline[].voice`。
 - 疊加 -55 dBFS 底噪：避免整段數位零被 ZeroSplicer 當成 PipeWire 插入的靜音而剪掉。
-- 30 分鐘版限制在 1790 s 以內（`/api/record` 上限 1800 s）。
+- 長會議版本（45 分／1／1.5／2／3／4 小時）共用同一個 seed（`LONG_SERIES_SEED`），議題序列互為前綴：4 小時版的前段就是 3 小時版的內容。逐句 TTS 快取因此可共用，6 個長度合計 6440 句、不重複的只有約 1360 句。
+  - 題庫的值有限，所以長會議裡會有重複的句子。長版本主要用來測長時間穩定度（記憶體、NPU、keep_alive 視窗、網頁停頓、溫度），內容品質仍照同一套門檻評分。
+- 4 小時版限制在 14390 s 以內（`/api/record` 上限 14400 s）。
+- 音檔以串流方式寫出（只讀各句長度、逐句載入），4 小時版也只需數十 MB 記憶體。新舊寫法的輸出逐位元相同，既有 6 個短版本的 sha256 不變。
 
 ## 產生測試音檔（需網路與 edge-tts）
 
 ```bash
 pip install edge-tts numpy
 python3 tools/e2e/gen_test_audio.py --minutes 1 3 5 10 15 30 --out ~/ln_e2e_data
+python3 tools/e2e/gen_test_audio.py --minutes 45 60 90 120 180 240 --out ~/ln_e2e_data   # 長會議，WAV 合計約 1.4 GB
 # 傳到 Pi：FLAC 無損壓縮後再解回，sha256 不變
 ffmpeg -i meeting_30min.wav -c:a flac meeting_30min.flac
 scp meeting_*min.flac pi@<pi>:/home/pi/ln_e2e/data/
@@ -51,6 +55,7 @@ ssh pi@<pi> 'cd /path/to/repo && bash tools/ci/prepare_test_data.sh 1 3 5 10 15 
 python3 -m pytest -q tests                                          # 離線單元測試，任何機器
 python3 tools/e2e/run_suite.py --minutes 1 3                        # Pi 上，quick（約 10 分鐘）
 python3 tools/e2e/run_suite.py --minutes 1 3 5 10 15 30             # Pi 上，full（約 2 小時）
+python3 tools/e2e/run_suite.py --minutes 45 60 90 120 180 240        # Pi 上，long（約 14 小時，含紀要）
 python3 tools/e2e/run_suite.py --minutes 5 --allow-bypass           # 只測錄音 + STT
 ```
 
@@ -59,7 +64,7 @@ python3 tools/e2e/run_suite.py --minutes 5 --allow-bypass           # 只測錄�
 
 ## CI/CD
 
-- **GitLab** (`.gitlab-ci.yml`)：`unit`（docker）→ `deploy_raspi678` → `hil_quick`（main 每次 push）／`hil_full`（排程或手動）。
+- **GitLab** (`.gitlab-ci.yml`)：`unit`（docker）→ `deploy_raspi678` → `hil_quick`（main 每次 push）／`hil_full`（排程或手動）／`hil_long`（排程變數 `LN_E2E_LONG=1`，建議每週；或手動）。
 - **GitHub** (`.github/workflows/ci.yml`)：`unit` 在 GitHub 託管 runner；`hil` 需在 Pi 上註冊 self-hosted runner（label `raspi678`），以 workflow_dispatch 手動觸發。
 - Pi runner 註冊（shell executor，以 `pi` 使用者執行，需要 `sudo -n systemctl restart pi5-dispatcher-api` 免密碼）：
   - GitLab：安裝 gitlab-runner → `gitlab-runner register --executor shell --tag-list raspi678` → 讓服務以 `pi` 執行。

@@ -39,7 +39,32 @@ def api(path, body=None, t=15):
     return json.loads(urllib.request.urlopen(req, timeout=t).read())
 
 
-def wait_idle(timeout=1800):
+def api_retry(path, body=None, t=30, tries=4):
+    """app 在 STT 期間 event loop 可能卡住數秒；最終狀態讀取改為重試，避免單次逾時讓整個案例作廢。"""
+    for i in range(tries):
+        try:
+            return api(path, body, t)
+        except Exception:
+            if i == tries - 1:
+                raise
+            time.sleep(3)
+
+
+def _api_stats(lat, gaps, timeouts):
+    lat = sorted(lat)
+    pick = lambda q: round(lat[min(len(lat) - 1, int(q * len(lat)))], 2) if lat else None
+    return {"polls": len(lat), "timeouts": timeouts, "latency_p50_s": pick(0.5), "latency_p95_s": pick(0.95),
+            "latency_max_s": round(lat[-1], 2) if lat else None, "max_gap_s": round(max(gaps), 1) if gaps else None,
+            "gaps_gt3s": sum(g > 3 for g in gaps)}
+
+
+def post_record_budget_s(audio_s):
+    """錄音結束後等待 app 完成的上限：紀要延遲門檻 (120 s + 12 s/分鐘) 的 1.5 倍再加 10 分鐘，至少 25 分鐘。
+    4 小時會議約 5100 s (舊版固定 1500 s，4 小時案例會在紀要完成前就被判逾時)。"""
+    return max(1500.0, 1.5 * (120 + 12 * audio_s / 60.0) + 600)
+
+
+def wait_idle(timeout=4 * 3600):
     t0 = time.time()
     while time.time() - t0 < timeout:
         try:
@@ -92,15 +117,29 @@ def run_case(wav, fixture_path, label, bypass_summary=False, out_dir="/tmp"):
     t0 = time.time()
     jt0 = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     job, phases, play, rec_end = None, {}, None, None
+    api_lat, api_gaps, api_timeouts = [], [], 0
     try:
         with open(FORCE, "w") as f:
             f.write(SINK + ".monitor")
         job = api("/api/record", {"seconds": int(dur + 4), "bypass_summary": bool(bypass_summary)}).get("job")
         time.sleep(1.5)
         play = subprocess.Popen(["ffmpeg", "-nostdin", "-v", "error", "-re", "-i", wav, "-f", "pulse", "-device", SINK, "ln_e2e"])
-        last = None
-        while time.time() - t0 < dur + 1500:
-            s = api("/api/status")
+        last, last_ok, fail_since = None, time.time(), None
+        while time.time() - t0 < dur + post_record_budget_s(dur):
+            q0 = time.time()
+            try:
+                s = api("/api/status", t=20)
+            except Exception:
+                api_timeouts += 1
+                fail_since = fail_since or q0
+                if time.time() - fail_since > 180:
+                    raise RuntimeError("/api/status 連續 180 s 無回應")
+                time.sleep(1)
+                continue
+            q1 = time.time()
+            api_lat.append(q1 - q0)
+            api_gaps.append(q1 - last_ok)
+            last_ok, fail_since = q1, None
             ph = (s.get("state"), s.get("phase"))
             if ph != last:
                 phases[f"{ph[0]}/{ph[1]}"] = round(time.time() - t0, 1)
@@ -125,7 +164,7 @@ def run_case(wav, fixture_path, label, bypass_summary=False, out_dir="/tmp"):
             play.kill()
     total = round(time.time() - t0, 1)
     jt1 = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    s, r = api("/api/status"), api("/api/result")
+    s, r = api_retry("/api/status"), api_retry("/api/result")
     transcript = s.get("transcript") or r.get("transcript") or ""
     summary = s.get("summary_stream") or scoring.summary_body(r.get("markdown") or "")
     log = sh(f"journalctl -u pi5-dispatcher-api --since '{jt0}' --until '{jt1}' --no-pager", 60)
@@ -145,9 +184,10 @@ def run_case(wav, fixture_path, label, bypass_summary=False, out_dir="/tmp"):
         "llm_fallbacks": log.count("trying next backend"),
         "zero_splice": [l[l.find("removed"):][:120] for l in log.splitlines() if "zero-splice" in l],
         "errors": errors[:20],
+        "api": _api_stats(api_lat, api_gaps, api_timeouts),
         "resources": _resources(rows, t0, rec_end, total, head, tail_),
         "transcript_eval": scoring.transcript_checks(transcript, fixture),
-        "summary_eval": None if bypass_summary else scoring.summary_checks(summary, fixture),
+        "summary_eval": None if bypass_summary else scoring.summary_checks(summary, fixture, transcript),
         "transcript": transcript, "summary": summary,
     }
     with open(os.path.join(out_dir, f"e2e_{label}.json"), "w", encoding="utf-8") as f:

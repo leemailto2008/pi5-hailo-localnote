@@ -19,7 +19,13 @@ CHARS_PER_SEC = 3.85     # edge-tts zh-TW 實測 (不含標點)
 LINE_GAP_S = 0.6
 TOPIC_GAP_S = 1.2
 LEAD_S, TAIL_S = 1.0, 1.5
-MAX_AUDIO_S = 1790       # /api/record seconds 上限 1800，保留 e2e 前後緩衝
+MAX_AUDIO_S = 14390      # /api/record seconds 上限 14400 (4 小時)，保留 e2e 前後緩衝
+SHORT_MINUTES = (1, 3, 5, 10, 15, 30)
+LONG_MINUTES = (45, 60, 90, 120, 180, 240)
+# 長會議系列共用同一個 seed：議題序列互為前綴 (4 小時版的前段 = 3 小時版的內容)，逐句 TTS 快取可共用，
+# 總共只需合成約 4 小時份量的語音 (不必 12.25 小時)。短會議沿用各自的 seed，既有 fixture 與音檔不變。
+LONG_SERIES_SEED = 45007
+MAX_TOPICS = 1000        # 4 小時約 660 個議題 (舊上限 200 只夠約 70 分鐘)
 
 SPEAKERS = {"A": "zh-TW-HsiaoChenNeural", "B": "zh-TW-YunJheNeural", "C": "zh-TW-HsiaoYuNeural"}
 
@@ -231,7 +237,9 @@ def est_seconds(lines) -> float:
 def build_meeting(minutes: float, seed: int = None, target_s: float = None) -> dict:
     """target_s：覆寫目標秒數 (gen_test_audio.py 依實際合成長度校正時使用)。"""
     target = min(target_s if target_s else minutes * 60.0, MAX_AUDIO_S)
-    r = random.Random(seed if seed is not None else int(minutes * 1000) + 7)
+    if seed is None:
+        seed = LONG_SERIES_SEED if minutes >= min(LONG_MINUTES) else int(minutes * 1000) + 7
+    r = random.Random(seed)
     lib = topic_library()
     order = list(range(len(lib)))
     r.shuffle(order)
@@ -252,7 +260,7 @@ def build_meeting(minutes: float, seed: int = None, target_s: float = None) -> d
             break
         topics.append({"index": k, "keyword": kw, "lines": [{"spk": a, "text": b} for a, b in lines],
                        "facts": {f"T{k}{kw}-{lab}": al for lab, al in facts.items()}, "recap": recap, "est_s": round(est_seconds(lines), 1)})
-        if len(topics) >= 200:
+        if len(topics) >= MAX_TOPICS:
             break
     recap_topics = topics[:3] if len(topics) <= 3 else [topics[0], topics[len(topics) // 2], topics[-1]]
     closing = [{"spk": "A", "text": "好，最後總結一下。"}]
@@ -277,7 +285,7 @@ def build_meeting(minutes: float, seed: int = None, target_s: float = None) -> d
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--minutes", nargs="+", type=float, default=[1, 3, 5, 10, 15, 30])
+    ap.add_argument("--minutes", nargs="+", type=float, default=list(SHORT_MINUTES), help=f"長會議：{' '.join(map(str, LONG_MINUTES))}")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures"))
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)

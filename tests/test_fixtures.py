@@ -19,8 +19,26 @@ def _load(p):
 
 def test_all_lengths_present():
     names = {os.path.basename(p) for p in FIXTURES}
-    for m in (1, 3, 5, 10, 15, 30):
+    for m in meeting_gen.SHORT_MINUTES + meeting_gen.LONG_MINUTES:
         assert f"meeting_{m}min.json" in names
+
+
+def test_long_series_share_topic_prefix():
+    """長會議共用 seed：較短者的議題段落必須是較長者的前綴 (TTS 快取可共用的前提)。"""
+    long = [_load(os.path.join(FX_DIR, f"meeting_{m}min.json")) for m in meeting_gen.LONG_MINUTES]
+    for a, b in zip(long, long[1:]):
+        sa, sb = a["segments"][1:-1], b["segments"][1:-1]
+        assert sb[:len(sa)] == sa
+
+
+def test_api_limit_covers_longest_fixture():
+    import re
+    main_py = open(os.path.join(os.path.dirname(FX_DIR), "..", "..", "code_dispatcher", "main.py"), encoding="utf-8").read()
+    le = int(re.search(r"seconds: int = Field\(default=90, ge=10, le=(\d+)", main_py).group(1))
+    for p in FIXTURES:
+        fx = _load(p)
+        if "audio" in fx:
+            assert int(fx["audio"]["duration_s"] + 4) <= le   # e2e.py 以 seconds=int(dur + 4) 呼叫 /api/record
 
 
 @pytest.mark.parametrize("path", FIXTURES, ids=os.path.basename)

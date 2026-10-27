@@ -56,6 +56,39 @@ def test_evaluate_pass_and_fail():
     assert failed == {"transcript_cer", "stt_npu_ratio", "summary_latency_s"}
 
 
+def test_api_gap_check():
+    th = dict(scoring.thresholds_for(TH, 3), api_max_gap_s_max=8)
+    names = lambda r: {c["check"]: c["passed"] for c in scoring.evaluate(r, th)}
+    assert "api_max_gap_s" not in names(_result())                      # 舊結果沒有 api 欄位 → 不評
+    assert names(_result(api={"max_gap_s": 2.1}))["api_max_gap_s"] is True
+    assert names(_result(api={"max_gap_s": 18.4}))["api_max_gap_s"] is False
+    assert names(_result(api={"max_gap_s": None}))["api_max_gap_s"] is False
+
+
+def test_api_stats():
+    import e2e
+    st = e2e._api_stats([0.01, 0.02, 4.0], [1.0, 1.1, 18.4], 1)
+    assert st["polls"] == 3 and st["timeouts"] == 1 and st["max_gap_s"] == 18.4 and st["gaps_gt3s"] == 1
+    assert e2e._api_stats([], [], 0)["max_gap_s"] is None
+
+
 def test_thresholds_override():
     assert scoring.thresholds_for(TH, 30)["stt_tail_wait_max_s"] == 15
     assert scoring.thresholds_for(TH, 5)["stt_tail_wait_max_s"] == 10
+
+
+def test_recap_recall_relative_to_transcript():
+    fx = {"topic_keywords": [], "recap_facts": {"a": ["王經理"], "b": ["新光材料"]}}
+    s = scoring.summary_checks("## 摘要\n- 王經理負責", fx, transcript="王經理說星光材料")   # ASR 把新光聽成星光
+    assert s["recap_recall"] == 0.5 and s["recap_in_transcript"] == 1 and s["recap_recall_rel"] == 1.0
+    th = scoring.thresholds_for(TH, 3)
+    r = _result(summary_eval={**_result()["summary_eval"], "recap_recall": 0.5, "recap_recall_rel": 1.0})
+    assert {c["check"]: c["passed"] for c in scoring.evaluate(r, th)}["summary_recap_recall"] is True
+    assert "recap_recall_rel" not in scoring.summary_checks("x", fx)                       # 沒給逐字稿 → 不算
+
+
+def test_post_record_budget_scales_to_4h():
+    import e2e
+    assert e2e.post_record_budget_s(75) == 1500                       # 短會議維持至少 25 分鐘
+    b = e2e.post_record_budget_s(14390)                               # 4 小時
+    assert b > 1.5 * (120 + 12 * 14390 / 60) and b < 6000

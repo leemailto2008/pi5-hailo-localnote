@@ -4,10 +4,12 @@
 流程：meeting_gen.build_meeting() 產生腳本 → edge-tts 逐句合成 (依 voice+text 快取) → 依 fixture 的 gaps 串接
 → 疊加 -55 dBFS 底噪 (避免整段數位零被 ZeroSplicer 視為 PipeWire 插入的靜音) → 量測實際長度；
 若超出 [0.88, 1.12]×目標 或超過 MAX_AUDIO_S，依比例調整目標重建腳本 (最多 4 次)。
+音檔以串流方式寫出 (只量長度、逐句載入)，4 小時版也只需數十 MB 記憶體。
 
 需求：pip install edge-tts numpy；ffmpeg；可連線 speech.platform.bing.com。
 usage:
   gen_test_audio.py --minutes 1 3 5 10 15 30 --fixtures tools/e2e/fixtures --out ~/ln_e2e_data
+  gen_test_audio.py --minutes 45 60 90 120 180 240 --out ~/ln_e2e_data      # 長會議 (最長 4 小時)
 """
 import argparse
 import asyncio
@@ -76,32 +78,52 @@ def synth_lines(meeting, cache_dir, concurrency=3):
             sem = asyncio.Semaphore(concurrency)
             await asyncio.gather(*[_synth_one(sem, v, t, p) for v, t, p in todo])
         asyncio.run(run())
-    clips, voices = [], []
+    paths, voices = [], []
     for s, t in meeting["lines"]:
         p = os.path.join(cache_dir, _key(meeting["speakers"][s], t) + ".npy")
-        clips.append(np.load(p))
+        paths.append(p)
         vf = p + ".voice"
         voices.append(open(vf).read().strip() if os.path.exists(vf) else meeting["speakers"][s])
-    return clips, voices, len(todo)
+    return paths, voices, len(todo)
 
 
-def assemble(meeting, clips, voices, seed=1):
+def layout(meeting, paths, voices):
+    """依 fixture 的 gaps 排出時間軸，不載入音訊 (只讀各句長度)。回傳 (events, timeline, total_samples)；
+    events 依序為 ("gap", 樣本數) 或 ("clip", 快取路徑)。"""
     g = meeting["gaps"]
-    parts, timeline, pos, i = [np.zeros(int(SR * g["lead_s"]), np.float32)], [], int(SR * g["lead_s"]), 0
+    n = int(SR * g["lead_s"])
+    events, timeline, pos, i = [("gap", n)], [], n, 0
     for si, seg in enumerate(meeting["segments"]):
         if si:
-            parts.append(np.zeros(int(SR * g["segment_s"]), np.float32)); pos += int(SR * g["segment_s"])
+            n = int(SR * g["segment_s"]); events.append(("gap", n)); pos += n
         for li, line in enumerate(seg["lines"]):
             if li:
-                parts.append(np.zeros(int(SR * g["line_s"]), np.float32)); pos += int(SR * g["line_s"])
-            c = clips[i].astype(np.float32); i += 1
-            timeline.append({"segment": seg["name"], "spk": line["spk"], "voice": voices[i - 1],
-                             "start_s": round(pos / SR, 3), "end_s": round((pos + len(c)) / SR, 3)})
-            parts.append(c); pos += len(c)
-    parts.append(np.zeros(int(SR * g["tail_s"]), np.float32))
-    x = np.concatenate(parts) * GAIN
-    x += np.random.default_rng(seed).standard_normal(len(x)).astype(np.float32) * (32768 * 10 ** (NOISE_DBFS / 20))
-    return np.clip(np.round(x), -32768, 32767).astype("<i2"), timeline
+                n = int(SR * g["line_s"]); events.append(("gap", n)); pos += n
+            length = np.load(paths[i], mmap_mode="r").shape[0]
+            timeline.append({"segment": seg["name"], "spk": line["spk"], "voice": voices[i],
+                             "start_s": round(pos / SR, 3), "end_s": round((pos + length) / SR, 3)})
+            events.append(("clip", paths[i])); pos += length; i += 1
+    n = int(SR * g["tail_s"]); events.append(("gap", n)); pos += n
+    return events, timeline, pos
+
+
+def write_wav(events, wav_path, seed=1):
+    """逐段串接 + 增益 + -55 dBFS 底噪並直接寫入 WAV，記憶體只放一句 (4 小時音訊舊做法需約 3 GB)。
+    底噪以同一個 Generator 依序產生，結果與舊版整段一次產生逐位元相同 (既有 fixture 的 sha256 不變)。回傳 sha256。"""
+    rng = np.random.default_rng(seed)
+    scale = 32768 * 10 ** (NOISE_DBFS / 20)
+    with wave.open(wav_path, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR)
+        for kind, v in events:
+            x = np.zeros(v, np.float32) if kind == "gap" else np.load(v).astype(np.float32)
+            x = x * GAIN
+            x += rng.standard_normal(len(x)).astype(np.float32) * scale
+            w.writeframes(np.clip(np.round(x), -32768, 32767).astype("<i2").tobytes())
+    h = hashlib.sha256()
+    with open(wav_path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
 
 
 def build_one(minutes, fixtures_dir, out_dir, cache_dir):
@@ -109,14 +131,14 @@ def build_one(minutes, fixtures_dir, out_dir, cache_dir):
     t, best = target, None
     for it in range(4):
         m = meeting_gen.build_meeting(minutes, target_s=t)
-        clips, voices, new = synth_lines(m, cache_dir)
-        y, timeline = assemble(m, clips, voices)
-        dur = len(y) / SR
+        paths, voices, new = synth_lines(m, cache_dir)
+        events, timeline, n_samples = layout(m, paths, voices)
+        dur = n_samples / SR
         fits_cap = dur <= meeting_gen.MAX_AUDIO_S
         ok = fits_cap and 0.88 * target <= dur <= 1.12 * target
         print(f"  {minutes:g}min iter{it}: topics={m['n_topics']} lines={len(m['lines'])} new_tts={new} audio={dur:.1f}s target={target:.0f}s {'OK' if ok else 'adjust'}", flush=True)
         if fits_cap and (best is None or abs(dur - target) < abs(best[2] - target)):
-            best = (m, (y, timeline), dur)
+            best = (m, (events, timeline), dur)
         if ok:
             break
         t = t * target / dur
@@ -124,12 +146,10 @@ def build_one(minutes, fixtures_dir, out_dir, cache_dir):
     tol = 0.30 if minutes <= 1 else 0.12
     if best is None or abs(best[2] - target) > tol * target:
         raise SystemExit(f"could not fit {minutes} min within tolerance")
-    m, (y, timeline), dur = best
+    m, (events, timeline), dur = best
     wav_name = f"meeting_{minutes:g}min.wav"
     wav_path = os.path.join(out_dir, wav_name)
-    with wave.open(wav_path, "wb") as w:
-        w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR); w.writeframes(y.tobytes())
-    sha = hashlib.sha256(open(wav_path, "rb").read()).hexdigest()
+    sha = write_wav(events, wav_path)
     try:
         import edge_tts
         ver = getattr(edge_tts, "__version__", "unknown")
@@ -147,7 +167,8 @@ def build_one(minutes, fixtures_dir, out_dir, cache_dir):
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     ap = argparse.ArgumentParser()
-    ap.add_argument("--minutes", nargs="+", type=float, default=[1, 3, 5, 10, 15, 30])
+    ap.add_argument("--minutes", nargs="+", type=float, default=list(meeting_gen.SHORT_MINUTES),
+                    help=f"長會議：{' '.join(map(str, meeting_gen.LONG_MINUTES))} (共用 seed，TTS 快取可共用)")
     ap.add_argument("--fixtures", default=os.path.join(here, "fixtures"))
     ap.add_argument("--out", required=True, help="WAV 輸出目錄 (不進 git)")
     ap.add_argument("--cache", default=os.path.join(os.path.expanduser("~"), ".cache", "ln_tts"), help="逐句 TTS 快取目錄")

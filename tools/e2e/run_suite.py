@@ -58,7 +58,8 @@ def write_markdown(path, cases, meta):
         t, s, res = r.get("transcript_eval") or {}, r.get("summary_eval") or {}, r.get("resources") or {}
         ok = "✅" if all(k["passed"] for k in c["checks"]) else "❌"
         npu = f"{r.get('stt_npu_chunks', 0)}/{r.get('stt_npu_chunks', 0) + r.get('stt_cpu_chunks', 0)}"
-        L.append(f"| {c['minutes']:g} 分 | {ok} | {t.get('cer', '-')} | {t.get('fact_recall', '-')} | {s.get('recap_recall', '-')} | "
+        rr = s.get('recap_recall', '-') if s.get('recap_recall_rel') is None else f"{s.get('recap_recall')} (逐字稿內 {s.get('recap_recall_rel')})"
+        L.append(f"| {c['minutes']:g} 分 | {ok} | {t.get('cer', '-')} | {t.get('fact_recall', '-')} | {rr} | "
                  f"{s.get('topic_coverage', '-')} | {r.get('summary_latency_s', '-')} s | {npu} | {res.get('rec_cpu_avg', '-')}% | "
                  f"{res.get('cpu_temp_max', '-')} °C | {res.get('ram_peak_mb', '-')} MB |")
     for c in cases:
