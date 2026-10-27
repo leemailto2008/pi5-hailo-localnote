@@ -6,6 +6,7 @@ in-memory PCM streaming to eliminate MicroSD/NVMe flash wear and sub-second I/O 
 """
 
 import os
+import time
 import sys
 import shutil
 import subprocess
@@ -14,7 +15,11 @@ from typing import Dict, Any, Optional, Union, List
 import numpy as np
 
 # Maximum RAM quota allocated to audio sessions (Default: 64 MB)
-MAX_RAM_CACHE_BYTES = 64 * 1024 * 1024
+# 2026-10-27：會議最長 4 小時 (opus 64 kbps ≈ 115 MB)，舊配額 64 MB 會讓一場長會議單檔就超標而被整個刪掉。
+# raspi678 的 /dev/shm 為 4 GB；配額 768 MB 約可保留 6 場 4 小時會議或數十場短會議。
+MAX_RAM_CACHE_BYTES = int(os.environ.get("PI5_AUDIO_CACHE_MB", "768")) * 1024 * 1024
+# 最近仍在寫入 (錄音中) 的檔案絕不清除
+ACTIVE_WRITE_GRACE_SEC = 120
 # Maximum number of concurrent audio sessions preserved in RAM ring buffer
 MAX_RETAINED_SESSIONS = 15
 
@@ -127,13 +132,16 @@ def evict_audio_ring_buffer(
         print(f"[VoiceMemory] Error reading ring buffer directory: {e}")
         return {"evicted_count": 0, "reclaimed_bytes": 0}
 
-    # Sort oldest first (FIFO eviction)
+    # Sort oldest first (FIFO eviction)；最新一筆與最近 ACTIVE_WRITE_GRACE_SEC 內仍在寫入的不列入清除候選
     entries.sort(key=lambda x: x["mtime"])
+    now = time.time()
+    protected = [e for e in entries if now - e["mtime"] < ACTIVE_WRITE_GRACE_SEC] + entries[-1:]
+    entries = [e for e in entries if e not in protected]
 
     evicted_count = 0
     reclaimed_bytes = 0
 
-    session_count = len(entries)
+    session_count = len(entries) + len(protected)
     for entry in entries:
         if total_size <= max_bytes and session_count <= max_sessions:
             break

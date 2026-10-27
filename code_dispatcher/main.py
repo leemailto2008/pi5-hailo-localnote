@@ -94,6 +94,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("shutdown")
+def _shutdown_stt_worker():
+    """關閉 STT 子行程 (會先釋放 Hailo NPU)。"""
+    try:
+        from stt_worker import stt_worker
+        stt_worker.shutdown()
+    except Exception as e:
+        print(f"[Shutdown] stt worker: {e}")
+
+
 @app.on_event("startup")
 async def startup_event():
     import asyncio
@@ -1325,7 +1335,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # -------------------------------------------------------------
 
 class DemoRecordRequest(BaseModel):
-    seconds: int = Field(default=90, ge=10, le=1800, description="錄音秒數")
+    seconds: int = Field(default=90, ge=10, le=14400, description="錄音秒數 (最長 4 小時)")
     bypass_summary: Optional[bool] = Field(default=None, description="是否跳過 AI 總結，僅輸出完整逐字稿")
 
 
@@ -1361,104 +1371,87 @@ async def get_bypass_summary_config() -> Dict[str, Any]:
     return {"bypass_summary": getattr(minutes_manager, "bypass_summary", False)}
 
 
-_hailo_cache: Dict[str, Any] = {
-    "time": 0.0,
-    "data": {
-        "detected": True,
-        "device": "Hailo-10H",
-        "tops": 40,
-        "device_id": "pci/0001:01:00.0",
-        "arch": "HAILO10H",
-        "nnc_util_pct": 0.0,
-        "cpu_util_pct": 0.0,
-        "ram_util_pct": 6.8,
-        "ram_usage_mb": "490 / 7221",
-        "temp_c": 47.0,
-        "voltage_mv": 798
-    }
-}
+# NPU 遙測 (2026-10-27 修正)：
+# - 舊版讀不到 hailortcli 輸出時不更新、也沒有時間戳，網頁會一直顯示舊值 (實測 12:27–13:48 凍結在 96.8% / 59.2 °C / 3734 MB)；
+#   推論中還會塞入假的 95%。改為只存真實取樣與取樣時間，超過 NPU_STALE_SEC 未更新即標示 stale，前端顯示「—」。
+# - hailortcli monitor 連線裝置時若撞上 hailo-ollama / Whisper 建立 VDevice，會造成 HAILO_DEVICE_TEMPORARILY_UNAVAILABLE；
+#   因此錄音、語音轉文字與紀要整理期間都暫停取樣 (paused 告知前端原因)。
+NPU_STALE_SEC = 10.0
+_hailo_cache: Dict[str, Any] = {"time": 0.0, "data": None, "paused": None}
 _hailo_monitor_started: bool = False
 
 
+def _npu_pause_reason() -> Optional[str]:
+    """NPU 正被使用 (或即將被使用) 時回傳原因，期間不跑 hailortcli。"""
+    try:
+        from voice_streaming import is_any_recording_active
+        if is_any_recording_active():
+            return "recording"
+    except Exception:
+        pass
+    try:
+        from meeting_minutes import minutes_manager
+        st = minutes_manager.status
+        if st.state == "recording":
+            return "recording"
+        if st.state == "processing":
+            return "summary" if st.phase == "summarize" else "stt"
+    except Exception:
+        pass
+    try:
+        from stt_worker import stt_worker
+        if stt_worker.is_busy():
+            return "stt"
+    except Exception:
+        pass
+    return None
+
+
 def _hailo_telemetry_loop():
-    """Dedicated background daemon thread sampling Hailo-10H stats without ever blocking HTTP requests."""
-    global _hailo_cache
+    """背景執行緒：只在 NPU 閒置時以 hailortcli monitor 取樣，不阻塞 HTTP。"""
     cmd = ["script", "-q", "-c", "timeout 1.5 hailortcli monitor", "/dev/null"]
     while True:
-        try:
-            # Strict AGENTS.md rule: Zero bus contention or PCIe spikes during audio recording
-            from voice_streaming import is_any_recording_active
-            if is_any_recording_active():
-                time.sleep(1.0)
-                continue
-        except Exception:
-            pass
-
-        try:
-            # Check if Hailo NPU is currently executing Whisper inference
-            from hailo_whisper.engine import is_hailo_inference_active
-            is_inferring = is_hailo_inference_active()
-        except Exception:
-            is_inferring = False
-
-        if is_inferring:
-            if _hailo_cache.get("data"):
-                _hailo_cache["data"]["nnc_util_pct"] = 95.0
-                _hailo_cache["time"] = time.time()
+        reason = _npu_pause_reason()
+        _hailo_cache["paused"] = reason
+        if reason:
             time.sleep(1.0)
             continue
-
         try:
-            res = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                timeout=2.5
-            )
-            data_line = ""
-            for line in res.stdout.splitlines():
-                line_str = line.strip()
-                if "pci/" in line_str:
-                    data_line = line_str
-                    break
-            if data_line:
-                parts = re.split(r"\s{2,}", data_line)
-                if len(parts) >= 8:
-                    _hailo_cache["data"] = {
-                        "detected": True,
-                        "device": "Hailo-10H",
-                        "tops": 40,
-                        "device_id": parts[0],
-                        "arch": parts[1],
-                        "nnc_util_pct": float(parts[2]),
-                        "cpu_util_pct": float(parts[3]),
-                        "ram_util_pct": float(parts[4]),
-                        "ram_usage_mb": parts[5],
-                        "temp_c": float(parts[6]),
-                        "voltage_mv": int(parts[7])
-                    }
-                    _hailo_cache["time"] = time.time()
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=2.5)
+            data_line = next((l.strip() for l in res.stdout.splitlines() if "pci/" in l), "")
+            parts = re.split(r"\s{2,}", data_line) if data_line else []
+            if len(parts) >= 8:
+                _hailo_cache["data"] = {
+                    "detected": True,
+                    "device": "Hailo-10H",
+                    "tops": 40,
+                    "device_id": parts[0],
+                    "arch": parts[1],
+                    "nnc_util_pct": float(parts[2]),
+                    "cpu_util_pct": float(parts[3]),
+                    "ram_util_pct": float(parts[4]),
+                    "ram_usage_mb": parts[5],
+                    "temp_c": float(parts[6]),
+                    "voltage_mv": int(parts[7]),
+                }
+                _hailo_cache["time"] = time.time()
         except Exception:
             pass
-
-        time.sleep(2.0)
+        time.sleep(3.0)
 
 
 def get_hailo10_stats() -> Dict[str, Any]:
-    """Retrieve Hailo-10H NPU live stats directly from RAM cache with 0ms latency."""
-    global _hailo_cache, _hailo_monitor_started
+    """回傳最後一次真實取樣 + 取樣年齡 (age_s)、是否過期 (stale) 與暫停原因 (paused)。"""
+    global _hailo_monitor_started
     if not _hailo_monitor_started:
         _hailo_monitor_started = True
         th = threading.Thread(target=_hailo_telemetry_loop, daemon=True, name="hailo-monitor-daemon")
         th.start()
-    return _hailo_cache.get("data") or {
-        "detected": True,
-        "device": "Hailo-10H",
-        "tops": 40,
-        "temp_c": 47.0,
-        "nnc_util_pct": 0.0
-    }
+    t = _hailo_cache.get("time") or 0.0
+    age = round(time.time() - t, 1) if t else None
+    out = dict(_hailo_cache.get("data") or {"detected": True, "device": "Hailo-10H", "tops": 40})
+    out.update({"age_s": age, "stale": age is None or age > NPU_STALE_SEC, "paused": _hailo_cache.get("paused")})
+    return out
 
 
 @app.get("/api/system/hailo", tags=["System"])
@@ -1485,7 +1478,10 @@ def get_system_telemetry_payload() -> Dict[str, Any]:
             "nnc_util_pct": hailo10.get("nnc_util_pct"),
             "ram_usage_mb": hailo10.get("ram_usage_mb"),
             "ram_util_pct": hailo10.get("ram_util_pct"),
-            "voltage_mv": hailo10.get("voltage_mv")
+            "voltage_mv": hailo10.get("voltage_mv"),
+            "age_s": hailo10.get("age_s"),
+            "stale": hailo10.get("stale"),
+            "paused": hailo10.get("paused"),
         }
     else:
         try:

@@ -219,6 +219,12 @@ details[open] summary::after{content:"收起 ▴"}
                 <option value="600">10 分鐘</option>
                 <option value="900">15 分鐘</option>
                 <option value="1800">30 分鐘（完整會議）</option>
+                <option value="2700">45 分鐘</option>
+                <option value="3600">1 小時</option>
+                <option value="5400">1 小時 30 分</option>
+                <option value="7200">2 小時</option>
+                <option value="10800">3 小時</option>
+                <option value="14400">4 小時（上限）</option>
               </select>
             </div>
             <div class="row" style="margin-top:6px;padding:6px 10px;background:var(--set-bg);border-radius:8px;justify-content:space-between;align-items:center;">
@@ -684,7 +690,17 @@ async function api(path, body, timeoutMs = 15000) {
   }
 }
 function toast(msg, ms = 1800) { el.toast.textContent = msg; el.toast.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.toast.classList.remove('show'), ms); }
-function fmt(s) { s = Math.max(0, Math.round(s)); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
+function fmt(s) {
+  s = Math.max(0, Math.round(s));
+  const p2 = n => String(n).padStart(2, '0');
+  if (s >= 3600) return `${Math.floor(s / 3600)}:${p2(Math.floor(s / 60) % 60)}:${p2(s % 60)}`;   // 長會議 (最長 4 小時) 顯示 h:mm:ss
+  return p2(Math.floor(s / 60)) + ':' + p2(s % 60);
+}
+function fmtDurText(s) {
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, sec = s % 60;
+  return h ? `${h} 小時 ${m} 分` : `${Math.floor(s / 60)} 分 ${sec} 秒`;
+}
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 /* ---------- 視圖切換 (SPA Router) 與藍牙智慧自動更新 ---------- */
@@ -781,17 +797,24 @@ function updateSystemUI(s) {
   }
   const npu = (s && s.npu && s.npu.detected) ? s.npu : (s && s.hailo && s.hailo.detected ? s.hailo : (lastSystemData && lastSystemData.npu && lastSystemData.npu.detected ? lastSystemData.npu : null));
   if (npu) {
+    // stale：超過 10 秒沒有真實取樣 (錄音／語音轉文字／紀要整理期間會暫停量測，避免干擾 NPU)，一律顯示「—」而不是舊值
+    const npuStale = !!npu.stale;
+    const npuPauseTxt = { recording: '錄音中，暫停量測', stt: '語音轉文字使用中', summary: '紀要整理使用中' }[npu.paused] || '';
+    const npuAgeTxt = npu.age_s != null ? `最後量測：${Math.round(npu.age_s)} 秒前` : '尚未量測';
+    const npuNote = npuPauseTxt || (npu.age_s != null ? `無最新資料（${Math.round(npu.age_s)} 秒前）` : '量測中…');
     if (el.npuPill) {
       el.npuPill.style.display = 'inline-flex';
-      const devName = 'NPU';
-      const tempVal = npu.temp_c != null ? `${Math.round(npu.temp_c)}°C` : '--';
-      const utilVal = npu.nnc_util_pct != null ? `${Math.round(npu.nnc_util_pct)}%` : '0%';
-      if (isNarrow) {
+      const tempVal = (!npuStale && npu.temp_c != null) ? `${Math.round(npu.temp_c)}°C` : '—';
+      const utilVal = (!npuStale && npu.nnc_util_pct != null) ? `${Math.round(npu.nnc_util_pct)}%` : '—';
+      if (npuStale) {
+        el.npuPill.textContent = isNarrow ? `⚡ NPU ${npuNote}` : `⚡ NPU：${npuNote}`;
+      } else if (isNarrow) {
         el.npuPill.textContent = `⚡ NPU ${utilVal} · ${tempVal}`;
       } else {
         el.npuPill.textContent = `⚡ NPU：負載 ${utilVal} · ${tempVal}`;
       }
-      el.npuPill.title = `AI 加速晶片 (NPU)\n核心負載: ${utilVal}\n晶片溫度: ${npu.temp_c ?? '--'}°C\nRAM: ${npu.ram_usage_mb || '--'}\n電壓: ${npu.voltage_mv || '--'} mV`;
+      el.npuPill.title = `AI 加速晶片 (NPU)\n核心負載: ${utilVal}\n晶片溫度: ${tempVal}\nRAM: ${npuStale ? '—' : (npu.ram_usage_mb || '—')}\n` +
+        `電壓: ${npuStale ? '—' : (npu.voltage_mv || '—')} mV\n${npuAgeTxt}`;
     }
     const tDisp = $('hailoTempDisplay');
     const nncDisp = $('hailoNncDisplay');
@@ -801,6 +824,16 @@ function updateSystemUI(s) {
     const tempStatus = $('hailoTempStatus');
     const nncStatus = $('hailoNncStatus');
     const liveBadge = $('hailoLiveBadge');
+    if (npuStale) {
+      [tDisp, nncDisp, ramDisp, ramPct, voltDisp, $('btHubHailoTempDisplay'), $('btHubHailoNncDisplay'), $('btHubHailoRamDisplay')]
+        .forEach(d => { if (d) d.textContent = '—'; });
+      [tempStatus, nncStatus].forEach(d => { if (d) { d.textContent = npuNote; d.style.color = '#94a3b8'; } });
+      if (liveBadge) {
+        liveBadge.textContent = npu.paused ? `● ${npuPauseTxt}` : '● 無最新資料';
+        liveBadge.style.color = npu.paused ? '#38bdf8' : '#94a3b8';
+        liveBadge.style.borderColor = npu.paused ? '#0284c7' : '#475569';
+      }
+    } else {
     if (tDisp && npu.temp_c != null) {
       tDisp.textContent = `${npu.temp_c.toFixed(1)} °C`;
       if (tempStatus) {
@@ -830,6 +863,7 @@ function updateSystemUI(s) {
     if (btTDisp && npu.temp_c != null) btTDisp.textContent = `${npu.temp_c.toFixed(1)} °C`;
     if (btNncDisp && npu.nnc_util_pct != null) btNncDisp.textContent = `${Math.round(npu.nnc_util_pct)} %`;
     if (btRamDisp && npu.ram_usage_mb) btRamDisp.textContent = `${npu.ram_usage_mb} MB`;
+    }
   }
   if (s.ssid) el.ssid.textContent = s.ssid;
   if (s.host) el.host.textContent = s.host;
@@ -1993,7 +2027,7 @@ function renderMinutes(r) {
   }
   if (!r.summary && !r.todos) { el.minutes.innerHTML = '<div class="empty">還沒有紀要。</div>'; return; }
   const when = r.started_at ? new Date(r.started_at) : null;
-  const meta = [when ? `${when.getMonth() + 1} 月 ${when.getDate()} 日 ${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}` : '', r.duration ? fmt(r.duration).replace(/^(\d+):(\d+)$/, (m, a, b) => `${+a} 分 ${+b} 秒`) : ''].filter(Boolean).join(' · ');
+  const meta = [when ? `${when.getMonth() + 1} 月 ${when.getDate()} 日 ${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}` : '', r.duration ? fmtDurText(r.duration) : ''].filter(Boolean).join(' · ');
   el.minutes.innerHTML = `
     <div><h3>${esc(r.title || '會議')}</h3><div class="meta">${esc(meta)}</div></div>
     <div><h4>摘要</h4><ul>${(r.summary || []).map(s => `<li>${esc(s)}</li>`).join('') || '<li>—</li>'}</ul></div>
