@@ -215,20 +215,15 @@ def speech_to_text(
             if root_path not in sys.path:
                 sys.path.append(root_path)
 
-            from hailo_whisper.engine import get_whisper_engine
-            h10_engine = get_whisper_engine(preferred_backend="hailo")
-            if h10_engine.is_hardware_accelerated():
-                h10_res = h10_engine.transcribe(
-                    audio_source,
-                    language=language,
-                    initial_prompt=None,
-                    temperature=0.0
-                )
-                if h10_res is not None and "text" in h10_res:
-                    txt = h10_res.get("text", "")
-                    if txt:
-                        print(f"[VoicePipeline] ⚡ Hailo-10H 轉錄完成: '{txt}' (耗時: {h10_res.get('inference_time_ms', 0)}ms)")
-                    return txt
+            # 2026-10-27 方案 B：Hailo-10H Whisper 在獨立子行程 (stt_worker) 執行，同一次錄音共用一個引擎。
+            # 舊版每段都在 uvicorn 行程內新建 VDevice + Speech2Text，HailoRT 推論期間不放 GIL → 網頁最長 18 s 無回應。
+            from stt_worker import stt_worker
+            h10_res = stt_worker.transcribe(audio_source, language=language)
+            if h10_res is not None and "text" in h10_res:
+                txt = h10_res.get("text", "")
+                if txt:
+                    print(f"[VoicePipeline] ⚡ Hailo-10H 轉錄完成: '{txt}' (耗時: {h10_res.get('inference_time_ms', 0)}ms)")
+                return txt
         except Exception as h10_err:
             print(f"[VoicePipeline] Hailo-10H 轉錄探測異常，平滑降級: {h10_err}")
 
