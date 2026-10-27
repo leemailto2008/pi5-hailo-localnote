@@ -18,6 +18,7 @@ hailo-ollama API quirks verified on 2026-10-22 (hailo-ollama 0.5.1, oatpp server
     receives the intended newlines because hailo-ollama re-parses that JSON.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -57,6 +58,15 @@ def _sanitize_for_hailo(text: str) -> str:
     return _HAILO_CONTROL_RE.sub("", out)
 
 
+def _free_npu_for_llm() -> None:
+    """Hailo-10H 的 VDevice 一次只能給一個行程：送 Hailo LLM 請求前，先請 STT 子行程放開 NPU (沒開就什麼都不做)。"""
+    try:
+        from stt_worker import stt_worker
+        stt_worker.release()
+    except Exception as e:
+        logger.debug(f"[LLM] stt worker release skipped: {e}")
+
+
 class LLMError(RuntimeError):
     """Raised when every configured backend failed."""
 
@@ -83,6 +93,7 @@ class LLMBackend:
         temperature: float = 0.2,
         num_predict: int = 200,
         top_p: Optional[float] = None,
+        hailo_keep_alive: Optional[int] = None,
     ) -> Dict[str, Any]:
         options: Dict[str, Any] = {"temperature": temperature, "num_predict": num_predict}
         if top_p is not None:
@@ -100,9 +111,12 @@ class LLMBackend:
             # NPU 仲裁 (2026-10-22 e2e 實測)：Hailo-10H 的 VDevice 為單一行程獨占。hailo-ollama 未帶 keep_alive 時
             # 模型常駐 NPU 5 分鐘，期間 HailoWhisper 一律 HAILO_OUT_OF_PHYSICAL_DEVICES → STT 全部退回 CPU (錄音中 CPU ~100%)。
             # keep_alive=0：回應完成後約 3 秒即卸載並釋放 NPU，代價為每次冷載入約 +7~8 秒。
-            payload["keep_alive"] = HAILO_KEEP_ALIVE
+            # 長會議 map 階段會連續送多個請求：呼叫端可傳 hailo_keep_alive (秒) 讓模型暫時常駐，最後一個請求再用預設 0 釋放。
+            payload["keep_alive"] = HAILO_KEEP_ALIVE if hailo_keep_alive is None else int(hailo_keep_alive)
         else:
-            payload["keep_alive"] = "24h"
+            # 2026-10-27：LLM 以 Hailo NPU 為主，CPU Ollama 只是備援。原本 "24h" 讓 qwen2.5:3b 一旦被用到就常駐 2.4 GB
+            # 到隔天 (e2e RAM 峰值 4.1 GB、swap +247 MB)；改為用完即卸載。
+            payload["keep_alive"] = 0
             options["num_thread"] = 4
         return payload
 
@@ -178,12 +192,15 @@ def chat_complete(
     temperature: float = 0.2,
     num_predict: int = 200,
     timeout: float = 60.0,
+    hailo_keep_alive: Optional[int] = None,
 ) -> Tuple[str, LLMBackend]:
     """Blocking completion. Tries backends in order; raises LLMError if all fail."""
     last_err: Optional[Exception] = None
     messages = build_messages(prompt, system)
     for backend in backends_in_order():
-        payload = backend.build_chat_payload(messages, stream=False, temperature=temperature, num_predict=num_predict)
+        if backend.is_hailo:
+            _free_npu_for_llm()
+        payload = backend.build_chat_payload(messages, stream=False, temperature=temperature, num_predict=num_predict, hailo_keep_alive=hailo_keep_alive)
         try:
             resp = requests.post(backend.chat_url, json=payload, timeout=timeout)
             if resp.status_code != 200:
@@ -203,6 +220,7 @@ def iter_chat_stream(
     num_predict: int = 200,
     top_p: Optional[float] = None,
     timeout: float = 60.0,
+    hailo_keep_alive: Optional[int] = None,
 ) -> Iterator[Tuple[str, bool, LLMBackend]]:
     """
     Blocking token generator yielding (token, is_done, backend).
@@ -211,7 +229,9 @@ def iter_chat_stream(
     last_err: Optional[Exception] = None
     messages = build_messages(prompt, system)
     for backend in backends_in_order():
-        payload = backend.build_chat_payload(messages, stream=True, temperature=temperature, num_predict=num_predict, top_p=top_p)
+        if backend.is_hailo:
+            _free_npu_for_llm()
+        payload = backend.build_chat_payload(messages, stream=True, temperature=temperature, num_predict=num_predict, top_p=top_p, hailo_keep_alive=hailo_keep_alive)
         emitted = False
         try:
             with requests.post(backend.chat_url, json=payload, stream=True, timeout=timeout) as resp:
@@ -255,20 +275,29 @@ async def achat_complete(
     temperature: float = 0.2,
     num_predict: int = 200,
     timeout: float = 60.0,
+    hailo_keep_alive: Optional[int] = None,
+    hailo_retries: int = 0,
 ) -> Tuple[str, LLMBackend]:
+    """hailo_retries：Hailo 失敗時先等 3 s 重試幾次再換下一個後端 (hailo-ollama 偶發 500 後通常重載即恢復)。"""
     last_err: Optional[Exception] = None
     messages = build_messages(prompt, system)
     for backend in backends_in_order():
-        payload = backend.build_chat_payload(messages, stream=False, temperature=temperature, num_predict=num_predict)
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(backend.chat_url, json=payload)
-                if resp.status_code != 200:
-                    raise LLMError(f"{backend.label} HTTP {resp.status_code}: {resp.text[:200]}")
-                return extract_token(resp.json()).strip(), backend
-        except (httpx.HTTPError, ValueError, LLMError) as e:
-            last_err = e
-            logger.warning(f"[LLM] {backend.label} failed, trying next backend: {e}")
+        if backend.is_hailo:
+            await asyncio.to_thread(_free_npu_for_llm)
+        payload = backend.build_chat_payload(messages, stream=False, temperature=temperature, num_predict=num_predict, hailo_keep_alive=hailo_keep_alive)
+        for attempt in range(1 + (hailo_retries if backend.is_hailo else 0)):
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    resp = await client.post(backend.chat_url, json=payload)
+                    if resp.status_code != 200:
+                        raise LLMError(f"{backend.label} HTTP {resp.status_code}: {resp.text[:200]}")
+                    return extract_token(resp.json()).strip(), backend
+            except (httpx.HTTPError, ValueError, LLMError) as e:
+                last_err = e
+                logger.warning(f"[LLM] {backend.label} failed (attempt {attempt + 1}): {e}")
+                if backend.is_hailo and attempt < hailo_retries:
+                    await asyncio.sleep(3.0)
+        logger.warning(f"[LLM] {backend.label} failed, trying next backend: {last_err}")
     raise LLMError(f"all LLM backends failed: {last_err}")
 
 
@@ -278,11 +307,14 @@ async def aiter_chat_stream(
     temperature: float = 0.2,
     num_predict: int = 200,
     timeout: float = 90.0,
+    hailo_keep_alive: Optional[int] = None,
 ) -> AsyncIterator[Tuple[str, bool, LLMBackend]]:
     last_err: Optional[Exception] = None
     messages = build_messages(prompt, system)
     for backend in backends_in_order():
-        payload = backend.build_chat_payload(messages, stream=True, temperature=temperature, num_predict=num_predict)
+        if backend.is_hailo:
+            await asyncio.to_thread(_free_npu_for_llm)
+        payload = backend.build_chat_payload(messages, stream=True, temperature=temperature, num_predict=num_predict, hailo_keep_alive=hailo_keep_alive)
         emitted = False
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:

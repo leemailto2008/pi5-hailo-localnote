@@ -36,7 +36,44 @@ AUDIO_CACHE_DIR = get_in_memory_cache_dir()
 
 # LLM backend selection (Hailo-10H qwen3:1.7b preferred, CPU Ollama fallback) lives in llm_backend.py
 from llm_backend import achat_complete, aiter_chat_stream, LLMError
-from summary_utils import clean_summary_markdown
+from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, keep_alive_plan,
+                           split_with_recap, summary_limits)
+
+# 長會議紀要 (2026-10-27 e2e)：Hailo qwen3:1.7b 單次請求約 1500 字就 context full (HTTP 500)，
+# 5 分鐘會議 (約 1000 字) 單次整理品質良好 → 1200 字以內維持單次；超過則切成 <= 1000 字的區塊逐段抽重點，
+# 再由 summary_utils.assemble_long_minutes() 組成三段式紀要 (1.7B 模型無法跨 20+ 條重點歸納，實測會照抄並擠掉待辦/決議)。
+SUMMARY_SINGLE_MAX_CHARS = int(os.environ.get("PI5_SUMMARY_SINGLE_MAX", "1200"))
+SUMMARY_CHUNK_CHARS = int(os.environ.get("PI5_SUMMARY_CHUNK", "1000"))
+# 分段整理期間讓 hailo-ollama 模型常駐，避免每段重新載入 7–28 秒；最後一段用預設 0 釋放 NPU。
+# 實測 hailo-ollama 0.5.1：keep_alive 單位為秒，計時從模型載入開始，後續請求「不會」延長。
+# 計時到期若剛好撞上下一段請求，會 HAILO_COMMUNICATION_CLOSED → HTTP 500 (30 分鐘實測第 6 段)。
+# 因此 keep_alive 取「整個載入視窗」的上限 (段數 × 每段預算 + 餘裕，最多 1800 s)；超過一個視窗的長會議 (最長 4 小時約 55 段)
+# 由 summary_utils.keep_alive_plan() 在視窗最後一段主動卸載、下一段重新載入。
+SUMMARY_MAP_SEC_PER_CHUNK = int(os.environ.get("PI5_SUMMARY_MAP_SEC_PER_CHUNK", "75"))
+SUMMARY_MAP_KEEP_ALIVE_MAX = 1800
+
+
+def map_user_prompt(piece: str, idx: int, total: int) -> str:
+    """最後一段明確告知是會議結尾：會議常以總結收尾，總結裡的決議/待辦/負責人是紀要最重要的內容。"""
+    if idx == total and total > 1:
+        return (f"會議逐字稿（第 {idx}/{total} 段，會議最後一段）：\n{piece}\n\n"
+                "如果最後有總結，請優先條列總結提到的事項與負責人；沒有總結就條列本段重點：")
+    return f"會議逐字稿（第 {idx}/{total} 段）：\n{piece}\n\n請條列本段重點："
+
+
+MINUTES_SYSTEM_MSG = (
+    "你是會議記錄員，只用台灣繁體中文輸出精簡的 Markdown 會議紀要，依序只有三段：## 摘要、## 待辦、## 決議。"
+    "規則：摘要依議題分點，每個議題一點，最多 5 點，每點 40 字以內，並寫出該議題的關鍵數字、日期、金額與人名；"
+    "待辦用表格「| 事項 | 負責人 | 時間 |」每個待辦一列，最多 4 列，事項 15 字以內、不要抄摘要，沒有待辦就寫一列「| 無 | - | - |」；"
+    "決議最多 3 點，每點 30 字以內，沒有就寫「- 無」。若會議最後有總結，以總結內容為準。"
+    "不要開場白，不要解釋，不要重複規則，三段寫完就結束。"
+)
+MAP_SYSTEM_MSG = (
+    "你是會議記錄員，只用台灣繁體中文條列會議重點。規則：每個議題一行，最多 4 行，每行 35 字以內，"
+    "每行以「- 議題名稱：」開頭（例如「- 教育訓練：」「- 客戶訂單：」「- 預算：」），"
+    "一定要保留關鍵數字、日期、金額、人名與公司名，並寫出負責人與期限；不要寫會議日期、出席者等與議題無關的內容；"
+    "若本段是會議結尾的總結，只列總結提到的事項。不要開場白，不要解釋，不要重複規則，只輸出條列。"
+)
 
 
 
@@ -207,6 +244,7 @@ class MeetingJobManager:
         self._current_task: Optional[asyncio.Task] = None
         self._record_task: Optional[asyncio.Task] = None
         self._chunk_worker_task: Optional[asyncio.Task] = None
+        self._hailo_pinned: bool = False   # map 階段讓 hailo-ollama 模型常駐 NPU 中
         self._main_loop: Optional[asyncio.AbstractEventLoop] = None
         self.offline_detector = OfflineDetector(check_interval=10.0)
         self._last_cpu_time: float = 0.0
@@ -385,6 +423,14 @@ class MeetingJobManager:
         self._finish_early_event = asyncio.Event()
         self._current_ffmpeg_proc = None
         self._record_task = None
+
+        try:
+            from voice_memory import evict_audio_ring_buffer
+            ev = evict_audio_ring_buffer()
+            if ev.get("evicted_count"):
+                print(f"[MeetingMinutes] 錄音前清理音訊快取：{ev}")
+        except Exception as e:
+            print(f"[MeetingMinutes] audio cache eviction skipped: {e}")
 
         job_id = f"m_{int(time.time())}"
         self.status = JobStatus(
@@ -680,7 +726,8 @@ class MeetingJobManager:
             try:
                 from ws_manager import ws_manager
                 from two_layer_audio import extract_waveform_peaks
-                peaks = extract_waveform_peaks(raw_ogg, num_peaks=200)
+                # 長會議 (最長 4 小時) 解碼整段母帶需數十秒：丟到執行緒，避免卡住 event loop
+                peaks = await asyncio.to_thread(extract_waveform_peaks, raw_ogg, 200)
                 await ws_manager.broadcast("audio_ready", {
                     "job_id": job_id,
                     "audio_url": f"/audio/{job_id}.ogg",
@@ -809,7 +856,7 @@ class MeetingJobManager:
             llm_done_event = asyncio.Event()
             llm_start = time.time()
 
-            is_long_hierarchical = bool(len(transcript.strip()) > 2500)
+            is_long_hierarchical = bool(len(transcript.strip()) > SUMMARY_SINGLE_MAX_CHARS)
             est_total_llm_sec = max(25.0, float(len(transcript.strip()) / 1400.0) * 16.0)
 
             async def _llm_ticker():
@@ -932,118 +979,81 @@ class MeetingJobManager:
 
     async def _generate_hierarchical_summary_llm(self, transcript: str, job_id: Optional[str] = None) -> str:
         """
-        Hierarchical Map-Reduce summary for long transcripts (>2500 characters) to avoid LLM context overflow.
-        1. Map: Split transcript into logical chunks (~1500 chars) and extract bullet points per chunk.
-        2. Reduce: Synthesize the extracted points into the final structured meeting minutes.
+        長逐字稿 (> SUMMARY_SINGLE_MAX_CHARS)：
+        1. 依句子/子句邊界平均切成 <= SUMMARY_CHUNK_CHARS 的區塊，逐段請 LLM 條列重點 (期間模型常駐 NPU，最後一段釋放)。
+        2. 每段重點以 compact_notes() 收斂 (<= 4 條、每條 <= 40 字)，再以 assemble_long_minutes() 組成三段式紀要。
+        中途取消或失敗時，finally 會送 keep_alive=0 釋放 NPU，讓下一次錄音的 STT 能開 VDevice。
         """
-        import json
+        try:
+            return await self._hierarchical_summary_body(transcript, job_id)
+        finally:
+            if self._hailo_pinned:
+                await self._release_hailo()
+
+    async def _release_hailo(self) -> None:
+        """分段整理時模型常駐 NPU；若在最後一段 (keep_alive=0) 之前中止或失敗，補送極短請求立即釋放，讓 STT 能開 VDevice。"""
+        self._hailo_pinned = False
+        try:
+            from llm_backend import HAILO_BACKEND, build_messages
+            import httpx
+            payload = HAILO_BACKEND.build_chat_payload(build_messages("好"), stream=False, num_predict=1, hailo_keep_alive=0)
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                await client.post(HAILO_BACKEND.chat_url, json=payload)
+            print("[MeetingMinutes] map 階段中止，已送 keep_alive=0 釋放 Hailo NPU")
+        except Exception as e:
+            print(f"[MeetingMinutes] release Hailo NPU failed: {e}")
+
+    async def _hierarchical_summary_body(self, transcript: str, job_id: Optional[str]) -> str:
         from ws_manager import ws_manager
 
-        print(f"[MeetingMinutes] 📚 長時逐字稿長度: {len(transcript)} 字，啟動 Map-Reduce 階層式提煉...")
-        
-        # 1. Map 階段：按自然段落切塊
-        paragraphs = [p.strip() for p in transcript.split("\n\n") if p.strip()]
-        if not paragraphs:
-            paragraphs = [p.strip() for p in transcript.split("\n") if p.strip()]
-        if not paragraphs:
-            paragraphs = [transcript]
-
-        chunks = []
-        cur_chunk = []
-        cur_len = 0
-        for p in paragraphs:
-            cur_chunk.append(p)
-            cur_len += len(p)
-            if cur_len >= 1400:
-                chunks.append("\n\n".join(cur_chunk))
-                cur_chunk = []
-                cur_len = 0
-        if cur_chunk:
-            chunks.append("\n\n".join(cur_chunk))
-
-        print(f"[MeetingMinutes] 長逐字稿共劃分為 {len(chunks)} 個語意區塊進行 Map 萃取。")
-        chunk_summaries = []
-
-        # 針對每個 Chunk 進行重點抽取
-        for idx, ch in enumerate(chunks, 1):
+        t_map = time.time()
+        chunks = split_with_recap(transcript, SUMMARY_CHUNK_CHARS)   # 結尾總結自成一段
+        total = len(chunks)
+        print(f"[MeetingMinutes] 📚 長逐字稿 {len(transcript)} 字 → {total} 段 (每段 <= {SUMMARY_CHUNK_CHARS} 字)，逐段整理")
+        self.status.metrics["summary_chunks"] = total
+        plan = keep_alive_plan(total, SUMMARY_MAP_SEC_PER_CHUNK, SUMMARY_MAP_KEEP_ALIVE_MAX)
+        notes: List[str] = []
+        for idx, piece in enumerate(chunks, 1):
             if self._cancellation_token and self._cancellation_token.is_set():
                 return ""
-            
-            map_pct = int(60 + (idx / max(1, len(chunks))) * 28)
-            self.status.progress = map_pct
-            self.status.msg = f"📝 長會議階層提煉中：正在提煉第 {idx}/{len(chunks)} 階段核心重點 ({int((idx-1)/len(chunks)*100)}%)..."
+            self.status.progress = int(60 + (idx - 1) / max(1, total) * 35)
+            self.status.msg = f"📝 長會議分段整理：第 {idx}/{total} 段..."
             self.notify_status_update()
-
-            map_prompt = (
-                f"你是專業筆記員。以下是長會議的第 {idx}/{len(chunks)} 段對話。請提取本段的 2-3 個核心討論點與行動事項（繁體中文條列，嚴禁任何開場白）：\n\n"
-                f"{ch}"
-            )
-            chunk_res = []
+            ka = plan[idx - 1]   # None = 這是載入視窗的最後一段，完成即卸載
+            t_req, text = time.time(), ""
             try:
-                chunk_text, _ = await achat_complete(map_prompt, temperature=0.2, num_predict=150, timeout=60.0)
-                chunk_res.append(chunk_text)
+                self._hailo_pinned = True
+                text, backend = await achat_complete(map_user_prompt(piece, idx, total), system=MAP_SYSTEM_MSG,
+                    temperature=0.2, num_predict=160, timeout=120.0, hailo_retries=1,
+                    hailo_keep_alive=ka)
+                self.status.metrics["llm_backend"] = backend.label
+                if ka is None and backend.is_hailo:
+                    self._hailo_pinned = False   # 帶預設 keep_alive=0，完成即釋放 NPU
             except LLMError as e:
-                print(f"[MeetingMinutes] Chunk {idx} map summary note: {e}")
+                print(f"[MeetingMinutes] 第 {idx}/{total} 段整理失敗: {e}")
+            text = compact_notes(text or "")
+            if not text:   # LLM 失敗：保留原文開頭，避免這段在紀要中消失
+                text = compact_notes("- " + piece[:120], max_lines=1, max_len=60)
+            notes.append(text)
+            print(f"[MeetingMinutes] 段 {idx}/{total}: {len(piece)} → {len(text)} 字 ({time.time() - t_req:.1f}s)")
+            if ka is None and idx < total:
+                await asyncio.sleep(3.0)   # 視窗切換：等 hailo-ollama 卸載完成再送下一段 (避免撞上卸載)
+            # 逐段把目前組出的紀要推給前端，使用者不必等全部完成
+            partial = assemble_long_minutes(notes, **summary_limits(total))
+            self.status.summary_stream = partial
+            if job_id:
+                await ws_manager.broadcast("summary_stream", {"job_id": job_id, "token": "", "accumulated": partial})
 
-            if chunk_res and chunk_res[0]:
-                chunk_summaries.append(f"【第 {idx} 階段重點】\n" + chunk_res[0])
-            else:
-                chunk_summaries.append(f"【第 {idx} 階段重點】\n" + ch[:250])
-
-        combined_notes = "\n\n".join(chunk_summaries)
-        print(f"[MeetingMinutes] Map 階段完成，各段要點提煉完畢 ({len(combined_notes)} 字)，進入 Reduce 全局綜整...")
-        self.status.progress = 90
-        self.status.msg = "📝 各階段要點提煉完畢！正在全局綜合產出標準會議紀要..."
-        self.notify_status_update()
-
-        # 2. Reduce 階段：全局綜合提煉標準三段式紀要 (以串流方式推送給使用者)
-        reduce_prompt = (
-            "你是專業筆記與會議記錄員。請嚴格根據以下長時會議各階段提煉出的重點，使用台灣繁體中文輸出完整的結構化紀要。\n"
-            "請嚴格依序輸出以下三個區塊標題（包含 ## 符號），嚴禁加入任何開場白或問候語：\n\n"
-            "## 摘要\n"
-            "1. （核心重點 1，每條不超過 35 字，綜觀全場討論核心）\n"
-            "2. （核心重點 2）\n"
-            "3. （核心重點 3）\n\n"
-            "## 待辦\n"
-            "| 事項 | 負責人 | 時間 |\n"
-            "| --- | --- | --- |\n"
-            "| （若無具體待辦請填「無具體待辦事項」） | 待定 | 待定 |\n\n"
-            "## 決議\n"
-            "1. （只寫真正定案的事項；若純為經驗交流請寫「無特定決議事項（經驗分享與交流）」）\n\n"
-            f"各階段討論要點彙整：\n{combined_notes}"
-        )
-
-        accumulated = []
-        try:
-            async for token, _done, _backend in aiter_chat_stream(reduce_prompt, temperature=0.2, num_predict=260, timeout=90.0):
-                if self._cancellation_token and self._cancellation_token.is_set():
-                    return ""
-                if token:
-                    accumulated.append(token)
-                    curr_text = "".join(accumulated)
-                    self.status.summary_stream = curr_text
-                    self.status.metrics["llm_tokens"] = len(accumulated)
-                    if job_id:
-                        await ws_manager.broadcast("summary_stream", {
-                            "job_id": job_id,
-                            "token": token,
-                            "accumulated": curr_text
-                        })
-
-            full_text = "".join(accumulated).strip()
-            if full_text:
-                return full_text
-        except LLMError as re:
-            print(f"[MeetingMinutes] Reduce stage error: {re}")
-
-        if accumulated:
-            return "".join(accumulated).strip()
-        return "## 摘要\n- 長時會議重點已成功提煉\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 確認各階段討論進度 | 全體 | 待定 |\n\n## 決議\n- 30 分鐘長時錄音會議紀要存檔完成"
+        self.status.metrics["summary_map_s"] = round(time.time() - t_map, 1)
+        full_text = assemble_long_minutes(notes, **summary_limits(total))
+        self.status.summary_stream = full_text
+        print(f"[MeetingMinutes] 長會議紀要完成：{total} 段，{time.time() - t_map:.1f}s")
+        return full_text
 
     async def _generate_summary_llm(self, transcript: str, job_id: Optional[str] = None) -> str:
         """Call Ollama LLM to synthesize meeting minutes with real-time SSE token streaming."""
         clean_transcript = transcript.strip()
-        if len(clean_transcript) > 2500:
+        if len(clean_transcript) > SUMMARY_SINGLE_MAX_CHARS:
             return await self._generate_hierarchical_summary_llm(clean_transcript, job_id=job_id)
 
         import json
@@ -1052,12 +1062,7 @@ class MeetingJobManager:
         # 2026-10-22 e2e 提示詞 A/B (Hailo qwen3:1.7b，同一份含辨識錯誤的逐字稿)：
         # 舊版把「（核心重點 1…）」等佔位說明寫在輸出範本內，小模型會照抄且 num_predict=220 讓待辦/決議被截斷 (事實命中 6/9)；
         # 改為規則放 system、範本不含佔位文字、摘要依議題分點並要求保留數字/日期/金額/人名 → 8/9。
-        system_msg = (
-            "你是會議記錄員，只用台灣繁體中文輸出精簡的 Markdown 會議紀要，依序只有三段：## 摘要、## 待辦、## 決議。"
-            "規則：摘要依議題分點，每個議題一點，最多 5 點，每點 40 字以內，並寫出該議題的關鍵數字、日期、金額與人名；"
-            "待辦用表格「| 事項 | 負責人 | 時間 |」每個待辦一列，沒有待辦就寫一列「| 無 | - | - |」；"
-            "決議最多 3 點，每點 30 字以內，沒有就寫「- 無」。不要開場白，不要解釋，不要重複規則，三段寫完就結束。"
-        )
+        system_msg = MINUTES_SYSTEM_MSG
         prompt = f"逐字稿：\n{transcript}\n\n請輸出會議紀要："
 
         accumulated = []
@@ -1083,6 +1088,7 @@ class MeetingJobManager:
 
             full_text = clean_summary_markdown("".join(accumulated))
             if full_text:
+                full_text = ensure_sections(full_text)   # 被 num_predict 截斷時明確標示缺段，不捏造
                 self.status.summary_stream = full_text
                 self.status.metrics["llm_tokens"] = len(accumulated)
                 self.status.metrics["llm_backend"] = used_backend_label
@@ -1098,7 +1104,7 @@ class MeetingJobManager:
             print(f"[MeetingMinutes] Streaming LLM error ({used_backend_label}): {e}")
 
         if accumulated:
-            return clean_summary_markdown("".join(accumulated))
+            return ensure_sections(clean_summary_markdown("".join(accumulated)))
         return "## 摘要\n- 會議內容已完整保留於逐字稿\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 確認逐字稿細節 | 全體 | 待定 |\n\n## 決議\n- 錄音與逐字稿存檔完成"
 
     async def transcribe_region(self, job_id: Optional[str], start_sec: float, end_sec: float) -> Dict[str, Any]:
