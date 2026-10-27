@@ -30,3 +30,7 @@ tools/pi_probe_out/
 # Local deploy bundles & scratch commit messages
 tools/*.tar
 tools/commit_msg.txt
+
+# e2e 報告與測試音檔 (音檔另行分發，見 tools/e2e/README.md)
+e2e_reports/
+*.flac
