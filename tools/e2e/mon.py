@@ -30,6 +30,8 @@ def mem():
 def npu():
     try:
         d = json.loads(urllib.request.urlopen("http://127.0.0.1/api/system", timeout=1.5).read()).get("npu") or {}
+        if d.get("stale"):   # app 在錄音/STT/紀要期間暫停量測：記為空值，不把舊值當成現在的讀數
+            return {"npu_util": None, "npu_temp": None, "npu_ram_mb": None, "npu_paused": d.get("paused")}
         ram = str(d.get("ram_usage_mb") or "").split("/")[0].strip()
         return {"npu_util": d.get("nnc_util_pct"), "npu_temp": d.get("temp_c"), "npu_ram_mb": float(ram) if ram else None}
     except Exception: return {}
