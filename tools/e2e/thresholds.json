@@ -1,0 +1,23 @@
+{
+ "_doc": "LocalNote e2e 門檻。default 適用所有長度，per_minutes 以分鐘數覆寫 (key 為 1/3/5/10/15/30)。2026-10-27 初版，依基準結果校正。",
+ "default": {
+  "transcript_cer_max": 0.40,
+  "transcript_fact_recall_min": 0.60,
+  "summary_required": true,
+  "summary_duplicate_lines_max": 0,
+  "summary_recap_recall_min": 0.50,
+  "summary_topic_coverage_min": 0.50,
+  "summary_latency_base_s": 120,
+  "summary_latency_per_min_s": 12,
+  "stt_npu_ratio_min": 0.95,
+  "hailo_busy_errors_max": 0,
+  "stt_tail_wait_max_s": 10,
+  "rec_cpu_avg_max": 15,
+  "cpu_temp_max": 75,
+  "ram_peak_mb_max": 3500,
+  "swap_growth_mb_max": 64
+ },
+ "per_minutes": {
+  "30": {"stt_tail_wait_max_s": 15}
+ }
+}
