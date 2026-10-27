@@ -26,3 +26,7 @@ telegram_agent/temp/
 
 # Raspberry Pi remote probe outputs
 tools/pi_probe_out/
+
+# Local deploy bundles & scratch commit messages
+tools/*.tar
+tools/commit_msg.txt
