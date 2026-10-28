@@ -187,6 +187,14 @@ async def startup_event():
 redis_conn = Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
 task_queue = Queue(QUEUE_NAME, connection=redis_conn)
 
+
+def _queue_len() -> int:
+    """redis 套件已安裝但 redis-server 未執行時 len(task_queue) 會丟 ConnectionError；/health 不應因此回 500。"""
+    try:
+        return len(task_queue)
+    except Exception:
+        return 0
+
 HTML_CLIENT_UI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui_client.html")
 HTML_UI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui.html")
 HTML_DBG01_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui_dbg01.html")
@@ -364,7 +372,7 @@ def get_system_health() -> Dict[str, Any]:
         "cpu_temperature_c": temp_c,
         "ram_available_mb": free_ram_mb,
         "ram_total_mb": total_ram_mb,
-        "queue_length": len(task_queue),
+        "queue_length": _queue_len() if redis_ok else 0,
         "server_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
 
@@ -435,13 +443,16 @@ def get_task_status(task_id: str) -> TaskStatusResponse:
 @app.get("/api/queue", tags=["Monitoring"])
 def get_queue_status() -> Dict[str, Any]:
     """Inspect queue depth and active jobs."""
-    return {
-        "queue_name": QUEUE_NAME,
-        "queued_jobs_count": len(task_queue),
-        "started_jobs_count": task_queue.started_job_registry.count,
-        "finished_jobs_count": task_queue.finished_job_registry.count,
-        "failed_jobs_count": task_queue.failed_job_registry.count
-    }
+    try:
+        return {
+            "queue_name": QUEUE_NAME,
+            "queued_jobs_count": len(task_queue),
+            "started_jobs_count": task_queue.started_job_registry.count,
+            "finished_jobs_count": task_queue.finished_job_registry.count,
+            "failed_jobs_count": task_queue.failed_job_registry.count
+        }
+    except Exception as e:   # redis 套件在、但 redis-server 沒跑 (LocalNote 不需要 redis)
+        raise HTTPException(status_code=503, detail=f"任務佇列無法使用 (redis): {e}")
 
 
 class NetworkSwitchRequest(BaseModel):
@@ -1408,8 +1419,13 @@ def _npu_pause_reason() -> Optional[str]:
 
 
 def _hailo_telemetry_loop():
-    """背景執行緒：只在 NPU 閒置時以 hailortcli monitor 取樣，不阻塞 HTTP。"""
-    cmd = ["script", "-q", "-c", "timeout 1.5 hailortcli monitor", "/dev/null"]
+    """背景執行緒：只在 NPU 閒置時以 hailortcli monitor 取樣，不阻塞 HTTP。
+
+    2026-10-28 實測 (raspi678)：hailortcli monitor 被 SIGTERM 砍掉 (timeout 的預設訊號) 時不會清理，
+    Hailo-10H 裝置端每次漏約 3.7 MB；app 閒置時每 4.5 s 一次 → 每小時約 2.3 GB，是 NPU RAM 一直增加的主因。
+    改送 SIGINT 讓它正常結束 (20 次實測不漏)；-k 2 只在它 2 秒內沒結束時才補 SIGKILL。
+    """
+    cmd = ["script", "-q", "-c", "timeout -s INT -k 2 1.5 hailortcli monitor", "/dev/null"]
     while True:
         reason = _npu_pause_reason()
         _hailo_cache["paused"] = reason
@@ -1417,7 +1433,7 @@ def _hailo_telemetry_loop():
             time.sleep(1.0)
             continue
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=2.5)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=5.0)
             data_line = next((l.strip() for l in res.stdout.splitlines() if "pci/" in l), "")
             parts = re.split(r"\s{2,}", data_line) if data_line else []
             if len(parts) >= 8:
