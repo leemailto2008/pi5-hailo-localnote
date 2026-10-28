@@ -257,8 +257,12 @@ def iter_chat_stream(
     raise LLMError(f"all LLM backends failed: {last_err}")
 
 
-def prewarm(timeout: float = 45.0) -> Optional[LLMBackend]:
-    """Load weights of the active backend. Returns the backend used, None on failure."""
+def prewarm(timeout: float = 120.0) -> Optional[LLMBackend]:
+    """Load weights of the active backend. Returns the backend used, None on failure.
+
+    timeout 45 → 120 s (2026-10-28)：開機時 qwen3 的 2.9 GB HEF 還不在 page cache，要從 SD 卡冷讀。
+    raspi543 的 SD 卡約 57 MB/s，冷載入 43.5 s＋生成就超過 45 s，於是退到 CPU Ollama，又冷讀 1.9 GB 再逾時一次。
+    """
     try:
         _, backend = chat_complete("Hello", system="Reply with one word.", num_predict=4, timeout=timeout)
         return backend
