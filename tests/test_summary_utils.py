@@ -179,3 +179,13 @@ def test_without_opencc_text_is_unchanged(monkeypatch):
     monkeypatch.setattr(summary_utils, "_CC", False)
     assert summary_utils.to_taiwan_traditional("供应商") == "供应商"
     assert summary_utils.to_taiwan_traditional("") == "" and summary_utils.to_taiwan_traditional(None) == ""
+
+
+def test_missing_table_separator_is_restored():
+    md = "## 待辦\n| 事項 | 負責人 | 時間 |\n| 回覆客戶 | 王經理 | 週五 |\n\n## 決議\n- 無"
+    out = clean_summary_markdown(md)
+    assert "| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 回覆客戶 | 王經理 | 週五 |" in out
+    ok = "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 回覆客戶 | 王經理 | 週五 |"
+    assert clean_summary_markdown(ok) == ok          # 已有分隔線就不動
+    assert clean_summary_markdown("## 待辦\n| 事項 | 負責人 | 時間 |") == "## 待辦\n| 事項 | 負責人 | 時間 |"   # 只有表頭不補
+

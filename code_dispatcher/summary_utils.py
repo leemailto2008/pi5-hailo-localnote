@@ -51,7 +51,24 @@ def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) 
             if lim and count > lim:
                 continue
         out.append(line.rstrip())
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(_fix_table_separators(out))).strip()
+
+
+def _is_sep(line: str) -> bool:
+    return line.strip().startswith("|") and set(line.strip()) <= set("|-: ")
+
+
+def _fix_table_separators(lines: List[str]) -> List[str]:
+    """表頭下一列不是分隔線時補上 (2026-10-29 228 e2e：小模型偶爾漏掉 |---|，待辦表就無法以表格顯示)。"""
+    out: List[str] = []
+    for i, line in enumerate(lines):
+        out.append(line)
+        s = line.strip()
+        starts_table = s.startswith("|") and not _is_sep(s) and (i == 0 or not lines[i - 1].strip().startswith("|"))
+        nxt = lines[i + 1].strip() if i + 1 < len(lines) else ""
+        if starts_table and nxt.startswith("|") and not _is_sep(nxt):
+            out.append("|" + "---|" * max(1, s.count("|") - 1))
+    return out
 
 
 # 長逐字稿分段 (2026-10-27)：Hailo qwen3:1.7b 單次請求約 1500 字就 "Conversation context is full" (HTTP 500)。
