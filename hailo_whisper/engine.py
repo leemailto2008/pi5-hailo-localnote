@@ -25,8 +25,11 @@ logger = logging.getLogger("hailo_whisper.engine")
 #   - auto：中文會議與強制 zh 結果相同；英文句不再被翻成中文 (CER 0.54 → 0)；底噪片段的幻覺 8/10 → 1–2/10。
 WHISPER_LANGUAGE = os.environ.get("PI5_WHISPER_LANGUAGE", "auto").strip().lower() or "auto"
 WHISPER_REPETITION_PENALTY = float(os.environ.get("PI5_WHISPER_REPETITION_PENALTY", "1.1"))
-# 幾乎全靜音 (RMS < -66 dBFS) 不送 NPU：實測數位靜音會被解碼成「有 有，有」之類的幻覺
-SILENCE_RMS = 0.0005
+# 近乎靜音 (RMS < -55 dBFS) 不送 NPU：
+#   - 合成測試：數位靜音被解碼成「有 有，有」。
+#   - 228 真人藍牙錄音 (10-29)：說話段 RMS 約 -36～-34 dBFS；錄音尾端無人說話段 -75～-60 dBFS，
+#     auto 會在其中幻覺出「I'm going to get this.」「yes The the the」。-55 dBFS 與說話段仍有約 20 dB 餘裕。
+SILENCE_RMS = 10 ** (-55 / 20)
 # 自動偵測偶爾把中文誤判成日／韓文；輸出含假名或諺文就改用 zh 重跑一次
 _UNEXPECTED_SCRIPT_RE = re.compile(r"[\u3040-\u30ff\u31f0-\u31ff\uac00-\ud7af\u1100-\u11ff]")
 

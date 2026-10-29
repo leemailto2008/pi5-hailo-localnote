@@ -76,6 +76,15 @@ def test_near_silence_skips_the_npu(fake_engine):
     e = fake_engine([])
     r = e.transcribe(np.zeros(16000 * 8, np.float32), language="auto")
     assert r["text"] == "" and e._s2t.calls == []
+    quiet = (np.random.default_rng(1).standard_normal(16000 * 6) * 10 ** (-62 / 20)).astype(np.float32)   # 錄音尾端底噪
+    assert e.transcribe(quiet, language="auto")["text"] == "" and e._s2t.calls == []
+
+
+def test_quiet_speech_still_goes_to_the_npu(fake_engine):
+    e = fake_engine(["好"])
+    voice = _speech(1.0) * 10 ** (-40 / 20) / 0.2 * np.sqrt(2)    # 約 -40 dBFS 的說話段
+    e.transcribe(np.concatenate([voice, np.zeros(16000 * 3, np.float32)]), language="auto")
+    assert len(e._s2t.calls) == 1
 
 
 @pytest.mark.parametrize("text,retry", [("こんにちは", True), ("안녕하세요", True), ("我們下週 review PR", False), ("", False)])
