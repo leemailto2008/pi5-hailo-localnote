@@ -21,6 +21,7 @@ import requests
 
 # Ensure dependencies from voice_pipeline are importable
 from voice_pipeline import (
+    NoMicrophoneError,
     speech_to_text,
     ensure_bluetooth_recording_ready,
     to_taiwan_traditional,
@@ -91,7 +92,12 @@ class StreamingVoiceSession:
         self.start_time = time.time()
         self.is_recording = True
 
-        source_node = await ensure_bluetooth_recording_ready()
+        try:
+            source_node = await ensure_bluetooth_recording_ready()
+        except NoMicrophoneError as e:
+            self.is_recording = False          # 否則 is_any_recording_active() 會一直以為在錄音
+            await self.emit_event("error", {"detail": str(e)})
+            return False
 
         # Segment time: 6.0 seconds per chunk
         chunk_pattern = os.path.join(self.session_dir, "chunk_%03d.ogg")

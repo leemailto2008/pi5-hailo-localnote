@@ -30,7 +30,7 @@ if os.path.exists(_agent_dir) and _agent_dir not in sys.path:
     sys.path.append(_agent_dir)
 
 from voice_memory import get_in_memory_cache_dir
-from voice_pipeline import record_audio_from_mic, speech_to_text
+from voice_pipeline import NoMicrophoneError, record_audio_from_mic, speech_to_text
 
 AUDIO_CACHE_DIR = get_in_memory_cache_dir()
 
@@ -661,7 +661,14 @@ class MeetingJobManager:
                     self._record_task.cancel()
                 return
 
-            record_ok = await self._record_task
+            try:
+                record_ok = await self._record_task
+            except NoMicrophoneError as e:
+                await chunk_queue.put(None)
+                self.status.state = "error"
+                self.status.msg = f"⚠️ {e}"
+                self.notify_status_update()
+                return
             rec_finish_time = time.time()
             actual_record_sec = max(1.0, round(rec_finish_time - t0, 1))
             duration_sec = int(round(actual_record_sec))

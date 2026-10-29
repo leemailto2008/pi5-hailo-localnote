@@ -573,6 +573,10 @@ async def _wait_for_live_audio(source_node: str, attempts: int = 4, probe_sec: f
     return False
 
 
+class NoMicrophoneError(RuntimeError):
+    """PipeWire 沒有任何可錄音的來源 (藍牙耳麥未連線／已關機，也沒有其他麥克風)。"""
+
+
 async def ensure_bluetooth_recording_ready() -> str:
     """
     Ensure PipeWire/WirePlumber and Bluetooth process affinities are isolated to CPU 0,1.
@@ -686,9 +690,19 @@ async def ensure_bluetooth_recording_ready() -> str:
             await _wait_for_live_audio(bt_source_node)
             return bt_source_node
 
+        # 沒有連線中的藍牙耳麥，也沒有其他 Audio/Source 時，pulse 的 default 會落到 Dummy Output 的 monitor：
+        # 錄下整段數位靜音，畫面卻顯示「正在進行耳麥錄音」(2026-10-29 228：耳麥 20:48 自動關機，
+        # 21:30 的 30 分鐘自測錄了 4.5 分鐘靜音才發現)。這種情況直接報錯，讓使用者先開耳麥。
+        # 耳麥有連線但 profile 剛切換、節點還沒出現時維持舊行為 (錄 default)。
+        no_mic = bt_device_id is None and not any(
+            "Audio/Source" in n.get("info", {}).get("props", {}).get("media.class", "") for n in nodes)
     except Exception as e:
         print(f"[VoicePipeline] Bluetooth readiness resolution error: {e}")
+        no_mic = False   # 查不到拓撲時維持舊行為 (錄 default)
 
+    if no_mic:
+        print("[VoicePipeline] ❌ 找不到任何麥克風來源 (藍牙耳麥未連線？)")
+        raise NoMicrophoneError("找不到麥克風：藍牙耳麥未連線或已關機，請開啟耳麥後再錄音")
     return target_source
 
 
