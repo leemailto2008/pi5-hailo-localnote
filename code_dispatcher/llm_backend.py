@@ -31,6 +31,8 @@ from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Tuple
 import httpx
 import requests
 
+from npu_share import SHARED_KEEP_ALIVE, shared_group
+
 logger = logging.getLogger("Pi5LLM")
 
 HAILO_URL = "http://127.0.0.1:11435"
@@ -59,12 +61,53 @@ def _sanitize_for_hailo(text: str) -> str:
 
 
 def _free_npu_for_llm() -> None:
-    """Hailo-10H 的 VDevice 一次只能給一個行程：送 Hailo LLM 請求前，先請 STT 子行程放開 NPU (沒開就什麼都不做)。"""
+    """獨占模式下 Hailo-10H 的 VDevice 一次只能給一個行程：送 Hailo LLM 請求前，先請 STT 子行程放開 NPU (沒開就什麼都不做)。
+    共用模式 (npu_share.py) 下 Whisper 以 group_id 開著，不必也不會釋放。"""
     try:
         from stt_worker import stt_worker
-        stt_worker.release()
+        stt_worker.release(exclusive_only=True)
     except Exception as e:
         logger.debug(f"[LLM] stt worker release skipped: {e}")
+
+
+# Hailo LLM 請求進行中計數：NPU 群組重置 (npu_share.maybe_reset) 只在沒有請求、且閒置一段時間後才執行。
+_hailo_inflight = 0
+_hailo_last_activity = 0.0
+_hailo_activity_lock = threading.Lock()
+
+
+class _hailo_activity:
+    def __init__(self, active: bool) -> None:
+        self.active = active
+
+    def __enter__(self) -> "_hailo_activity":
+        global _hailo_inflight, _hailo_last_activity
+        if self.active:
+            with _hailo_activity_lock:
+                _hailo_inflight += 1
+                _hailo_last_activity = time.monotonic()
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        global _hailo_inflight, _hailo_last_activity
+        if self.active:
+            with _hailo_activity_lock:
+                _hailo_inflight -= 1
+                _hailo_last_activity = time.monotonic()
+
+    async def __aenter__(self) -> "_hailo_activity":
+        return self.__enter__()
+
+    async def __aexit__(self, *exc: Any) -> None:
+        self.__exit__(*exc)
+
+
+def hailo_idle_seconds() -> Optional[float]:
+    """距離上一次 Hailo LLM 請求結束幾秒；有請求進行中回傳 0，從未使用回傳 None。"""
+    with _hailo_activity_lock:
+        if _hailo_inflight > 0:
+            return 0.0
+        return None if not _hailo_last_activity else time.monotonic() - _hailo_last_activity
 
 
 class LLMError(RuntimeError):
@@ -112,7 +155,12 @@ class LLMBackend:
             # 模型常駐 NPU 5 分鐘，期間 HailoWhisper 一律 HAILO_OUT_OF_PHYSICAL_DEVICES → STT 全部退回 CPU (錄音中 CPU ~100%)。
             # keep_alive=0：回應完成後約 3 秒即卸載並釋放 NPU，代價為每次冷載入約 +7~8 秒。
             # 長會議 map 階段會連續送多個請求：呼叫端可傳 hailo_keep_alive (秒) 讓模型暫時常駐，最後一個請求再用預設 0 釋放。
-            payload["keep_alive"] = HAILO_KEEP_ALIVE if hailo_keep_alive is None else int(hailo_keep_alive)
+            # 共用模式 (2026-10-29，npu_share.py)：Whisper 與 LLM 同時常駐，一律長 keep_alive。
+            # 實測在 Whisper 常駐時卸載 LLM，約 2.9 GB 裝置記憶體不歸還，再載入就變兩份 (約 6.5 GB)。
+            if shared_group():
+                payload["keep_alive"] = SHARED_KEEP_ALIVE
+            else:
+                payload["keep_alive"] = HAILO_KEEP_ALIVE if hailo_keep_alive is None else int(hailo_keep_alive)
         else:
             # 2026-10-27：LLM 以 Hailo NPU 為主，CPU Ollama 只是備援。原本 "24h" 讓 qwen2.5:3b 一旦被用到就常駐 2.4 GB
             # 到隔天 (e2e RAM 峰值 4.1 GB、swap +247 MB)；改為用完即卸載。
@@ -202,7 +250,8 @@ def chat_complete(
             _free_npu_for_llm()
         payload = backend.build_chat_payload(messages, stream=False, temperature=temperature, num_predict=num_predict, hailo_keep_alive=hailo_keep_alive)
         try:
-            resp = requests.post(backend.chat_url, json=payload, timeout=timeout)
+            with _hailo_activity(backend.is_hailo):
+                resp = requests.post(backend.chat_url, json=payload, timeout=timeout)
             if resp.status_code != 200:
                 raise LLMError(f"{backend.label} HTTP {resp.status_code}: {resp.text[:200]}")
             text = extract_token(resp.json()).strip()
@@ -234,7 +283,7 @@ def iter_chat_stream(
         payload = backend.build_chat_payload(messages, stream=True, temperature=temperature, num_predict=num_predict, top_p=top_p, hailo_keep_alive=hailo_keep_alive)
         emitted = False
         try:
-            with requests.post(backend.chat_url, json=payload, stream=True, timeout=timeout) as resp:
+            with _hailo_activity(backend.is_hailo), requests.post(backend.chat_url, json=payload, stream=True, timeout=timeout) as resp:
                 if resp.status_code != 200:
                     raise LLMError(f"{backend.label} HTTP {resp.status_code}: {resp.text[:200]}")
                 for raw in resp.iter_lines():
@@ -271,6 +320,24 @@ def prewarm(timeout: float = 120.0) -> Optional[LLMBackend]:
         return None
 
 
+def prewarm_hailo(wait_ready_sec: float = 30.0, timeout: float = 120.0) -> bool:
+    """只載入 Hailo LLM (NPU 群組重置後用)：等 hailo-ollama 就緒再送 1 token 請求；不退回 CPU Ollama。"""
+    deadline = time.monotonic() + wait_ready_sec
+    while not is_backend_healthy(HAILO_BACKEND, force_refresh=True):
+        if time.monotonic() > deadline:
+            logger.warning("[LLM] hailo-ollama not ready, skip Hailo prewarm")
+            return False
+        time.sleep(1.0)
+    payload = HAILO_BACKEND.build_chat_payload(build_messages("Hello", "Reply with one word."), stream=False, num_predict=1)
+    try:
+        with _hailo_activity(True):
+            resp = requests.post(HAILO_BACKEND.chat_url, json=payload, timeout=timeout)
+        return resp.status_code == 200
+    except requests.RequestException as e:
+        logger.warning(f"[LLM] Hailo prewarm failed: {e}")
+        return False
+
+
 # ------------------------------------------------------------------ async (httpx)
 
 async def achat_complete(
@@ -291,7 +358,7 @@ async def achat_complete(
         payload = backend.build_chat_payload(messages, stream=False, temperature=temperature, num_predict=num_predict, hailo_keep_alive=hailo_keep_alive)
         for attempt in range(1 + (hailo_retries if backend.is_hailo else 0)):
             try:
-                async with httpx.AsyncClient(timeout=timeout) as client:
+                async with _hailo_activity(backend.is_hailo), httpx.AsyncClient(timeout=timeout) as client:
                     resp = await client.post(backend.chat_url, json=payload)
                     if resp.status_code != 200:
                         raise LLMError(f"{backend.label} HTTP {resp.status_code}: {resp.text[:200]}")
@@ -321,7 +388,7 @@ async def aiter_chat_stream(
         payload = backend.build_chat_payload(messages, stream=True, temperature=temperature, num_predict=num_predict, hailo_keep_alive=hailo_keep_alive)
         emitted = False
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with _hailo_activity(backend.is_hailo), httpx.AsyncClient(timeout=timeout) as client:
                 async with client.stream("POST", backend.chat_url, json=payload) as resp:
                     if resp.status_code != 200:
                         body = await resp.aread()

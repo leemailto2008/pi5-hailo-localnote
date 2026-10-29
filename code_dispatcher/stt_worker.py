@@ -12,6 +12,8 @@ stt_worker.py — Hailo-10H Whisper 語音轉文字 (STT) 獨立子行程 (2026-
   - 子行程常駐待命 (不佔 NPU)。第一次收到音訊才開 NPU 並載入 Whisper，整段錄音共用同一個引擎。
   - 閒置 IDLE_RELEASE_SEC 秒，或主行程要用 Hailo LLM 前呼叫 release()，就釋放 NPU 給 hailo-ollama
     (Hailo-10H 的 VDevice 一次只能給一個行程)。
+  - 共用模式 (2026-10-29，見 npu_share.py)：hailo-ollama 以 HAILO_OLLAMA_VDEVICE_GROUP_ID 啟動時，VDevice 帶相同 group_id，
+    Whisper 一直常駐 (不做閒置釋放，LLM 請求前也不釋放)，根治每次開關約 22 MB 的裝置記憶體洩漏。
   - NPU 開不起來時回傳 error，由 voice_pipeline 走原本的 CPU 備援流程 (子行程內不做 CPU 推論)。
   - 子行程異常結束時，下一次呼叫自動重啟。
 
@@ -26,7 +28,8 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Any, Dict, Optional
+from contextlib import contextmanager
+from typing import Any, Dict, Iterator, Optional
 
 IDLE_RELEASE_SEC = float(os.environ.get("PI5_STT_IDLE_RELEASE_SEC", "10"))
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -72,12 +75,14 @@ def _child_main() -> None:
         if p not in sys.path:
             sys.path.insert(0, p)
     from hailo_whisper.engine import HailoWhisperEngine
+    from npu_share import shared_group
 
     engine = None
+    engine_group: Optional[str] = None   # 共用模式的 group_id；None = 獨占 VDevice
     last_use = time.monotonic()
 
     def release() -> None:
-        nonlocal engine
+        nonlocal engine, engine_group
         if engine is None:
             return
         for obj in (getattr(engine, "_s2t", None), getattr(engine, "_vdevice", None)):
@@ -86,12 +91,12 @@ def _child_main() -> None:
                     obj.release()
             except Exception as e:
                 print(f"[SttWorker] release warning: {e}", flush=True)
-        engine = None
+        engine, engine_group = None, None
         print("[SttWorker] Hailo NPU released", flush=True)
 
     print(f"[SttWorker] ready (pid {os.getpid()})", flush=True)
     while True:
-        timeout = IDLE_RELEASE_SEC if engine is not None else None
+        timeout = IDLE_RELEASE_SEC if engine is not None and engine_group is None else None   # 共用模式不做閒置釋放
         r, _, _ = select.select([in_fd], [], [], timeout)
         if not r:
             if engine is not None and time.monotonic() - last_use >= IDLE_RELEASE_SEC:
@@ -106,25 +111,30 @@ def _child_main() -> None:
             _write_frame(proto_out, {"ok": True})
             break
         if cmd == "release":
-            release()
-            _write_frame(proto_out, {"ok": True})
+            exclusive_only = bool(payload and payload.get("exclusive_only"))
+            if not (exclusive_only and engine_group):   # 共用模式下 LLM 不需要 STT 讓出 NPU
+                release()
+            _write_frame(proto_out, {"ok": True, "engine_open": engine is not None})
             continue
         if cmd == "ping":
-            _write_frame(proto_out, {"ok": True, "engine_open": engine is not None})
+            _write_frame(proto_out, {"ok": True, "engine_open": engine is not None, "shared_group": engine_group})
             continue
         if cmd == "transcribe":
             audio, language = payload
             try:
                 if engine is None:
                     t0 = time.perf_counter()
-                    engine = HailoWhisperEngine()
+                    group = shared_group(force_refresh=True)
+                    engine = HailoWhisperEngine(group_id=group)
+                    engine_group = group
                     if not engine.is_hardware_accelerated():
                         release()
                         _write_frame(proto_out, {"ok": False, "error": "hailo_unavailable"})
                         continue
-                    print(f"[SttWorker] Hailo NPU opened, Whisper loaded ({(time.perf_counter() - t0) * 1000:.0f} ms)", flush=True)
+                    mode = f"shared group {group}" if group else "exclusive"
+                    print(f"[SttWorker] Hailo NPU opened ({mode}), Whisper loaded ({(time.perf_counter() - t0) * 1000:.0f} ms)", flush=True)
                 res = engine.transcribe(audio, language=language, initial_prompt=None, temperature=0.0)
-                _write_frame(proto_out, {"ok": True, "result": res})
+                _write_frame(proto_out, {"ok": True, "result": res, "shared_group": engine_group})
             except Exception as e:
                 release()
                 _write_frame(proto_out, {"ok": False, "error": f"{type(e).__name__}: {e}"})
@@ -143,6 +153,7 @@ class SttWorker:
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
         self._busy = False
+        self._engine_group: Optional[str] = None   # 子行程的 Whisper 以共用模式開著時為 group_id
 
     def is_busy(self) -> bool:
         return self._busy
@@ -154,7 +165,11 @@ class SttWorker:
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None, cwd=_HERE)
         return self._proc
 
+    def shared_group(self) -> Optional[str]:
+        return self._engine_group
+
     def _kill(self) -> None:
+        self._engine_group = None
         if self._proc is not None:
             try:
                 self._proc.kill()
@@ -191,27 +206,44 @@ class SttWorker:
             finally:
                 self._busy = False
         if not reply.get("ok"):
+            self._engine_group = None          # 子行程出錯時已釋放 NPU
             raise RuntimeError(reply.get("error") or "stt worker error")
+        self._engine_group = reply.get("shared_group")
         return reply["result"]
 
-    def release(self, timeout: float = 15.0) -> None:
-        """釋放 NPU (子行程保留待命)。沒有子行程時什麼都不做。"""
+    def release(self, timeout: float = 15.0, exclusive_only: bool = False) -> None:
+        """釋放 NPU (子行程保留待命)。沒有子行程時什麼都不做。
+        exclusive_only=True (LLM 請求前)：Whisper 以共用模式開著時不釋放，也不等鎖 (LLM 不必等正在跑的 STT)。"""
+        if exclusive_only and self._engine_group:
+            return
         with self._lock:
             if self._proc is None or self._proc.poll() is not None:
                 return
             try:
-                self._call("release", None, timeout)
+                reply = self._call("release", {"exclusive_only": exclusive_only}, timeout)
+                if not reply.get("engine_open"):
+                    self._engine_group = None
             except RuntimeError as e:
                 print(f"[SttWorker] release: {e}")
 
+    def _shutdown_locked(self) -> None:
+        if self._proc is not None and self._proc.poll() is None:
+            try:
+                self._call("exit", None, 10.0)
+            except RuntimeError:
+                pass
+        self._kill()
+
     def shutdown(self) -> None:
         with self._lock:
-            if self._proc is not None and self._proc.poll() is None:
-                try:
-                    self._call("exit", None, 10.0)
-                except RuntimeError:
-                    pass
-            self._kill()
+            self._shutdown_locked()
+
+    @contextmanager
+    def paused(self) -> Iterator[None]:
+        """結束子行程並在 with 區塊內擋住所有 STT 呼叫 (NPU 群組重置用)；離開後下一次呼叫自動重啟子行程。"""
+        with self._lock:
+            self._shutdown_locked()
+            yield
 
 
 stt_worker = SttWorker()

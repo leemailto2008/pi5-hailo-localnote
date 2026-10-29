@@ -1395,6 +1395,12 @@ _hailo_monitor_started: bool = False
 def _npu_pause_reason() -> Optional[str]:
     """NPU 正被使用 (或即將被使用) 時回傳原因，期間不跑 hailortcli。"""
     try:
+        import npu_share
+        if npu_share.is_resetting():
+            return "npu_reset"
+    except Exception:
+        pass
+    try:
         from voice_streaming import is_any_recording_active
         if is_any_recording_active():
             return "recording"
@@ -1451,9 +1457,21 @@ def _hailo_telemetry_loop():
                     "voltage_mv": int(parts[7]),
                 }
                 _hailo_cache["time"] = time.time()
+                _maybe_reset_npu_group(parts[5])
         except Exception:
             pass
         time.sleep(3.0)
+
+
+def _maybe_reset_npu_group(ram_usage: str) -> None:
+    """共用模式 (npu_share.py)：閒置時 NPU RAM 異常偏高 (LLM 卸載/重啟或 STT 子行程被 kill 的殘留) → 背景群組重置。"""
+    try:
+        import npu_share
+        from llm_backend import hailo_idle_seconds, prewarm_hailo
+        npu_share.maybe_reset(npu_share.parse_ram_used_mb(ram_usage), npu_busy=_npu_pause_reason() is not None,
+                              llm_idle_sec=hailo_idle_seconds(), prewarm=prewarm_hailo)
+    except Exception as e:
+        print(f"[NPU] group reset check failed: {e}")
 
 
 def get_hailo10_stats() -> Dict[str, Any]:
@@ -1467,6 +1485,12 @@ def get_hailo10_stats() -> Dict[str, Any]:
     age = round(time.time() - t, 1) if t else None
     out = dict(_hailo_cache.get("data") or {"detected": True, "device": "Hailo-10H", "tops": 40})
     out.update({"age_s": age, "stale": age is None or age > NPU_STALE_SEC, "paused": _hailo_cache.get("paused")})
+    try:
+        import npu_share
+        out["shared_group"] = npu_share.shared_group()
+        out["last_group_reset"] = npu_share.reset_status()
+    except Exception:
+        pass
     return out
 
 

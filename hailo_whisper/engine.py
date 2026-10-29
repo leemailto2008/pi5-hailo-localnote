@@ -145,8 +145,10 @@ class HailoWhisperEngine(WhisperEngineInterface):
         "/home/pi/models/whisper_small_h10h.hef",
     ]
 
-    def __init__(self, hef_path: Optional[str] = None):
+    def __init__(self, hef_path: Optional[str] = None, group_id: Optional[str] = None):
         self.hef_path = hef_path
+        # group_id：與 hailo-ollama (HAILO_OLLAMA_VDEVICE_GROUP_ID) 相同時兩個行程可共用 Hailo-10H；None = 獨占 VDevice
+        self.group_id = group_id or None
         self._vdevice = None
         self._s2t = None
         self._initialized = False
@@ -173,7 +175,12 @@ class HailoWhisperEngine(WhisperEngineInterface):
                 self._initialized = False
                 return
 
-            self._vdevice = VDevice()
+            if self.group_id:
+                params = VDevice.create_params()
+                params.group_id = self.group_id
+                self._vdevice = VDevice(params)
+            else:
+                self._vdevice = VDevice()
             for cand_path in existing_candidates:
                 try:
                     logger.info(f"[HailoWhisper] Attempting Speech2Text initialization with: {cand_path}...")
