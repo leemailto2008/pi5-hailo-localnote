@@ -17,6 +17,27 @@ from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger("hailo_whisper.engine")
 
+# Whisper 解碼參數 (HailoRT >= 5.2.0 的 Speech2Text 支援 repetition_penalty 與自動語言偵測)。
+#   PI5_WHISPER_LANGUAGE            預設語言 (ISO-639-1，例如 zh、en)；"auto" = 由模型自動偵測
+#   PI5_WHISPER_REPETITION_PENALTY  重複懲罰，1.0 = 不懲罰
+# 2026-10-29 raspi543 A/B (Whisper-Small HEF，8 s 切片，1/3/5/10 分鐘測試會議＋中英夾雜／英文短句＋底噪)：
+#   - repetition_penalty 1.1：平均 CER 0.401 → 0.363，10 分鐘會議的重複迴圈 (同一片段連續 10 次) 消失；1.05／1.15／1.2 以上都較差。
+#   - auto：中文會議與強制 zh 結果相同；英文句不再被翻成中文 (CER 0.54 → 0)；底噪片段的幻覺 8/10 → 1–2/10。
+WHISPER_LANGUAGE = os.environ.get("PI5_WHISPER_LANGUAGE", "auto").strip().lower() or "auto"
+WHISPER_REPETITION_PENALTY = float(os.environ.get("PI5_WHISPER_REPETITION_PENALTY", "1.1"))
+# 幾乎全靜音 (RMS < -66 dBFS) 不送 NPU：實測數位靜音會被解碼成「有 有，有」之類的幻覺
+SILENCE_RMS = 0.0005
+# 自動偵測偶爾把中文誤判成日／韓文；輸出含假名或諺文就改用 zh 重跑一次
+_UNEXPECTED_SCRIPT_RE = re.compile(r"[\u3040-\u30ff\u31f0-\u31ff\uac00-\ud7af\u1100-\u11ff]")
+
+
+def is_near_silent(audio: "np.ndarray") -> bool:
+    return audio.size == 0 or float(np.sqrt(np.mean(np.square(audio, dtype=np.float64)))) < SILENCE_RMS
+
+
+def needs_zh_retry(text: str) -> bool:
+    return bool(text) and _UNEXPECTED_SCRIPT_RE.search(text) is not None
+
 try:
     import opencc
     _OPENCC = opencc.OpenCC('s2twp.json')
@@ -266,6 +287,7 @@ class HailoWhisperEngine(WhisperEngineInterface):
         language: Optional[str] = None,
         initial_prompt: Optional[str] = None,
         temperature: float = 0.0,
+        repetition_penalty: Optional[float] = None,
     ) -> Dict[str, Any]:
         if not self.is_hardware_accelerated():
             raise RuntimeError("Hailo-10H Engine not initialized. Please use CPU fallback.")
@@ -278,7 +300,7 @@ class HailoWhisperEngine(WhisperEngineInterface):
             if audio_data is not None:
                 audio_data = self._trim_leading_silence(audio_data)
 
-            if audio_data is None or len(audio_data) < 1600:
+            if audio_data is None or len(audio_data) < 1600 or is_near_silent(audio_data):
                 return {
                     "text": "",
                     "language": language or "en",
@@ -287,19 +309,28 @@ class HailoWhisperEngine(WhisperEngineInterface):
                 }
 
             from hailo_platform.genai import Speech2TextTask
-            # Set default language to "zh" (Chinese) for clean multi-byte token decoding without byte-splitting errors
-            lang_code = language.lower() if language else "zh"
+            # 預設 "zh" (中文多位元組 token 解碼較乾淨)；"auto" → None 交給模型自動偵測語言
+            lang = (language or WHISPER_LANGUAGE).lower()
+            lang_code = None if lang == "auto" else lang
+            rp = WHISPER_REPETITION_PENALTY if repetition_penalty is None else float(repetition_penalty)
 
             # Calculate dynamic timeout: minimum 30s, or 1.5x audio duration + 10s
             audio_dur_sec = len(audio_data) / 16000.0
             calc_timeout_ms = max(30000, int((audio_dur_sec * 1.5 + 10.0) * 1000))
 
-            raw_text = self._s2t.generate_all_text(
-                audio_data=audio_data,
-                task=Speech2TextTask.TRANSCRIBE,
-                language=lang_code,
-                timeout_ms=calc_timeout_ms
-            )
+            gen_kwargs: Dict[str, Any] = {
+                "audio_data": audio_data,
+                "task": Speech2TextTask.TRANSCRIBE,
+                "language": lang_code,
+                "timeout_ms": calc_timeout_ms,
+            }
+            if rp != 1.0:   # HailoRT < 5.2.0 沒有這個參數；1.0 時不傳以維持相容
+                gen_kwargs["repetition_penalty"] = rp
+            raw_text = self._s2t.generate_all_text(**gen_kwargs)
+            if lang_code is None and needs_zh_retry(raw_text or ""):
+                logger.info(f"[HailoWhisper] auto language produced kana/hangul, retry with zh: {raw_text!r}")
+                gen_kwargs["language"] = lang_code = "zh"
+                raw_text = self._s2t.generate_all_text(**gen_kwargs)
 
             final_text = (raw_text or "").strip()
             # Filter prompt bleeding if present
