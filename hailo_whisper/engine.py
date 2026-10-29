@@ -41,6 +41,35 @@ def is_near_silent(audio: "np.ndarray") -> bool:
 def needs_zh_retry(text: str) -> bool:
     return bool(text) and _UNEXPECTED_SCRIPT_RE.search(text) is not None
 
+
+# 語音偵測 (VAD)：用 faster-whisper 內建的 Silero VAD (CPU 備援路徑本來就以 vad_filter 使用)，找不到語音的切片不送 NPU。
+#   PI5_WHISPER_VAD=0 關閉；faster-whisper 未安裝時只用上面的 RMS 門檻。
+# 2026-10-29 228 喇叭→藍牙實錄：PipeWire 1.6.9 後錄音電平約高 10 dB，無人說話時底噪約 -49 dBFS，
+#   高於 -55 dBFS 門檻，auto 會幻覺出「I'm going to kill you.」之類英文句子並寫進紀要。
+#   Silero (預設 threshold 0.5、最短語音 250 ms)：純底噪 13/13 段擋下；真人錄音只擋結尾無人說話段；
+#   測試會議壓到 -50 dBFS 再疊真實底噪 (SNR 約 0 dB) 仍 0 段誤擋；每 8 s 切片約 30 ms CPU (單執行緒)。
+WHISPER_VAD = os.environ.get("PI5_WHISPER_VAD", "1").strip() != "0"
+_VAD_OPTIONS = None
+
+
+def speech_seconds(audio: "np.ndarray", sr: int = 16000) -> Optional[float]:
+    """Silero VAD 偵測到的語音總秒數；VAD 關閉、未安裝或出錯時回傳 None (呼叫端照常送 NPU)。"""
+    global _VAD_OPTIONS
+    if not WHISPER_VAD:
+        return None
+    try:
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
+    except Exception:
+        return None
+    try:
+        if _VAD_OPTIONS is None:
+            _VAD_OPTIONS = VadOptions(min_speech_duration_ms=250)
+        spans = get_speech_timestamps(np.asarray(audio, dtype=np.float32), vad_options=_VAD_OPTIONS, sampling_rate=sr)
+    except Exception as e:
+        logger.warning(f"[HailoWhisper] VAD failed, sending the slice anyway: {e}")
+        return None
+    return sum(s["end"] - s["start"] for s in spans) / float(sr)
+
 try:
     import opencc
     _OPENCC = opencc.OpenCC('s2twp.json')
@@ -303,7 +332,8 @@ class HailoWhisperEngine(WhisperEngineInterface):
             if audio_data is not None:
                 audio_data = self._trim_leading_silence(audio_data)
 
-            if audio_data is None or len(audio_data) < 1600 or is_near_silent(audio_data):
+            if (audio_data is None or len(audio_data) < 1600 or is_near_silent(audio_data)
+                    or speech_seconds(audio_data) == 0.0):
                 return {
                     "text": "",
                     "language": language or "en",

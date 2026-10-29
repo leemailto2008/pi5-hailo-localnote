@@ -69,7 +69,7 @@ graph TD
 | Hailo 軟體 | HailoRT／PCIe 驅動 (`hailort`、`hailort-pcie-driver`) | 5.3.0 |
 | | HailoRT Python 綁定 (`hailort` wheel，cp313) | 5.3.0 |
 | | Hailo Model Zoo GenAI (`hailo-gen-ai-model-zoo`，含 hailo-ollama) | 5.3.0（hailo-ollama 0.5.1） |
-| AI 模型 | STT：Whisper-Small HEF | `/home/pi/models/hailo10h/Whisper-Small.hef`；解碼：自動語言偵測、repetition_penalty 1.1（`PI5_WHISPER_LANGUAGE`／`PI5_WHISPER_REPETITION_PENALTY`） |
+| AI 模型 | STT：Whisper-Small HEF | `/home/pi/models/hailo10h/Whisper-Small.hef`；解碼：自動語言偵測、repetition_penalty 1.1（`PI5_WHISPER_LANGUAGE`／`PI5_WHISPER_REPETITION_PENALTY`）；Silero VAD 判定無語音的切片不送 NPU（`PI5_WHISPER_VAD`） |
 | | LLM（NPU）：`qwen3:1.7b` | Q4_0，2.9 GB，hailo-ollama `127.0.0.1:11435` |
 | | LLM（CPU 備援）：`qwen2.5:3b-opt`（→ `qwen2.5:3b`） | Ollama 0.40.4，`127.0.0.1:11434` |
 | | STT（CPU 備援）：faster-whisper | 1.2.1（ctranslate2 4.8.3） |

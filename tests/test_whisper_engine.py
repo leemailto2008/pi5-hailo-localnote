@@ -27,6 +27,8 @@ def fake_engine(monkeypatch):
     monkeypatch.setitem(sys.modules, "hailo_platform", types.ModuleType("hailo_platform"))
     monkeypatch.setitem(sys.modules, "hailo_platform.genai", genai)
 
+    monkeypatch.setattr(eng, "speech_seconds", lambda audio, sr=16000: 1.0)   # 預設 VAD 判定有語音；VAD 測試再覆寫
+
     def make(replies):
         e = object.__new__(eng.HailoWhisperEngine)
         e.hef_path, e.group_id, e._vdevice, e._initialized = "x.hef", None, None, True
@@ -90,3 +92,43 @@ def test_quiet_speech_still_goes_to_the_npu(fake_engine):
 @pytest.mark.parametrize("text,retry", [("こんにちは", True), ("안녕하세요", True), ("我們下週 review PR", False), ("", False)])
 def test_needs_zh_retry(text, retry):
     assert eng.needs_zh_retry(text) is retry
+
+
+def test_vad_without_speech_skips_the_npu(fake_engine, monkeypatch):
+    e = fake_engine([])
+    monkeypatch.setattr(eng, "speech_seconds", lambda audio, sr=16000: 0.0)
+    noise = (np.random.default_rng(2).standard_normal(16000 * 8) * 10 ** (-49 / 20)).astype(np.float32)   # 228 實測底噪
+    assert e.transcribe(noise, language="auto")["text"] == "" and e._s2t.calls == []
+
+
+def test_vad_unavailable_still_sends_the_slice(fake_engine, monkeypatch):
+    e = fake_engine(["好"])
+    monkeypatch.setattr(eng, "speech_seconds", lambda audio, sr=16000: None)
+    assert e.transcribe(_speech(), language="auto")["text"] == "好" and len(e._s2t.calls) == 1
+
+
+def _fake_vad_module(monkeypatch, spans):
+    vad = types.ModuleType("faster_whisper.vad")
+    vad.VadOptions = lambda **kw: kw
+    vad.get_speech_timestamps = lambda audio, vad_options=None, sampling_rate=16000: spans
+    monkeypatch.setitem(sys.modules, "faster_whisper", types.ModuleType("faster_whisper"))
+    monkeypatch.setitem(sys.modules, "faster_whisper.vad", vad)
+    monkeypatch.setattr(eng, "_VAD_OPTIONS", None)
+
+
+def test_speech_seconds_sums_vad_spans(monkeypatch):
+    _fake_vad_module(monkeypatch, [{"start": 0, "end": 8000}, {"start": 16000, "end": 40000}])
+    assert eng.speech_seconds(np.zeros(48000, np.float32)) == pytest.approx(2.0)
+    _fake_vad_module(monkeypatch, [])
+    assert eng.speech_seconds(np.zeros(48000, np.float32)) == 0.0
+
+
+def test_speech_seconds_can_be_disabled(monkeypatch):
+    _fake_vad_module(monkeypatch, [])
+    monkeypatch.setattr(eng, "WHISPER_VAD", False)
+    assert eng.speech_seconds(np.zeros(48000, np.float32)) is None
+
+
+def test_speech_seconds_without_faster_whisper(monkeypatch):
+    monkeypatch.setitem(sys.modules, "faster_whisper.vad", None)    # import 會失敗
+    assert eng.speech_seconds(np.zeros(48000, np.float32)) is None
