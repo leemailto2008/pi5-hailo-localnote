@@ -1,5 +1,5 @@
 import summary_utils  # noqa: E402
-from summary_utils import (SECTION_MISSING_NOTE, assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections,
+from summary_utils import (SECTION_MISSING_NOTE, assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, ground_todo_table,
                            extract_todos, keep_alive_plan, split_transcript, split_with_recap, summary_limits)
 
 
@@ -188,4 +188,22 @@ def test_missing_table_separator_is_restored():
     ok = "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 回覆客戶 | 王經理 | 週五 |"
     assert clean_summary_markdown(ok) == ok          # 已有分隔線就不動
     assert clean_summary_markdown("## 待辦\n| 事項 | 負責人 | 時間 |") == "## 待辦\n| 事項 | 負責人 | 時間 |"   # 只有表頭不補
+
+
+def test_todo_owner_and_time_must_come_from_transcript():
+    transcript = "下週由許經理主持面試，11月28日前完成；王經理週五回覆客戶。"
+    md = ("## 摘要\n- 招募：工程師A負責\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n"
+          "| 主持面試 | 許經理 | 11月28日前 |\n| 撰寫報告 | 工程師A | 今日 |\n| 回覆客戶 | 王經理、陳經理 | 週五 |\n\n## 決議\n- 無")
+    out = ground_todo_table(md, transcript)
+    assert "| 主持面試 | 許經理 | 11月28日前 |" in out              # 逐字稿有的保留
+    assert "| 撰寫報告 | - | - |" in out                          # 捏造的負責人與時間改成 -
+    assert "| 回覆客戶 | 王經理 | 週五 |" in out                    # 多人時只留逐字稿有的
+    assert "- 招募：工程師A負責" in out                               # 待辦以外的段落不動
+    assert "| 事項 | 負責人 | 時間 |\n|---|---|---|" in out
+
+
+def test_todo_grounding_keeps_placeholders_and_handles_empty_input():
+    md = "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 無 | - | - |"
+    assert ground_todo_table(md, "今天沒有待辦") == md
+    assert ground_todo_table("", "x") == "" and ground_todo_table(md, "") == md
 

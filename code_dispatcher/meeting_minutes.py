@@ -36,7 +36,7 @@ AUDIO_CACHE_DIR = get_in_memory_cache_dir()
 
 # LLM backend selection (Hailo-10H qwen3:1.7b preferred, CPU Ollama fallback) lives in llm_backend.py
 from llm_backend import achat_complete, aiter_chat_stream, LLMError
-from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, keep_alive_plan,
+from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, ground_todo_table, keep_alive_plan,
                            split_with_recap, summary_limits)
 
 # 長會議紀要 (2026-10-27 e2e)：Hailo qwen3:1.7b 單次請求約 1500 字就 context full (HTTP 500)，
@@ -878,6 +878,8 @@ class MeetingJobManager:
             finally:
                 llm_done_event.set()
                 llm_ticker_task.cancel()
+            raw_markdown = ground_todo_table(raw_markdown, transcript)   # 待辦的負責人／時間必須出自逐字稿
+            self.status.summary_stream = raw_markdown
 
             llm_dur = round(time.time() - llm_start, 2)
             total_lat = round(time.time() - rec_finish_time, 2)
@@ -950,7 +952,8 @@ class MeetingJobManager:
         async def _regen_worker():
             try:
                 transcript = self.result.transcript
-                raw_markdown = await self._generate_summary_llm(transcript, job_id=job_id)
+                raw_markdown = ground_todo_table(await self._generate_summary_llm(transcript, job_id=job_id), transcript)
+                self.status.summary_stream = raw_markdown
                 parsed = parse_markdown_minutes(raw_markdown)
 
                 start_dt = datetime.fromisoformat(self.result.started_at) if self.result.started_at else datetime.now()

@@ -54,6 +54,39 @@ def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) 
     return re.sub(r"\n{3,}", "\n\n", "\n".join(_fix_table_separators(out))).strip()
 
 
+
+# 待辦表的負責人／時間必須出自逐字稿 (2026-10-29 228／229 提示詞 A/B：9 份逐字稿 × 2 次，現行提示詞的 94 個待辦欄位中
+# 18 個是逐字稿與講稿都沒有的，例如「工程師A」「記錄員」「陳經理」「今日」)；改提示詞會連帶少寫 70% 的正確欄位，所以改在後處理擋。
+_TODO_SKIP = {"", "-", "無", "待定", "未定", "未指定", "全體", "n/a", "N/A"}
+
+
+def _ground_norm(text: str) -> str:
+    return to_taiwan_traditional(text or "").replace(" ", "").replace("　", "").replace("臺", "台").lower()
+
+
+def ground_todo_table(md: str, transcript: str) -> str:
+    """待辦表每列的負責人、時間欄若在逐字稿中找不到，改成「-」 (多人時只留找得到的人)；事項欄與其他段落不動。"""
+    if not md or not transcript or "## 待辦" not in md:
+        return md
+    tr = _ground_norm(transcript)
+    out, section = [], None
+    for line in md.splitlines():
+        s = line.strip()
+        if s.startswith("## "):
+            section = s[3:].strip()
+        if section == "待辦" and s.startswith("|") and not _is_sep(s):
+            cols = [c.strip() for c in s.strip("|").split("|")]
+            if len(cols) >= 3 and cols[0] != "事項":
+                for i in (1, 2):
+                    if cols[i] in _TODO_SKIP or _ground_norm(cols[i]) in tr:
+                        continue
+                    parts = [x for x in re.split(r"[、,，/]|與|和", cols[i]) if x.strip()]
+                    kept = [x.strip() for x in parts if _ground_norm(x) in tr]
+                    cols[i] = "、".join(kept) if kept and len(parts) > 1 else "-"
+                line = "| " + " | ".join(cols) + " |"
+        out.append(line)
+    return "\n".join(out)
+
 def _is_sep(line: str) -> bool:
     return line.strip().startswith("|") and set(line.strip()) <= set("|-: ")
 
