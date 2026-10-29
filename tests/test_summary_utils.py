@@ -1,3 +1,4 @@
+import summary_utils  # noqa: E402
 from summary_utils import (SECTION_MISSING_NOTE, assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections,
                            extract_todos, keep_alive_plan, split_transcript, split_with_recap, summary_limits)
 
@@ -153,3 +154,28 @@ def test_summary_limits_scale_with_length():
     big = summary_limits(55)
     assert big == {"max_summary": 15, "max_todos": 11, "max_decisions": 6}
     assert summary_limits(500)["max_summary"] == 16
+
+
+class _FakeCC:
+    def convert(self, text):
+        return text.translate(str.maketrans({"应": "應", "许": "許", "条": "條"}))
+
+
+def test_simplified_chars_in_summary_become_traditional(monkeypatch):
+    monkeypatch.setattr(summary_utils, "_CC", _FakeCC())
+    md = "## 摘要\n- 供应商交期延后\n- 供應商交期延后\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 主持面試 | 许經理 | 本週 |"
+    out = clean_summary_markdown(md)
+    assert "应" not in out and "许" not in out and "許經理" in out
+    assert out.count("供應商交期") == 1          # 轉換後才去重，簡繁兩行合併成一行
+
+
+def test_long_minutes_notes_become_traditional(monkeypatch):
+    monkeypatch.setattr(summary_utils, "_CC", _FakeCC())
+    out = assemble_long_minutes(["- 招募：许經理主持面試\n- 決議：供应商下週回覆"])
+    assert "許經理" in out and "供應商" in out and "应" not in out
+
+
+def test_without_opencc_text_is_unchanged(monkeypatch):
+    monkeypatch.setattr(summary_utils, "_CC", False)
+    assert summary_utils.to_taiwan_traditional("供应商") == "供应商"
+    assert summary_utils.to_taiwan_traditional("") == "" and summary_utils.to_taiwan_traditional(None) == ""

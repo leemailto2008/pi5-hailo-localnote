@@ -3,12 +3,34 @@
 import re
 from typing import Dict, List, Optional
 
+# 小模型 (qwen3:1.7b) 的紀要偶爾混出簡體字：2026-10-29 檢查 228 的 29 份 e2e／實錄紀要，11 份含簡體 (应、许、条、温…)，
+# 例如「应商」讓議題關鍵字比對落空。逐字稿已由 Whisper 引擎轉成台灣繁體 (OpenCC s2twp)，紀要也走同一套轉換；沒有 OpenCC 時原樣輸出。
+_CC = None
+
+
+def to_taiwan_traditional(text: str) -> str:
+    global _CC
+    if not text:
+        return text or ""
+    if _CC is None:
+        try:
+            import opencc
+            _CC = opencc.OpenCC("s2twp.json")
+        except Exception:
+            _CC = False
+    if not _CC:
+        return text
+    try:
+        return _CC.convert(text)
+    except Exception:
+        return text
+
 
 def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) -> str:
-    """LLM 紀要後處理：移除重複行 (小模型偶發重複迴圈直到 num_predict 用盡)，並限制摘要/決議點數。"""
+    """LLM 紀要後處理：轉台灣繁體、移除重複行 (小模型偶發重複迴圈直到 num_predict 用盡)，並限制摘要/決議點數。"""
     limits = max_items or {"摘要": 5, "決議": 3}
     out, seen, section, count = [], set(), None, 0
-    for line in (md or "").splitlines():
+    for line in to_taiwan_traditional(md or "").splitlines():
         s = line.strip()
         if s.startswith("## "):
             section, count = s[3:].strip(), 0
@@ -182,7 +204,7 @@ def assemble_long_minutes(chunk_notes: List[str], max_summary: int = 8, max_deci
     """chunk_notes：每段的 compact_notes() 輸出 (依時間順序)。
     摘要：最後一段 (會議結尾常有總結) 先保留 tail_lines 條，其餘名額每段先取第 1 條、有剩再取第 2 條…，維持時間順序；
     待辦/決議由規則從全部重點擷取。"""
-    per = [_note_lines(n) for n in chunk_notes]
+    per = [_note_lines(to_taiwan_traditional(n)) for n in chunk_notes]
     picked = []
     if len(per) > 1 and per[-1]:
         picked = [(len(per) - 1, r, l) for r, l in enumerate(per[-1][:tail_lines])]
