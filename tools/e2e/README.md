@@ -12,6 +12,7 @@
 | `scoring.py` | 純函式評分：CER、事實召回、summary 結構／重複／總結召回／議題覆蓋、門檻判定 |
 | `e2e.py` | 單一案例：null sink 注入 (`/dev/shm/ln_force_source`) → `/api/record` → 即時播放 → 評分 + `mon.py` 資源取樣 |
 | `run_suite.py` | 多案例：套 `thresholds.json`，輸出 `suite.json`、`summary.md`、`junit.xml`；任一失敗 exit 1 |
+| `speaker_selftest.py` | 聲學自測（在接喇叭的電腦上執行）：喇叭播放講稿 → 耳麥 → 藍牙 mSBC → app，錄完用 fixture 評分；只用標準函式庫 |
 | `thresholds.json` | 門檻（`default` + `per_minutes` 覆寫） |
 | `../ci/deploy_on_pi.sh` | CD：部署程式到 Pi、健康檢查、失敗自動回滾 |
 | `../ci/prepare_test_data.sh` | 檢查/解出與 fixture sha256 相符的測試音檔 |
@@ -57,6 +58,7 @@ python3 tools/e2e/run_suite.py --minutes 1 3                        # Pi 上，q
 python3 tools/e2e/run_suite.py --minutes 1 3 5 10 15 30             # Pi 上，full（約 2 小時）
 python3 tools/e2e/run_suite.py --minutes 45 60 90 120 180 240        # Pi 上，long（約 14 小時，含紀要）
 python3 tools/e2e/run_suite.py --minutes 5 --allow-bypass           # 只測錄音 + STT
+python tools/e2e/speaker_selftest.py --pi http://192.168.50.228 --wav meeting_1min.wav   # 接喇叭的電腦上，耳麥放喇叭前（聲學路徑）
 ```
 
 - 每次都用 `bypass_summary=false` 發送請求，只作用於該次錄音，**不改 UI 的全域設定**。
