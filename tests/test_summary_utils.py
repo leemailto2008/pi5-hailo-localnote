@@ -96,8 +96,8 @@ def test_assemble_long_minutes_is_grounded_and_chronological():
     chunks = ["- 甲議題一，王經理週三回報\n- 甲議題二", "- 乙議題一，決定維持原價\n- 乙議題二", "- 丙總結一\n- 丙總結二"]
     md = assemble_long_minutes(chunks, max_summary=5, tail_lines=2)
     summ = md.split("## 待辦")[0].splitlines()[1:]
-    # 最後一段 (結尾總結) 保留 2 條，其餘名額依時間順序輪流取
-    assert [l for l in summ if l] == ["- 甲議題一，王經理週三回報", "- 甲議題二", "- 乙議題一，決定維持原價", "- 丙總結一", "- 丙總結二"]
+    # 最後一段 (結尾總結) 保留 2 條，其餘名額依時間順序輪流取；決議條目只放在「決議」，不重複列在摘要
+    assert [l for l in summ if l] == ["- 甲議題一，王經理週三回報", "- 甲議題二", "- 乙議題二", "- 丙總結一", "- 丙總結二"]
     assert "| 甲議題一 | 王經理 | 週三 |" in md
     assert md.endswith("## 決議\n- 乙議題一，決定維持原價")
     assert all(sec in md for sec in ("## 摘要", "## 待辦", "## 決議"))
@@ -206,4 +206,14 @@ def test_todo_grounding_keeps_placeholders_and_handles_empty_input():
     md = "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 無 | - | - |"
     assert ground_todo_table(md, "今天沒有待辦") == md
     assert ground_todo_table("", "x") == "" and ground_todo_table(md, "") == md
+
+
+def test_long_minutes_never_repeat_a_decision_in_the_summary():
+    chunks = ["- 預算：明年預算200萬元\n- 訂單：決議先簽60臺試單", "- 總結：決議先簽60臺試單"]
+    md = assemble_long_minutes(chunks, max_summary=5, tail_lines=2)
+    lines = [l for l in md.splitlines() if l.startswith("- ")]
+    assert len(lines) == len(set(lines))                     # e2e 的 duplicate_lines = 0
+    assert "## 決議\n- 訂單：決議先簽60臺試單" in md and "- 預算：明年預算200萬元" in md
+    only = assemble_long_minutes(["- 決議：維持原價"])             # 全部都是決議時，摘要仍保留
+    assert only.split("## 待辦")[0].count("維持原價") == 1
 

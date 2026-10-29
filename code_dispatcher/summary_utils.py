@@ -254,7 +254,14 @@ def assemble_long_minutes(chunk_notes: List[str], max_summary: int = 8, max_deci
     """chunk_notes：每段的 compact_notes() 輸出 (依時間順序)。
     摘要：最後一段 (會議結尾常有總結) 先保留 tail_lines 條，其餘名額每段先取第 1 條、有剩再取第 2 條…，維持時間順序；
     待辦/決議由規則從全部重點擷取。"""
-    per = [_note_lines(to_taiwan_traditional(n)) for n in chunk_notes]
+    per_all = [_note_lines(to_taiwan_traditional(n)) for n in chunk_notes]
+    all_lines = [l for p in per_all for l in p]
+    decisions = [l for l in all_lines if _DECISION_RE.search(l)][:max_decisions]
+    # 選進「決議」的條目不再放進「摘要」(2026-10-29 228 30 分鐘 e2e：同一條同時出現在兩段，duplicate_lines 不過門檻)；
+    # 名額留給其他議題。全部條目都是決議時才退回原本的選法。
+    per = [[l for l in p if l not in decisions] for p in per_all]
+    if not any(per):
+        per = per_all
     picked = []
     if len(per) > 1 and per[-1]:
         picked = [(len(per) - 1, r, l) for r, l in enumerate(per[-1][:tail_lines])]
@@ -273,9 +280,7 @@ def assemble_long_minutes(chunk_notes: List[str], max_summary: int = 8, max_deci
                     used.add(_topic_key(lines[rank]))
             rank += 1
     picked.sort()
-    all_lines = [l for p in per for l in p]
     todos = extract_todos(all_lines, max_rows=max_todos)
-    decisions = [l for l in all_lines if _DECISION_RE.search(l)][:max_decisions]
     out = ["## 摘要"] + [f"- {l}" for _, _, l in picked] if picked else ["## 摘要", "- 無"]
     out += ["", "## 待辦", "| 事項 | 負責人 | 時間 |", "|---|---|---|"] + (todos or ["| 無 | - | - |"])
     out += ["", "## 決議"] + ([f"- {l}" for l in decisions] or ["- 無"])
