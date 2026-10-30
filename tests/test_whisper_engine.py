@@ -132,3 +132,22 @@ def test_speech_seconds_can_be_disabled(monkeypatch):
 def test_speech_seconds_without_faster_whisper(monkeypatch):
     monkeypatch.setitem(sys.modules, "faster_whisper.vad", None)    # import 會失敗
     assert eng.speech_seconds(np.zeros(48000, np.float32)) is None
+
+
+@pytest.mark.parametrize("raw,fixed", [
+    ("招募方面，決意是11月28日前完成報到，代辦事像是許經理主持面試", "招募方面，決議是11月28日前完成報到，待辦事項是許經理主持面試"),
+    ("品質方面，捷一是產線加開一站檢查，待辦事相是黃專員", "品質方面，決議是產線加開一站檢查，待辦事項是黃專員"),
+    ("代版事向是劉課長送預算表", "待辦事項是劉課長送預算表"),
+    ("他的決意很堅定", "他的決意很堅定"),            # 不是「決議是」的用法不動
+    ("請代辦簽證", "請代辦簽證"),
+    ("大半事項都完成了", "大半事項都完成了"),
+    ("", ""),
+])
+def test_fix_meeting_terms(raw, fixed):
+    assert eng.fix_meeting_terms(raw) == fixed
+
+
+def test_meeting_terms_fixed_in_npu_output(fake_engine):
+    e = fake_engine(["最後總結一下，預算方面決意是維持原案"])
+    assert e.transcribe(_speech(), language="auto")["text"].endswith("預算方面決議是維持原案")
+

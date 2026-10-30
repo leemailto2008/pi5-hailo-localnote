@@ -70,6 +70,21 @@ def speech_seconds(audio: "np.ndarray", sr: int = 16000) -> Optional[float]:
         return None
     return sum(s["end"] - s["start"] for s in spans) / float(sr)
 
+# 會議結構詞的系統性同音錯字 (2026-10-30 統計 228 的 51 份逐字稿，約 25.5 萬字)：
+#   「X方面，決議是…」：決意 72、捷一 8、決一 3，正確的「決議」只有 4 次。
+#   「待辦事項是…」：待辦事像 14、代辦事像 10、代版事像 7、代辦事向 6…，正確的只有 9 次。
+# 長會議紀要以「決議」等關鍵字挑出決議條目，錯字會讓決議段落變成「無」(30 分鐘喇叭自測)。
+# 只修正後面接「是」的決議，以及「待辦」系列後接「事X」的待辦事項，不動其他用法。
+_DECISION_FIX_RE = re.compile(r"(?:決意|捷一|決一|絕一|覺一)(?=\s*是)")
+_TODO_FIX_RE = re.compile(r"(?:待辦|代辦|代版|戴板|戴版|待半|大辦|帶辦)\s*事(?:項|像|相|象|向|下|巷)")
+
+
+def fix_meeting_terms(text: str) -> str:
+    if not text:
+        return text or ""
+    return _TODO_FIX_RE.sub("待辦事項", _DECISION_FIX_RE.sub("決議", text))
+
+
 try:
     import opencc
     _OPENCC = opencc.OpenCC('s2twp.json')
@@ -387,6 +402,7 @@ class HailoWhisperEngine(WhisperEngineInterface):
                     final_text = _OPENCC.convert(final_text)
                 except Exception as cc_err:
                     logger.warning(f"[HailoWhisper] OpenCC conversion warning: {cc_err}")
+            final_text = fix_meeting_terms(final_text)
 
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
             return {
