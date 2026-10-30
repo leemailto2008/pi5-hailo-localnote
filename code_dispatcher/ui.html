@@ -262,7 +262,7 @@ details[open] summary::after{content:"收起 ▴"}
               <div class="vu-header">
                 <span class="vu-title">🎤 耳麥收音</span>
                 <span class="vu-status-badge vu-silent" id="vuStatusBadge">靜音</span>
-                <span class="vu-status-badge vu-weak" id="vuLinkBadge" hidden title="最近 10 秒藍牙封包遺失、被剪掉的空白比例。超過 10% 逐字稿會明顯變差：請讓耳麥靠近主機，避開玻璃牆與金屬隔板。"></span>
+                <span class="vu-status-badge vu-weak" id="vuLinkBadge" hidden title="最近 10 秒藍牙封包遺失、被剪掉的空白比例。這只是下限（部分壞幀被補成假音訊，不會算進來）；0% 時逐字稿最準，超過 5% 會明顯變差：請讓耳麥靠近主機，避開玻璃牆與金屬隔板。"></span>
                 <span class="spacer"></span>
                 <span class="vu-db-val" id="vuDbVal">-60 dB</span>
               </div>
@@ -653,12 +653,13 @@ function updateVuMeter(data) {
     }
   }
 
-  // 藍牙掉音率 (ZeroSplicer 最近 10 秒)：≥3% 顯示，≥10% 轉紅
+  // 藍牙掉音率 (ZeroSplicer 最近 10 秒)：≥1% 顯示，≥5% 轉紅
+  // 2026-10-30 228 喇叭自測 18 輪：0% 時 CER 0.29–0.35；1.6–2.8% 約 0.40–0.48；4.5% 以上 0.43–0.94
   if (el.vuLinkBadge) {
     const d = data.dropout_pct;
-    if (d != null && d >= 3) {
+    if (d != null && d >= 1) {
       el.vuLinkBadge.hidden = false;
-      el.vuLinkBadge.className = 'vu-status-badge ' + (d >= 10 ? 'vu-silent' : 'vu-weak');
+      el.vuLinkBadge.className = 'vu-status-badge ' + (d >= 5 ? 'vu-silent' : 'vu-weak');
       el.vuLinkBadge.textContent = `藍牙掉音 ${Math.round(d)}%`;
     } else {
       el.vuLinkBadge.hidden = true;
@@ -1583,7 +1584,7 @@ function updateMetricsUI(m) {
     if (m.stt_status === 'done') {
       const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : (m.stt_duration || 0);
       const ld = m.link_dropout_pct;
-      const linkNote = (ld != null && ld >= 3) ? ` · ⚠️ 藍牙掉音 ${ld.toFixed(1)}%${ld >= 10 ? '（逐字稿可能不準，請讓耳麥靠近主機）' : ''}` : '';
+      const linkNote = (ld != null && ld >= 1) ? ` · ⚠️ 藍牙掉音 ${ld.toFixed(1)}%${ld >= 5 ? '（逐字稿可能不準，請讓耳麥靠近主機）' : ''}` : '';
       if (fc != null && fs != null) {
         elSttDesc.textContent = `⚡ 首進 STT: ${fc.toFixed(1)}s → 首出字: ${fs.toFixed(1)}s (推論時差 ${fl.toFixed(1)}s) · 尾端整合 ${waitSec.toFixed(1)}s${linkNote}`;
       } else {
