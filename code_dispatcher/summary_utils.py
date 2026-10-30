@@ -198,6 +198,38 @@ def compact_notes(text: str, max_lines: int = 4, max_len: int = 40) -> str:
 
 SECTION_MISSING_NOTE = "（模型輸出長度不足，此段未產生，請參考逐字稿）"
 
+# 逐字稿中明講的「決議是…」(STT 端 fix_meeting_terms 已把 決意/捷一… 改回「決議」)。
+# 只取到下一個標點或「待辦」為止，30 字內沒有斷點的長串不取 (多半是 STT 連成一片的錯字)。
+_SPOKEN_DECISION_RE = re.compile(r"決議(?:是|為|：|:)\s*([^，,。；;！!？?\n]{2,30}?)\s*(?=待辦|[，,。；;！!？?\n]|$)")
+
+
+def fill_decisions_from_transcript(md: str, transcript: str, max_items: int = 3) -> str:
+    """紀要的「決議」段是空的 (無／未產生) 但逐字稿明講了「決議是…」時，直接用逐字稿原句補上。
+
+    2026-10-30 228：60 份實錄與 e2e 紀要有 24 份決議段是空的，其中 21 份逐字稿裡就有「決議是…」。
+    qwen3:1.7b 常把決議寫進摘要或漏掉；原句出自逐字稿，不會捏造。決議段已有內容時不動。
+    """
+    if not md or not transcript:
+        return md
+    m = re.search(r"(^## 決議[ \t]*\n)(.*?)(?=^## |\Z)", md, re.S | re.M)
+    if not m:
+        return md
+    items = [l.strip()[2:].strip() for l in m.group(2).splitlines() if l.strip().startswith("- ")]
+    if any(x and x not in ("無", SECTION_MISSING_NOTE) for x in items):
+        return md
+    # 已經以同一句條列在其他段落的不再重複 (e2e 門檻 duplicate_lines = 0)
+    existing = {re.sub(r"\s+", "", l.strip()[2:]) for l in md.splitlines() if l.strip().startswith("- ")}
+    found: List[str] = []
+    for d in _SPOKEN_DECISION_RE.findall(transcript):
+        d = d.strip()
+        if d and d not in found and re.sub(r"\s+", "", d) not in existing:
+            found.append(d)
+    if not found:
+        return md
+    body = "\n".join(f"- {d}" for d in found[:max_items])
+    rest = md[m.end():]
+    return md[:m.start(2)] + body + ("\n\n" + rest if rest else "")
+
 
 def ensure_sections(md: str) -> str:
     """紀要被 num_predict 截斷時，補上缺少的段落標題並明確標示未產生 (不捏造內容)；

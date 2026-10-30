@@ -1,5 +1,6 @@
 import summary_utils  # noqa: E402
 from summary_utils import (SECTION_MISSING_NOTE, assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, ground_todo_table,
+                           fill_decisions_from_transcript,
                            extract_todos, keep_alive_plan, split_transcript, split_with_recap, summary_limits)
 
 
@@ -206,6 +207,29 @@ def test_todo_grounding_keeps_placeholders_and_handles_empty_input():
     md = "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 無 | - | - |"
     assert ground_todo_table(md, "今天沒有待辦") == md
     assert ground_todo_table("", "x") == "" and ground_todo_table(md, "") == md
+
+
+_CLOSING = "好最後總結一下，招募方面，決議是11月28日前完成報到，待辦事項是許經理主持面試，品質方面，決議是產線加開一站檢查待辦事項是黃專員"
+
+
+def test_empty_decisions_filled_from_spoken_decisions():
+    md = "## 摘要\n- 招募進度\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 面試 | 許經理 | - |\n\n## 決議\n- 無"
+    out = fill_decisions_from_transcript(md, _CLOSING)
+    assert out.endswith("## 決議\n- 11月28日前完成報到\n- 產線加開一站檢查")    # 到「，」或「待辦」為止
+    assert out.split("## 決議")[0] == md.split("## 決議")[0]                      # 其他段落不動
+    mid = "## 摘要\n- a\n\n## 決議\n\n## 待辦\n- b"
+    assert fill_decisions_from_transcript(mid, _CLOSING) == "## 摘要\n- a\n\n## 決議\n- 11月28日前完成報到\n- 產線加開一站檢查\n\n## 待辦\n- b"
+    missing = f"## 摘要\n- a\n\n## 決議\n- {SECTION_MISSING_NOTE}"
+    assert "- 11月28日前完成報到" in fill_decisions_from_transcript(missing, _CLOSING)
+
+
+def test_spoken_decisions_left_alone_when_not_needed():
+    md = "## 摘要\n- 產線加開一站檢查\n\n## 決議\n- 無"
+    assert fill_decisions_from_transcript("## 決議\n- 維持原價", _CLOSING) == "## 決議\n- 維持原價"   # 已有決議
+    assert fill_decisions_from_transcript(md, "今天沒有做出決定") == md                          # 逐字稿沒明講
+    assert fill_decisions_from_transcript(md, _CLOSING).endswith("## 決議\n- 11月28日前完成報到")  # 已在摘要的不重複
+    assert fill_decisions_from_transcript(md, "決議是" + "很長" * 20 + "。") == md               # 30 字內沒有斷點不取
+    assert fill_decisions_from_transcript("## 摘要\n- a", _CLOSING) == "## 摘要\n- a"             # 沒有決議段
 
 
 def test_long_minutes_never_repeat_a_decision_in_the_summary():

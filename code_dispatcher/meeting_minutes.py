@@ -36,7 +36,8 @@ AUDIO_CACHE_DIR = get_in_memory_cache_dir()
 
 # LLM backend selection (Hailo-10H qwen3:1.7b preferred, CPU Ollama fallback) lives in llm_backend.py
 from llm_backend import achat_complete, aiter_chat_stream, LLMError
-from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, ground_todo_table, keep_alive_plan,
+from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, fill_decisions_from_transcript,
+                           ground_todo_table, keep_alive_plan,
                            split_with_recap, summary_limits)
 
 # 長會議紀要 (2026-10-27 e2e)：Hailo qwen3:1.7b 單次請求約 1500 字就 context full (HTTP 500)，
@@ -896,6 +897,7 @@ class MeetingJobManager:
                 llm_done_event.set()
                 llm_ticker_task.cancel()
             raw_markdown = ground_todo_table(raw_markdown, transcript)   # 待辦的負責人／時間必須出自逐字稿
+            raw_markdown = fill_decisions_from_transcript(raw_markdown, transcript)   # 決議段空白但逐字稿有明講
             self.status.summary_stream = raw_markdown
 
             llm_dur = round(time.time() - llm_start, 2)
@@ -970,6 +972,7 @@ class MeetingJobManager:
             try:
                 transcript = self.result.transcript
                 raw_markdown = ground_todo_table(await self._generate_summary_llm(transcript, job_id=job_id), transcript)
+                raw_markdown = fill_decisions_from_transcript(raw_markdown, transcript)
                 self.status.summary_stream = raw_markdown
                 parsed = parse_markdown_minutes(raw_markdown)
 
