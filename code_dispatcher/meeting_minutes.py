@@ -1049,7 +1049,8 @@ class MeetingJobManager:
                 await self._release_hailo()
 
     async def _release_hailo(self) -> None:
-        """分段整理時模型常駐 NPU；若在最後一段 (keep_alive=0) 之前中止或失敗，補送極短請求立即釋放，讓 STT 能開 VDevice。"""
+        """分段整理時模型常駐 NPU；若在最後一段 (keep_alive=0) 之前中止、失敗，或最後一段 (結尾總結) 不呼叫 LLM，
+        補送極短請求立即釋放，讓 STT 能開 VDevice。"""
         self._hailo_pinned = False
         try:
             from llm_backend import HAILO_BACKEND, build_messages
@@ -1057,7 +1058,7 @@ class MeetingJobManager:
             payload = HAILO_BACKEND.build_chat_payload(build_messages("好"), stream=False, num_predict=1, hailo_keep_alive=0)
             async with httpx.AsyncClient(timeout=60.0) as client:
                 await client.post(HAILO_BACKEND.chat_url, json=payload)
-            print("[MeetingMinutes] map 階段中止，已送 keep_alive=0 釋放 Hailo NPU")
+            print("[MeetingMinutes] 已送 keep_alive=0 釋放 Hailo NPU (map 中止，或結尾總結直接採用原句)")
         except Exception as e:
             print(f"[MeetingMinutes] release Hailo NPU failed: {e}")
 
