@@ -262,7 +262,7 @@ details[open] summary::after{content:"收起 ▴"}
               <div class="vu-header">
                 <span class="vu-title">🎤 耳麥收音</span>
                 <span class="vu-status-badge vu-silent" id="vuStatusBadge">靜音</span>
-                <span class="vu-status-badge vu-weak" id="vuLinkBadge" hidden title="最近 10 秒藍牙封包遺失、被剪掉的空白比例。這只是下限（部分壞幀被補成假音訊，不會算進來）；0% 時逐字稿最準，超過 5% 會明顯變差：請讓耳麥靠近主機，避開玻璃牆與金屬隔板。"></span>
+                <span class="vu-status-badge vu-weak" id="vuLinkBadge" hidden title="最近 10 秒沒收到的藍牙語音封包比例。5% 以上逐字稿開始變差，10% 以上會明顯變差：請讓耳麥靠近主機，避開玻璃牆與金屬隔板。"></span>
                 <span class="spacer"></span>
                 <span class="vu-db-val" id="vuDbVal">-60 dB</span>
               </div>
@@ -619,6 +619,20 @@ let wsReconnectTimer = null;
 let httpSystemInterval = null;
 let httpBtInterval = null;
 
+/* ---------- 藍牙收音品質 ----------
+ * 優先用核心 SCO 收包計數算的掉包率 (100 − 到達率)：≥5% 黃、≥10% 紅；
+ * 讀不到 (非 mSBC 等) 時退回 ZeroSplicer 剪掉的空白比例：≥1% 黃、≥5% 紅。
+ * 2026-10-30 228 喇叭自測 (btmon 對照)：掉包 ≤5% 時 CER ≤0.35；8–10% 約 0.40；10% 以上 0.40–0.78。
+ * 剪掉的空白只是下限 (PipeWire 1.6 會把壞幀補成假音訊)，掉包 8–10% 時常常不到 1%。 */
+function linkLoss(arrival, dropout) {
+  if (arrival != null) {
+    const p = Math.max(0, 100 - arrival);
+    return {pct: p, label: '藍牙掉包', level: p >= 10 ? 2 : (p >= 5 ? 1 : 0)};
+  }
+  if (dropout != null) return {pct: dropout, label: '藍牙掉音', level: dropout >= 5 ? 2 : (dropout >= 1 ? 1 : 0)};
+  return null;
+}
+
 /* ---------- Task 09: 即時音量與頻譜視覺化更新 ---------- */
 function updateVuMeter(data) {
   if (!el.vuContainer) return;
@@ -653,14 +667,13 @@ function updateVuMeter(data) {
     }
   }
 
-  // 藍牙掉音率 (ZeroSplicer 最近 10 秒)：≥1% 顯示，≥5% 轉紅
-  // 2026-10-30 228 喇叭自測 18 輪：0% 時 CER 0.29–0.35；1.6–2.8% 約 0.40–0.48；4.5% 以上 0.43–0.94
+  // 藍牙收音品質 (最近 10 秒)，見 linkLoss()
   if (el.vuLinkBadge) {
-    const d = data.dropout_pct;
-    if (d != null && d >= 1) {
+    const L = linkLoss(data.arrival_pct, data.dropout_pct);
+    if (L && L.level > 0) {
       el.vuLinkBadge.hidden = false;
-      el.vuLinkBadge.className = 'vu-status-badge ' + (d >= 5 ? 'vu-silent' : 'vu-weak');
-      el.vuLinkBadge.textContent = `藍牙掉音 ${Math.round(d)}%`;
+      el.vuLinkBadge.className = 'vu-status-badge ' + (L.level >= 2 ? 'vu-silent' : 'vu-weak');
+      el.vuLinkBadge.textContent = `${L.label} ${Math.round(L.pct)}%`;
     } else {
       el.vuLinkBadge.hidden = true;
     }
@@ -1583,8 +1596,8 @@ function updateMetricsUI(m) {
 
     if (m.stt_status === 'done') {
       const waitSec = m.stt_tail_wait != null ? m.stt_tail_wait : (m.stt_duration || 0);
-      const ld = m.link_dropout_pct;
-      const linkNote = (ld != null && ld >= 1) ? ` · ⚠️ 藍牙掉音 ${ld.toFixed(1)}%${ld >= 5 ? '（逐字稿可能不準，請讓耳麥靠近主機）' : ''}` : '';
+      const L = linkLoss(m.link_arrival_pct, m.link_dropout_pct);
+      const linkNote = (L && L.level > 0) ? ` · ⚠️ ${L.label} ${L.pct.toFixed(1)}%${L.level >= 2 ? '（逐字稿可能不準，請讓耳麥靠近主機）' : ''}` : '';
       if (fc != null && fs != null) {
         elSttDesc.textContent = `⚡ 首進 STT: ${fc.toFixed(1)}s → 首出字: ${fs.toFixed(1)}s (推論時差 ${fl.toFixed(1)}s) · 尾端整合 ${waitSec.toFixed(1)}s${linkNote}`;
       } else {

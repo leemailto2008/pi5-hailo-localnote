@@ -731,11 +731,15 @@ async def record_audio_from_mic(
     filtering/encoding restores continuous speech (see audio_splice.py).
     Supports cancellation_event token for immediate hardware abort and finish_early_event for graceful early wrap-up.
 
-    stats_out (optional dict) receives link-quality numbers from the ZeroSplicer: `dropout_live` (percent of
-    inserted silence over the last ~10 s, updated while recording) and, at the end, `captured_s`, `inserted_s`,
-    `inserted_runs`, `dropout_pct`. Pure audio bookkeeping; no HCI command is issued while recording.
+    stats_out (optional dict) receives link-quality numbers:
+      - from the ZeroSplicer: `dropout_live` (percent of inserted silence over the last ~10 s) and, at the end,
+        `captured_s`, `inserted_s`, `inserted_runs`, `dropout_pct`;
+      - from the kernel SCO RX counter (bt_link_stats.ArrivalMeter): `arrival_live` / `arrival_pct`, the share
+        of mSBC packets that actually arrived (None when unknown).
+    Both are passive reads; no HCI command is issued while recording.
     """
     from audio_splice import ZeroSplicer, pause_cut_index
+    from bt_link_stats import ArrivalMeter
 
     source_node = await ensure_bluetooth_recording_ready()
 
@@ -782,6 +786,7 @@ async def record_audio_from_mic(
     slice_max_s = min(chunk_sec + 1.5, 9.5)
     slice_max_bytes = int(slice_max_s * 32000)
     splicer = ZeroSplicer(sr=16000)
+    arrival = ArrivalMeter(window_s=10.0, interval_s=1.0)
     link_win = deque(maxlen=100)   # (原始樣本數, 已剪樣本數) 快照；每次讀取 ≤0.1 s → 約最近 10 s
 
     def _live_dropout() -> float:
@@ -853,6 +858,7 @@ async def record_audio_from_mic(
                     "status": status_label,
                     "bands": bands,
                     "dropout_pct": _live_dropout(),
+                    "arrival_pct": arrival.live_pct(),
                     "active": True
                 }
                 try:
@@ -904,8 +910,10 @@ async def record_audio_from_mic(
                 break
             clean = splicer.feed(chunk)
             link_win.append((splicer.in_samples, splicer.removed_samples))
+            arrival.tick()
             if stats_out is not None:
                 stats_out["dropout_live"] = _live_dropout()
+                stats_out["arrival_live"] = arrival.live_pct()
             await _deliver(clean)
 
         await _deliver(splicer.flush())
@@ -931,7 +939,10 @@ async def record_audio_from_mic(
                 "inserted_s": round(splicer.removed_ms / 1000, 2),
                 "inserted_runs": splicer.runs,
                 "dropout_pct": round(splicer.dropout_pct, 1),
+                "arrival_pct": arrival.total_pct(),
             })
+        print(f"[VoicePipeline] 📶 SCO arrival {arrival.total_pct()}% of mSBC nominal "
+              f"(inserted silence {splicer.dropout_pct:.1f}%)")
 
         # Finalize encoder (EOF on stdin -> ffmpeg writes OGG trailer)
         if enc.stdin and not enc.stdin.is_closing():

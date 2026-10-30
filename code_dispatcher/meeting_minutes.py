@@ -658,6 +658,7 @@ class MeetingJobManager:
                     self.status.metrics["stt_audio_delay"] = max(0.0, round(time.time() - last_done_enq_t, 1))
                 if "dropout_live" in rec_stats:
                     self.status.metrics["link_dropout_live"] = rec_stats["dropout_live"]
+                    self.status.metrics["link_arrival_live"] = rec_stats.get("arrival_live")
                 self.notify_status_update()
                 await asyncio.sleep(0.5)
 
@@ -688,6 +689,7 @@ class MeetingJobManager:
                 # 藍牙收音品質：被剪掉的插入式靜音比例 (見 audio_splice.ZeroSplicer.dropout_pct)
                 self.status.metrics["link_dropout_pct"] = rec_stats["dropout_pct"]
                 self.status.metrics["link_inserted_s"] = rec_stats.get("inserted_s")
+                self.status.metrics["link_arrival_pct"] = rec_stats.get("arrival_pct")
 
             # 等待剩餘切片隊列消化完畢 (依據隊列深度動態等待，保證全軌切片 100% 入稿)
             await chunk_queue.put(None)
