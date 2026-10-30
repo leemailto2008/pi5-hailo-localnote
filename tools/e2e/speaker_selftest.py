@@ -105,10 +105,13 @@ def main() -> int:
     play()
     print(f"[selftest] 播放結束 ({time.time() - t0:.1f} s)，等待轉錄與紀要…", flush=True)
     wait_state(a.pi, lambda s: s.get("state") in ("done", "error", "idle") and s.get("job") in (job, None), seconds + 1800, poll=2)
+    met = api(a.pi, "/api/status").get("metrics") or {}
     res = api(a.pi, "/api/result")
     tr = res.get("transcript", "")
     summ = scoring.summary_body(res.get("markdown") or "")     # 去掉匯出 markdown 附帶的「## 逐字稿」，與 e2e.py 相同
     report = {"job": res.get("job"), "wav": os.path.basename(a.wav), "fixture": os.path.basename(fx_path),
+              # 藍牙收音品質 (ad499de 起)：SCO 封包到達率、ZeroSplicer 剪掉的空白；掉包 ≥10% 時 CER 通常 > 0.45
+              "link": {k: met.get(k) for k in ("link_arrival_pct", "link_dropout_pct", "link_inserted_s")},
               "transcript": scoring.transcript_checks(tr, fx),
               "summary": None if a.bypass_summary else scoring.summary_checks(summ, fx, tr)}
     print(json.dumps(report, ensure_ascii=False, indent=1))
