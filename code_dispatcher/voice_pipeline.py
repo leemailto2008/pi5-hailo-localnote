@@ -10,6 +10,7 @@ import sys
 import re
 import asyncio
 import subprocess
+from collections import deque
 from typing import Optional, Any, Callable, Dict, Union, List
 import numpy as np
 
@@ -714,7 +715,8 @@ async def record_audio_from_mic(
     on_proc_started: Optional[Callable[[Any], Any]] = None,
     pcm_chunk_callback: Optional[Callable[[bytes, bool], Any]] = None,
     chunk_sec: float = 5.0,
-    finish_early_event: Optional[asyncio.Event] = None
+    finish_early_event: Optional[asyncio.Event] = None,
+    stats_out: Optional[Dict[str, Any]] = None
 ) -> bool:
     """
     Record audio from Bluetooth headset mic using ffmpeg with explicit hardware source routing.
@@ -728,6 +730,10 @@ async def record_audio_from_mic(
     (btsnoop + libsbc) shows these blocks are inserted, not lost audio, so removing them before
     filtering/encoding restores continuous speech (see audio_splice.py).
     Supports cancellation_event token for immediate hardware abort and finish_early_event for graceful early wrap-up.
+
+    stats_out (optional dict) receives link-quality numbers from the ZeroSplicer: `dropout_live` (percent of
+    inserted silence over the last ~10 s, updated while recording) and, at the end, `captured_s`, `inserted_s`,
+    `inserted_runs`, `dropout_pct`. Pure audio bookkeeping; no HCI command is issued while recording.
     """
     from audio_splice import ZeroSplicer, pause_cut_index
 
@@ -776,6 +782,14 @@ async def record_audio_from_mic(
     slice_max_s = min(chunk_sec + 1.5, 9.5)
     slice_max_bytes = int(slice_max_s * 32000)
     splicer = ZeroSplicer(sr=16000)
+    link_win = deque(maxlen=100)   # (原始樣本數, 已剪樣本數) 快照；每次讀取 ≤0.1 s → 約最近 10 s
+
+    def _live_dropout() -> float:
+        if len(link_win) < 2:
+            return 0.0
+        (i0, r0), (i1, r1) = link_win[0], link_win[-1]
+        return round(100.0 * (r1 - r0) / (i1 - i0), 1) if i1 > i0 else 0.0
+
     chunk_buffer = bytearray()
     vu_buffer = bytearray()
     cap = None
@@ -838,6 +852,7 @@ async def record_audio_from_mic(
                     "level_pct": level_pct,
                     "status": status_label,
                     "bands": bands,
+                    "dropout_pct": _live_dropout(),
                     "active": True
                 }
                 try:
@@ -887,7 +902,11 @@ async def record_audio_from_mic(
                 continue
             if not chunk:
                 break
-            await _deliver(splicer.feed(chunk))
+            clean = splicer.feed(chunk)
+            link_win.append((splicer.in_samples, splicer.removed_samples))
+            if stats_out is not None:
+                stats_out["dropout_live"] = _live_dropout()
+            await _deliver(clean)
 
         await _deliver(splicer.flush())
 
@@ -905,7 +924,14 @@ async def record_audio_from_mic(
 
         if splicer.runs:
             print(f"[VoicePipeline] 🩹 zero-splice: removed {splicer.runs} PipeWire-inserted silence runs "
-                  f"({splicer.removed_ms / 1000:.2f}s) before encoding/STT")
+                  f"({splicer.removed_ms / 1000:.2f}s, {splicer.dropout_pct:.1f}%) before encoding/STT")
+        if stats_out is not None:
+            stats_out.update({
+                "captured_s": round(splicer.in_samples / 16000, 1),
+                "inserted_s": round(splicer.removed_ms / 1000, 2),
+                "inserted_runs": splicer.runs,
+                "dropout_pct": round(splicer.dropout_pct, 1),
+            })
 
         # Finalize encoder (EOF on stdin -> ffmpeg writes OGG trailer)
         if enc.stdin and not enc.stdin.is_closing():

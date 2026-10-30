@@ -627,6 +627,7 @@ class MeetingJobManager:
                     self.notify_status_update()
                 await chunk_queue.put((slice_data, is_final, time.time()))
 
+            rec_stats: Dict[str, Any] = {}
             self._record_task = asyncio.create_task(
                 record_audio_from_mic(
                     duration_sec,
@@ -636,7 +637,8 @@ class MeetingJobManager:
                     on_proc_started=_on_proc,
                     pcm_chunk_callback=_on_pcm_slice,
                     chunk_sec=8.0,
-                    finish_early_event=self._finish_early_event
+                    finish_early_event=self._finish_early_event,
+                    stats_out=rec_stats
                 )
             )
 
@@ -653,6 +655,8 @@ class MeetingJobManager:
                 self.status.metrics["record_elapsed"] = round(elapsed, 1)
                 if last_done_enq_t is not None:
                     self.status.metrics["stt_audio_delay"] = max(0.0, round(time.time() - last_done_enq_t, 1))
+                if "dropout_live" in rec_stats:
+                    self.status.metrics["link_dropout_live"] = rec_stats["dropout_live"]
                 self.notify_status_update()
                 await asyncio.sleep(0.5)
 
@@ -679,6 +683,10 @@ class MeetingJobManager:
             self.status.metrics["record_status"] = "done"
             self.status.metrics["record_elapsed"] = float(duration_sec)
             self.status.metrics["record_total"] = float(duration_sec)
+            if "dropout_pct" in rec_stats:
+                # 藍牙收音品質：被剪掉的插入式靜音比例 (見 audio_splice.ZeroSplicer.dropout_pct)
+                self.status.metrics["link_dropout_pct"] = rec_stats["dropout_pct"]
+                self.status.metrics["link_inserted_s"] = rec_stats.get("inserted_s")
 
             # 等待剩餘切片隊列消化完畢 (依據隊列深度動態等待，保證全軌切片 100% 入稿)
             await chunk_queue.put(None)

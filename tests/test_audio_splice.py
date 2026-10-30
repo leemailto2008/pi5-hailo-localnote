@@ -56,6 +56,24 @@ def test_no_zero_runs_is_passthrough():
     assert np.array_equal(x, y) and zs.runs == 0
 
 
+def test_dropout_pct_counts_inserted_share():
+    rng = np.random.default_rng(7)
+    x = (rng.standard_normal(16000) * 3000).astype(np.int16)
+    x[np.abs(x) <= 2] = 3                                 # 真實音訊不含近零
+    x[4000:4800] = 0                                      # 插入 800 + 1600 樣本 = 15%
+    x[9000:10600] = 0
+    sp = ZeroSplicer(sr=16000)
+    out = b"".join(sp.feed(x[i:i + 1600].tobytes()) for i in range(0, len(x), 1600)) + sp.flush()
+    assert sp.in_samples == 16000
+    assert sp.runs == 2
+    assert sp.dropout_pct == pytest.approx(15.0)
+    assert len(out) // 2 == 16000 - 2400 - 2 * 48      # 每個接縫交叉淡化 3 ms (48 樣本) 重疊
+
+
+def test_dropout_pct_empty_is_zero():
+    assert ZeroSplicer().dropout_pct == 0.0
+
+
 def test_pause_cut_lands_in_pause():
     sr = 16000
     x = (np.random.default_rng(3).standard_normal(sr * 10) * 3000).astype(np.int16)

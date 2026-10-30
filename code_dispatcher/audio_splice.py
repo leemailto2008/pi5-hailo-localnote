@@ -29,6 +29,7 @@ class ZeroSplicer:
         self._post = np.zeros(0, dtype=np.float32)       # 零段之後、等待交叉淡化的樣本
         self._need_xf = False
         self.removed_samples = 0
+        self.in_samples = 0                              # 餵入的原始樣本數
         self.runs = 0
 
     def feed(self, data: bytes) -> bytes:
@@ -38,6 +39,7 @@ class ZeroSplicer:
         if n == 0:
             return b""
         a = np.frombuffer(data[:n], dtype="<i2")
+        self.in_samples += len(a)
         small = np.abs(a.astype(np.int32)) <= self.thr
         cuts = np.flatnonzero(np.diff(small.astype(np.int8))) + 1
         bounds = np.concatenate(([0], cuts, [len(a)]))
@@ -76,6 +78,16 @@ class ZeroSplicer:
     @property
     def removed_ms(self) -> float:
         return self.removed_samples * 1000.0 / self.sr
+
+    @property
+    def dropout_pct(self) -> float:
+        """剪掉的插入式靜音占原始收音的百分比：藍牙空中遺失的下限指標。
+
+        2026-10-30 228 喇叭自測 15 輪：此比例與逐字稿 CER 相關 r = 0.76；
+        ≤3% 時 CER 約 0.40–0.64，≥15% 時 CER 0.67–0.94。PipeWire 1.6 的 PLC 會把一部分壞幀補成假音訊，
+        那部分不會出現在這裡，所以只是下限。
+        """
+        return 100.0 * self.removed_samples / self.in_samples if self.in_samples else 0.0
 
     def _keep(self, seg: np.ndarray):
         if self._need_xf:
