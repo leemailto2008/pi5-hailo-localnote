@@ -458,7 +458,10 @@ class MeetingJobManager:
             first_chunk_ready_time: Optional[float] = None
             first_stt_output_time: Optional[float] = None
             first_stt_latency: Optional[float] = None
-            last_processed_audio_sec: float = 0.0
+            # 即時差 (stt_audio_delay)：現在時刻 − 最後一段轉錄完成的切片「進佇列時刻」(＝該切片結尾的錄音時刻)。
+            # 2026-10-30 228 喇叭 30 分鐘自測：舊算法「已錄秒數 − 已處理音訊秒數」把 ZeroSplicer 剪掉的
+            # 插入靜音 (80 s) 也算成落後，顯示 101 s，但實際尾端等待只有 3.2 s、並無積壓。
+            last_done_enq_t: Optional[float] = None
 
             self.status.metrics = {
                 "job_id": job_id,
@@ -507,7 +510,7 @@ class MeetingJobManager:
 
             async def _chunk_stt_worker():
                 """背景即時解算滑動切片 PCM 音訊"""
-                nonlocal first_chunk_ready_time, first_stt_output_time, first_stt_latency, last_processed_audio_sec, curr_preview
+                nonlocal first_chunk_ready_time, first_stt_output_time, first_stt_latency, last_done_enq_t, curr_preview
                 try:
                     while True:
                         item = await chunk_queue.get()
@@ -516,12 +519,10 @@ class MeetingJobManager:
                             break
                         pcm_bytes = item[0]
                         is_final = item[1]
+                        enq_t = item[2] if len(item) > 2 else time.time()
 
                         if pcm_bytes and len(pcm_bytes) >= 16000 and not self._cancellation_token.is_set():
                             try:
-                                slice_sec = len(pcm_bytes) / 32000.0
-                                last_processed_audio_sec += slice_sec
-
                                 # 轉為 16kHz float32 PCM numpy 陣列
                                 pcm_np = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
 
@@ -529,8 +530,8 @@ class MeetingJobManager:
                                 peak = float(np.max(np.abs(pcm_np)))
                                 rms = float(np.sqrt(np.mean(pcm_np**2)))
                                 if peak < 0.035 and rms < 0.0025:
-                                    now_elapsed = time.time() - t0
-                                    self.status.metrics["stt_audio_delay"] = max(0.0, round(now_elapsed - last_processed_audio_sec, 1))
+                                    last_done_enq_t = enq_t
+                                    self.status.metrics["stt_audio_delay"] = max(0.0, round(time.time() - enq_t, 1))
                                     chunk_queue.task_done()
                                     continue
 
@@ -539,6 +540,7 @@ class MeetingJobManager:
                                     pcm_np,
                                     self._thread_cancellation_token
                                 )
+                                last_done_enq_t = enq_t
                                 now_t = time.time()
                                 now_elapsed = round(now_t - t0, 1)
 
@@ -591,7 +593,7 @@ class MeetingJobManager:
                                     self.status.metrics["stt_paragraphs"] = len(live_segments)
                                     self.status.metrics["first_stt_text_time"] = now_elapsed
 
-                                self.status.metrics["stt_audio_delay"] = max(0.0, round(now_elapsed - last_processed_audio_sec, 1))
+                                self.status.metrics["stt_audio_delay"] = max(0.0, round(time.time() - enq_t, 1))
                                 self.notify_status_update()
 
                                 if seg_text and seg_text.strip():
@@ -649,8 +651,8 @@ class MeetingJobManager:
                 self.status.progress = min(100, int((elapsed / duration_sec) * 100))
                 self.status.eta = max(0.0, float(duration_sec - elapsed))
                 self.status.metrics["record_elapsed"] = round(elapsed, 1)
-                if last_processed_audio_sec > 0:
-                    self.status.metrics["stt_audio_delay"] = max(0.0, round(elapsed - last_processed_audio_sec, 1))
+                if last_done_enq_t is not None:
+                    self.status.metrics["stt_audio_delay"] = max(0.0, round(time.time() - last_done_enq_t, 1))
                 self.notify_status_update()
                 await asyncio.sleep(0.5)
 
