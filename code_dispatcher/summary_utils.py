@@ -179,24 +179,35 @@ _RECAP_FILLER_RE = re.compile(r"^(?:好|那|嗯|ok|OK)?\s*(?:我們)?(?:最後)?
 
 
 def recap_notes(recap: str, max_lines: int = 6, max_len: int = 50) -> str:
-    """長會議的結尾總結改用逐字稿原句：依逗號／句號切成子句，去掉客套話，依序打包成 <= max_len 字的條列。
+    """長會議的結尾總結改用逐字稿原句：依逗號／句號切成子句，去掉客套話；遇到「X方面」就換行 (一行一個議題)，
+    同一議題內再依序打包成 <= max_len 字的條列。
 
-    2026-10-30 228 離線 A/B (14 份 10／15／30 分鐘長逐字稿，`stage/exp_recap.py`)：口頭總結本身已是
+    2026-10-30 228 離線 A/B (13 份 10／15／30 分鐘長逐字稿，`stage/exp_recap.py`、`recap_label_eval.py`)：口頭總結本身已是
     「X 方面，決議是…，待辦事項是某人在某日前…」，交給 qwen3:1.7b 再改寫、每行又截在 40 字時，負責人與期限常被丟掉；
-    改用原句後回顧事實 (逐字稿內) 只升不降，事實保留也變好，且少一次 LLM 呼叫。
+    改用原句後回顧事實 (逐字稿內) 0.61 → 0.81、事實保留 0.176 → 0.230，且少一次 LLM 呼叫。
+    依「方面」分行比單純依長度打包，議題覆蓋 0.815 → 0.831、事實保留 0.223 → 0.230。
     """
     clauses = [c.strip() for c in re.split(r"[，,。；;！!？?\n]", recap or "") if c.strip()]
+    if clauses:   # 「最後總結一下任體方面」：去掉黏在第一個子句前面的總結用語
+        clauses[0] = re.sub(r"^.*?(?:最後總結一下|總結一下|最後總結|做個總結|做一下總結)", "", clauses[0]).strip() or clauses[0]
     clauses = [c for c in clauses if len(c) >= 3 and not _RECAP_FILLER_RE.search(c)]
-    lines: List[str] = []
-    cur = ""
+    groups: List[List[str]] = []
     for c in clauses:
-        if cur and len(cur) + 1 + len(c) > max_len:
-            lines.append(cur)
-            cur = c
+        if "方面" in c or not groups:
+            groups.append([c])
         else:
-            cur = f"{cur}，{c}" if cur else c
-    if cur:
-        lines.append(cur)
+            groups[-1].append(c)
+    lines: List[str] = []
+    for g in groups:
+        cur = ""
+        for c in g:
+            if cur and len(cur) + 1 + len(c) > max_len:
+                lines.append(cur)
+                cur = c
+            else:
+                cur = f"{cur}，{c}" if cur else c
+        if cur:
+            lines.append(cur)
     return "\n".join("- " + l[:max_len] for l in lines[:max_lines])
 
 

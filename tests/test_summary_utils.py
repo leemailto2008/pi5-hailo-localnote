@@ -243,6 +243,8 @@ def test_recap_notes_keep_owners_and_dates_verbatim():
         assert fact in joined                               # 負責人與期限都留下
     assert "今天就到這裡" not in joined and "謝謝大家" not in joined and "總結一下" not in joined
     assert len(lines) <= 6 and recap_notes("") == ""
+    assert lines[0].startswith("- 韌體方面") and lines[1].startswith("- 庫存方面")   # 一行一個議題
+    assert recap_notes("最後總結一下任體方面，修正版上線").startswith("- 任體方面")       # 黏在前面的總結用語去掉
 
 
 def test_is_recap_chunk():
