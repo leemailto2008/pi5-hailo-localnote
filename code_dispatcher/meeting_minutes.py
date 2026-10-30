@@ -38,7 +38,7 @@ AUDIO_CACHE_DIR = get_in_memory_cache_dir()
 # LLM backend selection (Hailo-10H qwen3:1.7b preferred, CPU Ollama fallback) lives in llm_backend.py
 from llm_backend import achat_complete, aiter_chat_stream, LLMError
 from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, fill_decisions_from_transcript,
-                           ground_todo_table, keep_alive_plan,
+                           ground_todo_table, is_recap_chunk, keep_alive_plan, recap_notes,
                            split_with_recap, summary_limits)
 
 # 長會議紀要 (2026-10-27 e2e)：Hailo qwen3:1.7b 單次請求約 1500 字就 context full (HTTP 500)，
@@ -46,6 +46,8 @@ from summary_utils import (assemble_long_minutes, clean_summary_markdown, compac
 # 再由 summary_utils.assemble_long_minutes() 組成三段式紀要 (1.7B 模型無法跨 20+ 條重點歸納，實測會照抄並擠掉待辦/決議)。
 SUMMARY_SINGLE_MAX_CHARS = int(os.environ.get("PI5_SUMMARY_SINGLE_MAX", "1200"))
 SUMMARY_CHUNK_CHARS = int(os.environ.get("PI5_SUMMARY_CHUNK", "1000"))
+# 長會議的結尾總結在這個長度以內就直接用原句 (recap_notes)，不交給 LLM 改寫；設 0 關閉
+SUMMARY_RECAP_VERBATIM_MAX = int(os.environ.get("PI5_SUMMARY_RECAP_VERBATIM_MAX", "400"))
 # 分段整理期間讓 hailo-ollama 模型常駐，避免每段重新載入 7–28 秒；最後一段用預設 0 釋放 NPU。
 # 實測 hailo-ollama 0.5.1：keep_alive 單位為秒，計時從模型載入開始，後續請求「不會」延長。
 # 計時到期若剛好撞上下一段請求，會 HAILO_COMMUNICATION_CLOSED → HTTP 500 (30 分鐘實測第 6 段)。
@@ -1077,6 +1079,12 @@ class MeetingJobManager:
             self.notify_status_update()
             ka = plan[idx - 1]   # None = 這是載入視窗的最後一段，完成即卸載
             t_req, text = time.time(), ""
+            if idx == total > 1 and is_recap_chunk(piece) and len(piece) <= SUMMARY_RECAP_VERBATIM_MAX:
+                # 口頭總結直接用原句 (見 summary_utils.recap_notes)；模型仍常駐時由 finally 的 _release_hailo() 釋放 NPU
+                notes.append(recap_notes(piece))
+                print(f"[MeetingMinutes] 段 {idx}/{total}: 結尾總結 {len(piece)} 字，直接採用原句")
+                self.status.summary_stream = assemble_long_minutes(notes, **summary_limits(total))
+                continue
             try:
                 self._hailo_pinned = True
                 text, backend = await achat_complete(map_user_prompt(piece, idx, total), system=MAP_SYSTEM_MSG,

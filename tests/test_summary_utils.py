@@ -1,6 +1,6 @@
 import summary_utils  # noqa: E402
 from summary_utils import (SECTION_MISSING_NOTE, assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, ground_todo_table,
-                           fill_decisions_from_transcript,
+                           fill_decisions_from_transcript, is_recap_chunk, recap_notes,
                            extract_todos, keep_alive_plan, split_transcript, split_with_recap, summary_limits)
 
 
@@ -230,6 +230,24 @@ def test_spoken_decisions_left_alone_when_not_needed():
     assert fill_decisions_from_transcript(md, _CLOSING).endswith("## 決議\n- 11月28日前完成報到")  # 已在摘要的不重複
     assert fill_decisions_from_transcript(md, "決議是" + "很長" * 20 + "。") == md               # 30 字內沒有斷點不取
     assert fill_decisions_from_transcript("## 摘要\n- a", _CLOSING) == "## 摘要\n- a"             # 沒有決議段
+
+
+def test_recap_notes_keep_owners_and_dates_verbatim():
+    recap = ("最後總結一下，韌體方面，決議是修正版10月11日上線，待辦事項是李協理安排回歸測試，"
+             "庫存方面，決議是下一批3000臺11月5日到貨，待辦事項是劉課長調貨，今天就到這裡，謝謝大家！")
+    out = recap_notes(recap)
+    lines = out.splitlines()
+    assert all(l.startswith("- ") and len(l) <= 52 for l in lines)
+    joined = "".join(lines)
+    for fact in ("10月11日", "李協理", "3000臺", "11月5日", "劉課長"):
+        assert fact in joined                               # 負責人與期限都留下
+    assert "今天就到這裡" not in joined and "謝謝大家" not in joined and "總結一下" not in joined
+    assert len(lines) <= 6 and recap_notes("") == ""
+
+
+def test_is_recap_chunk():
+    assert is_recap_chunk("最後總結一下，招募方面…") and is_recap_chunk("  總結一下，預算方面…")
+    assert not is_recap_chunk("第一個議題是招募，最後總結一下")
 
 
 def test_long_minutes_never_repeat_a_decision_in_the_summary():

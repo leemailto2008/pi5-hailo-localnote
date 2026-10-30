@@ -168,6 +168,38 @@ def split_with_recap(text: str, max_chars: int = 1000, tail_ratio: float = 0.3, 
     return split_transcript(text, max_chars)
 
 
+def is_recap_chunk(piece: str) -> bool:
+    """split_with_recap() 切出的結尾總結段 (以總結用語開頭)。"""
+    return bool(_RECAP_RE.match((piece or "").strip()))
+
+
+# 結尾總結裡不帶資訊的子句 (「好」「最後總結一下」「今天就到這裡」「謝謝大家」)
+_RECAP_FILLER_RE = re.compile(r"^(?:好|那|嗯|ok|OK)?\s*(?:我們)?(?:最後)?(?:來)?(?:總結|整理|結論)(?:一下)?$|今天(?:就)?(?:先)?(?:到|開到)(?:這裡|這邊)"
+                              r"|^謝謝(?:大家)?|^(?:好|那|嗯|ok|OK)$")
+
+
+def recap_notes(recap: str, max_lines: int = 6, max_len: int = 50) -> str:
+    """長會議的結尾總結改用逐字稿原句：依逗號／句號切成子句，去掉客套話，依序打包成 <= max_len 字的條列。
+
+    2026-10-30 228 離線 A/B (14 份 10／15／30 分鐘長逐字稿，`stage/exp_recap.py`)：口頭總結本身已是
+    「X 方面，決議是…，待辦事項是某人在某日前…」，交給 qwen3:1.7b 再改寫、每行又截在 40 字時，負責人與期限常被丟掉；
+    改用原句後回顧事實 (逐字稿內) 只升不降，事實保留也變好，且少一次 LLM 呼叫。
+    """
+    clauses = [c.strip() for c in re.split(r"[，,。；;！!？?\n]", recap or "") if c.strip()]
+    clauses = [c for c in clauses if len(c) >= 3 and not _RECAP_FILLER_RE.search(c)]
+    lines: List[str] = []
+    cur = ""
+    for c in clauses:
+        if cur and len(cur) + 1 + len(c) > max_len:
+            lines.append(cur)
+            cur = c
+        else:
+            cur = f"{cur}，{c}" if cur else c
+    if cur:
+        lines.append(cur)
+    return "\n".join("- " + l[:max_len] for l in lines[:max_lines])
+
+
 _BULLET_RE = re.compile(r"^\s*(?:[-*•]|\d+[\.、)])\s*")
 # 小模型常自行加上與議題無關的行 (「會議日期：7.25」「出席：…」)，會佔掉每段的條數名額
 _META_RE = re.compile(r"^(?:會議)?(?:日期|時間|地點|出席|與會|主持|記錄|主題)\s*[：:]")
