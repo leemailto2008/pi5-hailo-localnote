@@ -62,6 +62,17 @@ def test_no_sco_traffic_is_none_not_100_percent_loss():
     assert m.live_pct() is None and m.total_pct() is None
 
 
+def test_link_that_dies_mid_recording_shows_full_loss():
+    link = FakeLink(); m = _meter(link)
+    for _ in link.advance(15):
+        m.tick()
+    link.rate = 0.0                                         # 耳麥斷線或出了範圍：SCO 完全停了
+    for _ in link.advance(12):
+        m.tick()
+    assert m.live_pct() == 0.0                              # 掉包 100%，不是「未知」
+    assert 50.0 <= m.total_pct() <= 60.0
+
+
 def test_too_short_is_none():
     link = FakeLink(); m = _meter(link)
     for _ in link.advance(1.0):
