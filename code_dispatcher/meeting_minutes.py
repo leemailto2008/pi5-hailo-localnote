@@ -30,6 +30,7 @@ if os.path.exists(_agent_dir) and _agent_dir not in sys.path:
     sys.path.append(_agent_dir)
 
 from voice_memory import get_in_memory_cache_dir
+from last_meeting import load_last_meeting, save_last_meeting
 from voice_pipeline import NoMicrophoneError, record_audio_from_mic, speech_to_text
 
 AUDIO_CACHE_DIR = get_in_memory_cache_dir()
@@ -257,6 +258,33 @@ class MeetingJobManager:
         self._finish_early_event: asyncio.Event = asyncio.Event()
         self._current_ffmpeg_proc = None
         self.bypass_summary: bool = False
+        self._restore_last_meeting()
+
+    def _restore_last_meeting(self) -> None:
+        """服務啟動時載回上一場會議 (last_meeting.py)，狀態設為 done，網頁打開就看得到。"""
+        payload = load_last_meeting()
+        if not payload:
+            return
+        try:
+            self.result = MeetingResult(**payload["result"])
+        except ValueError as e:          # pydantic ValidationError 是 ValueError 的子類別
+            print(f"[MeetingMinutes] 最後一場會議內容不符目前格式，略過: {e}")
+            return
+        job = self.result.job
+        audio_ok = os.path.exists(os.path.join(AUDIO_CACHE_DIR, f"{job}.ogg"))
+        self.status = JobStatus(
+            state="done", phase="done", progress=100, eta=0.0, job=job,
+            total=float(self.result.duration), elapsed=float(self.result.duration),
+            msg=f"已載入服務重啟前的最後一場會議（{payload.get('saved_at', '')} 保存）。",
+            transcript=self.result.transcript,
+            audio_url=f"/audio/{job}.ogg" if audio_ok else None,
+            metrics=(payload.get("status") or {}).get("metrics") or {},
+        )
+        print(f"[MeetingMinutes] 已載入最後一場會議 {job}（音檔{'在' if audio_ok else '已不在'} RAM 快取）")
+
+    def _save_last_meeting(self) -> None:
+        if self.result:
+            save_last_meeting(self.result.model_dump(), {"msg": self.status.msg, "metrics": self.status.metrics})
 
     def notify_status_update(self):
         """Notify WebSocket subscribers of status update safely across async and worker threads."""
@@ -845,6 +873,7 @@ class MeetingJobManager:
                 self.status.metrics["llm_duration"] = 0.0
                 self.status.metrics["total_elapsed"] = total_stt_sec
                 self.notify_status_update()
+                self._save_last_meeting()
 
                 try:
                     from ws_manager import ws_manager
@@ -940,6 +969,7 @@ class MeetingJobManager:
             self.status.eta = 0.0
             self.status.msg = "會議紀要已生成完畢。"
             self.notify_status_update()
+            self._save_last_meeting()
 
         except asyncio.CancelledError:
             self.status.state = "idle"
@@ -995,6 +1025,7 @@ class MeetingJobManager:
                 self.status.progress = 100
                 self.status.eta = 0.0
                 self.status.msg = "會議紀要已重新整理完畢。"
+                self._save_last_meeting()
             except Exception as e:
                 self.status.state = "error"
                 self.status.msg = f"重新整理失敗: {str(e)}"
