@@ -739,7 +739,7 @@ async def record_audio_from_mic(
     Both are passive reads; no HCI command is issued while recording.
     """
     from audio_splice import ZeroSplicer, pause_cut_index
-    from bt_link_stats import ArrivalMeter
+    from bt_link_stats import ArrivalMeter, sco_rx_packets
 
     source_node = await ensure_bluetooth_recording_ready()
 
@@ -786,7 +786,9 @@ async def record_audio_from_mic(
     slice_max_s = min(chunk_sec + 1.5, 9.5)
     slice_max_bytes = int(slice_max_s * 32000)
     splicer = ZeroSplicer(sr=16000)
-    arrival = ArrivalMeter(window_s=10.0, interval_s=1.0)
+    # 只有藍牙來源才量 SCO 到達率 (USB 麥克風等不會有 SCO 封包，不能顯示成掉包 100%)
+    arrival = ArrivalMeter(window_s=10.0, interval_s=1.0,
+                           reader=sco_rx_packets if "bluez" in str(source_node) else (lambda: None))
     link_win = deque(maxlen=100)   # (原始樣本數, 已剪樣本數) 快照；每次讀取 ≤0.1 s → 約最近 10 s
 
     def _live_dropout() -> float:

@@ -77,8 +77,8 @@ class ArrivalMeter:
             self._samples.popleft()
 
     def _pct(self, a: Optional[Tuple[float, int]], b: Optional[Tuple[float, int]]) -> Optional[float]:
-        if not a or not b or b[0] - a[0] < 1.5:
-            return None
+        if not a or not b or b[0] - a[0] < 1.5 or b[1] == a[1]:
+            return None                 # 時間太短，或完全沒有 SCO 封包 (不是藍牙收音、SCO 還沒建立)
         pct = 100.0 * (b[1] - a[1]) / ((b[0] - a[0]) * MSBC_PKTS_PER_SEC)
         if pct > 110.0:                 # 不是 mSBC (例如 CVSD 封包較密)：標稱速率不適用
             self.unknown_codec = True

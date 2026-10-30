@@ -54,6 +54,14 @@ def test_unknown_when_no_counter_or_not_msbc():
     assert m.live_pct() is None and m.total_pct() is None and m.unknown_codec
 
 
+def test_no_sco_traffic_is_none_not_100_percent_loss():
+    link = FakeLink(); link.rate = 0.0                       # USB 麥克風或 SCO 還沒建立：計數不動
+    m = _meter(link)
+    for _ in link.advance(12):
+        m.tick()
+    assert m.live_pct() is None and m.total_pct() is None
+
+
 def test_too_short_is_none():
     link = FakeLink(); m = _meter(link)
     for _ in link.advance(1.0):
