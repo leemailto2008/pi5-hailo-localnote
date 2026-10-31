@@ -97,7 +97,9 @@ _RECRUIT_FIX_RE = re.compile(r"(?:招\s*[木目牧幕慕暮]|朝\s*[目幕木])"
 # 日期寫法統一：Whisper 常把「二月十五日」寫成「2.15日」或「2 月 15 日」(10-31 228 69 份逐字稿：分別 119 與 233 次，
 # 正常的「2月15日」2230 次)。統一成「2月15日」：24 份會改到的逐字稿，事實召回 0.692 → 0.704 (12 份變好、0 份變差)，CER 沒有變差。
 # 只認 1–12 月、1–31 日，且前面不能接數字或小數點 (避免「13.5日」「1.25.3日」之類)。
-_DOT_DATE_RE = re.compile(r"(?<![\d.])(1[0-2]|[1-9])\.(3[01]|[12]\d|[1-9])\s*日")
+# 10-31 再補：點的前後有空白、日前面多一個點、補零 (「6. 04. 日」「1.20. 日」「2. 03 日」)，84 份逐字稿約 40 處；
+# ≤15 分鐘的 7 份會改到：事實召回 0.689 → 0.692 (3 份變好、0 份變差)，CER 沒有變差。
+_DOT_DATE_RE = re.compile(r"(?<![\d.])(1[0-2]|0?[1-9])\s*\.\s*(3[01]|[12]\d|0?[1-9])\s*\.?\s*日")
 _SPACED_DATE_RE = re.compile(r"(?<!\d)(1[0-2]|[1-9])\s*月\s*(3[01]|[12]\d|[1-9])\s*日")
 
 
@@ -106,7 +108,7 @@ def fix_meeting_terms(text: str) -> str:
         return text or ""
     text = _TODO_FIX_RE.sub("待辦事項", _DECISION_FIX_RE.sub("決議", text))
     text = _RECRUIT_FIX_RE.sub("招募", _QUALITY_FIX_RE.sub("品質", text))
-    text = _DOT_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
+    text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
 
 
