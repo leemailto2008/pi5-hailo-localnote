@@ -295,7 +295,8 @@ def ensure_sections(md: str) -> str:
 # 長會議紀要組裝 (2026-10-27)：qwen3:1.7b 無法跨 20+ 條重點做歸納 (實測會照抄、待辦表留空、決議擠掉)，
 # 因此 map 之後不再交給 LLM reduce，而是以程式從各段重點組出三段式紀要：內容全部來自 LLM 的分段重點，不捏造。
 # 姓名部分排除數量詞與動詞 (避免「增加三位工程師」「需楊工程師」被當成負責人)
-_NAME_CHAR = r"(?:(?![需請加由交給與和的位名個人一二三四五六七八九十兩])[\u4e00-\u9fff])"
+# 「是」也排除：結尾總結「待辦事項是林主任…」的「項是林主任」不能整串當成負責人 (10-31 10 分鐘 e2e)
+_NAME_CHAR = r"(?:(?![需請加由交給與和的位名個人是一二三四五六七八九十兩])[\u4e00-\u9fff])"
 _OWNER_RE = re.compile(r"(?:負責人(?:是|為)?\s*)?(" + _NAME_CHAR + r"{1,3}(?:經理|副理|協理|主任|專員|工程師|公程師|處長|課長|組長|主管|老師))")
 _TIME_RE = re.compile(r"(\d{1,2}\s*月\s*\d{1,2}\s*日|\d{1,2}[./-]\d{1,2}(?:日)?|\d{1,2}\s*日前|下?週[一二三四五六日]|月底|下週|明天|今天|年底)")
 _DECISION_RE = re.compile(r"決定|決議|定案|確定|通過|同意|維持|改為|改成|暫停|取消")
@@ -305,18 +306,50 @@ def _note_lines(notes: str) -> List[str]:
     return [l[2:].strip() for l in (notes or "").splitlines() if l.startswith("- ") and l[2:].strip()]
 
 
+_TODO_MARK_RE = re.compile(r"待辦(?:事項)?\s*(?:是|為|：|:)\s*")
+_CLAUSE_SPLIT_RE = re.compile(r"[，；;。]|,(?!\d)")          # 不切「1,200」這類數字
+_ACTION_LEAD_RE = re.compile(r"^(?:在|於|要|會|將|請|負責|之前|以前|前)+")
+
+
+def _todo_parts(line: str):
+    """回傳 (事項, 負責人, 時間) 或 None。
+    有「待辦事項是…」時只看它後面那一句：負責人從這句取，時間先找這句、沒有才用整行的 (決議的期限)，
+    事項寫成去掉負責人與時間後剩下的動作。
+    例：「訂單方面，決議是先簽50臺，待辦事項是林主任週三前回覆華新」→ (回覆華新, 林主任, 週三)。
+    原本會取第一個子句「訂單方面」當事項，時間也可能抓到決議裡的日期。"""
+    parts = _TODO_MARK_RE.split(line)
+    if len(parts) > 1:
+        seg = _CLAUSE_SPLIT_RE.split(parts[-1])[0].strip()
+        mo = _OWNER_RE.search(seg)
+        if mo:
+            mt = _TIME_RE.search(seg)
+            if mt:
+                action = seg.replace(mo.group(0), "", 1).replace(mt.group(0), "", 1)
+            else:
+                mt = _TIME_RE.search(line)
+                action = seg.replace(mo.group(0), "", 1)
+            if mt:
+                action = _ACTION_LEAD_RE.sub("", action.strip()).strip()
+                item = action if len(action) >= 2 else (_CLAUSE_SPLIT_RE.split(line)[0].strip() or line)
+                return item[:20], mo.group(1), mt.group(1)
+    mo, mt = _OWNER_RE.search(line), _TIME_RE.search(line)
+    if not (mo and mt):
+        return None
+    return (_CLAUSE_SPLIT_RE.split(line)[0].strip()[:20] or line[:20]), mo.group(1), mt.group(1)
+
+
 def extract_todos(lines: List[str], max_rows: int = 6) -> List[str]:
     """同時出現負責人與期限的重點 → 待辦表格列「| 事項 | 負責人 | 時間 |」。"""
     rows, seen = [], set()
     for line in lines:
-        mo, mt = _OWNER_RE.search(line), _TIME_RE.search(line)
-        if not (mo and mt):
+        got = _todo_parts(line)
+        if not got:
             continue
-        item = re.split(r"[，；;]|,(?!\d)", line)[0].strip()[:20] or line[:20]   # 不切「1,200」這類數字
+        item, owner, when = got
         if item in seen:
             continue
         seen.add(item)
-        rows.append(f"| {item} | {mo.group(1)} | {mt.group(1).replace(' ', '')} |")
+        rows.append(f"| {item} | {owner} | {when.replace(' ', '')} |")
         if len(rows) >= max_rows:
             break
     return rows

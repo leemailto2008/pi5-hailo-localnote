@@ -113,6 +113,15 @@ def test_extract_todos_ignores_quantities_and_number_commas():
     assert rows == ["| 庫存1,200臺 | 林主任 | 3月20日 |", "| 交期延至4.23 | 楊工程師 | 4.23 |"]
 
 
+def test_extract_todos_reads_the_spoken_todo_clause():
+    rows = extract_todos(["是訂單調. 定單方面，決議是先簽50臺示單，待辦事項是林主任週三前回復華新機店",
+                          "招募方面，決議是11月28日前完成報到，待辦事項是許經理主持面試",
+                          "公安方面，決議是7月4日前完成複訓，待辦事項是蔡組長週二前回報名單"])
+    assert rows == ["| 回復華新機店 | 林主任 | 週三 |",
+                    "| 主持面試 | 許經理 | 11月28日 |",       # 這句沒講時間：用決議的期限
+                    "| 回報名單 | 蔡組長 | 週二 |"]           # 不拿決議的 7月4日
+
+
 def test_compact_notes_drops_meta_lines_and_todo_time_formats():
     assert compact_notes("- 會議日期：7.25\n- 出席：全體同仁\n- 工安：加裝8支警示燈，8-15日前完成") == "- 工安：加裝8支警示燈，8-15日前完成"
     assert extract_todos(["工安：加裝8支警示燈，負責人是許經理，8-15日前完成"]) == ["| 工安：加裝8支警示燈 | 許經理 | 8-15日 |"]
