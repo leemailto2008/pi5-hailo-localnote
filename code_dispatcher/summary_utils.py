@@ -322,10 +322,49 @@ def fill_decisions_from_transcript(md: str, transcript: str, max_items: int = 3)
     return md[:m.start(2)] + body + ("\n\n" + rest if rest else "")
 
 
+_SECTION_ORDER = ("摘要", "待辦", "決議")
+
+
+def _reorder_sections(lines: List[str]) -> List[str]:
+    """三段順序固定為摘要、待辦、決議 (10-31 228 322 份紀要中 21 份把「## 決議」寫在「## 待辦」前面)。
+    只在三段各出現一次時才調整，其他段落位置不動。"""
+    blocks: List[List[str]] = [[]]
+    for line in lines:
+        if line.startswith("## "):
+            blocks.append([])
+        blocks[-1].append(line)
+    titles = [b[0][3:].strip() if b and b[0].startswith("## ") else None for b in blocks]
+    slots = [i for i, t in enumerate(titles) if t in _SECTION_ORDER]
+    if sorted(titles[i] for i in slots) != sorted(_SECTION_ORDER):
+        return lines
+    by_title = {titles[i]: blocks[i] for i in slots}
+    for i, t in zip(slots, _SECTION_ORDER):
+        blk = by_title[t]
+        blocks[i] = blk if blk[-1].strip() == "" or i == slots[-1] else blk + [""]
+    return [l for b in blocks for l in b]
+
+
+def _pad_todo_rows(lines: List[str]) -> List[str]:
+    """待辦表格列的格數少於表頭時補「-」(例：模型寫到「| 出差報告 |」就停，10-31 5 分鐘 e2e)。"""
+    out, section, width = [], None, 0
+    for line in lines:
+        s = line.strip()
+        if s.startswith("## "):
+            section, width = s[3:].strip(), 0
+        if section == "待辦" and s.startswith("|") and s.endswith("|") and not _is_sep(s):
+            cells = s.count("|") - 1
+            if not width:
+                width = cells
+            elif cells < width:
+                line = s + " - |" * (width - cells)
+        out.append(line)
+    return out
+
+
 def ensure_sections(md: str) -> str:
     """紀要被 num_predict 截斷時，補上缺少的段落標題並明確標示未產生 (不捏造內容)；
-    最後一列若是被截斷的半行表格也一併移除。"""
-    lines = (md or "").rstrip().splitlines()
+    最後一列若是被截斷的半行表格也一併移除。三段順序調成摘要、待辦、決議，待辦表格太短的列補「-」。"""
+    lines = _pad_todo_rows(_reorder_sections((md or "").rstrip().splitlines()))
     if lines and lines[-1].lstrip().startswith("|") and not lines[-1].rstrip().endswith("|"):
         lines.pop()
     if lines and lines[-1].strip() in ("##", "#"):

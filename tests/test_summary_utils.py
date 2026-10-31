@@ -128,6 +128,15 @@ def test_summary_table_becomes_bullets_and_empty_rows_are_dropped():
     assert stray.endswith("## 決議\n- 維持原價")
 
 
+def test_ensure_sections_fixes_order_and_short_todo_rows():
+    md = ensure_sections("## 摘要\n- 甲\n\n## 決議\n- 招募：8月26日前完成報到\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n"
+                         "| 面試 | 劉課長 | 週一前 |\n| 出差報告 |")
+    assert md == ("## 摘要\n- 甲\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 面試 | 劉課長 | 週一前 |\n"
+                  "| 出差報告 | - | - |\n\n## 決議\n- 招募：8月26日前完成報到")
+    same = "## 摘要\n- 甲\n\n## 待辦\n| 無 | - | - |\n\n## 決議\n- 無"
+    assert ensure_sections(same) == same
+
+
 def test_dates_in_minutes_lose_inner_spaces():
     md = clean_summary_markdown("## 摘要\n- 預算 6月14 日前送財務部，9 月 10 日完成\n- 版本 3.5 日誌")
     assert "6月14日前" in md and "9月10日完成" in md and "3.5 日誌" in md
