@@ -113,6 +113,17 @@ def test_extract_todos_ignores_quantities_and_number_commas():
     assert rows == ["| 庫存1,200臺 | 林主任 | 3月20日 |", "| 交期延至4.23 | 楊工程師 | 4.23 |"]
 
 
+def test_summary_table_becomes_bullets_and_empty_rows_are_dropped():
+    md = clean_summary_markdown("## 摘要\n| 議題 | 關鍵數字 | 日期 | 金額 | 人名 |\n|---|---|---|---|---|\n"
+                                "| 1. 供應商交期延後 | 10月10日 | 10月10日 | - | 李協理 |\n| 預算 | 200萬元 | - | - | - |\n\n"
+                                "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 送預算表 | 劉課長 | 10月7日 |\n| | | |\n| | | |\n\n## 決議\n- 無")
+    assert "## 摘要\n- 供應商交期延後：10月10日，李協理\n- 預算：200萬元\n" in md
+    assert "| | |" not in md and "| 送預算表 | 劉課長 | 10月7日 |" in md and "|---|---|---|" in md
+    rows = "".join(f"| {i}. 議題{i} | {i}0臺 | 3.28L | - | - |\n" for i in range(1, 8))
+    md7 = clean_summary_markdown("## 摘要\n| 議題 | 關鍵數字 | 日期 | 金額 | 人名 |\n|---|---|---|---|---|\n" + rows)
+    assert md7.count("\n- ") == 7 and "- 議題7：70臺，3.28L" in md7      # 表格轉條列不受 5 點限制、不去「3.28」的小數點
+
+
 def test_dates_in_minutes_lose_inner_spaces():
     md = clean_summary_markdown("## 摘要\n- 預算 6月14 日前送財務部，9 月 10 日完成\n- 版本 3.5 日誌")
     assert "6月14日前" in md and "9月10日完成" in md and "3.5 日誌" in md

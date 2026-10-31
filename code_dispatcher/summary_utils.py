@@ -34,12 +34,42 @@ def tidy_dates(text: str) -> str:
     return _SPACED_DATE_RE.sub(r"\1月\2日", text or "")
 
 
+_EMPTY_CELL = {"", "-", "—", "無", "N/A", "n/a"}
+
+
+def _summary_table_to_bullets(lines: List[str]) -> List[str]:
+    """「## 摘要」寫成表格時改回條列 (10-31 228 307 份紀要中 12 份：小模型把系統提示的「議題、關鍵數字、日期、金額、人名」
+    當成欄位畫表，常有整欄「-」和重複的日期)。表頭與分隔線丟掉，每列寫成「- 議題：值，值」，空白與重複的格子略過。"""
+    out: List[str] = []
+    section = None
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if s.startswith("## "):
+            section = s[3:].strip()
+        if section == "摘要" and s.startswith("|"):
+            nxt = lines[i + 1].strip() if i + 1 < len(lines) else ""
+            if _is_sep(s) or _is_sep(nxt):          # 分隔線、表頭
+                continue
+            vals: List[str] = []
+            for c in s.strip("|").split("|"):
+                c = re.sub(r"^\d+[\.、)](?!\d)\s*", "", c.strip())     # 「1. 供應商」去編號，「3.28L」不動
+                if c not in _EMPTY_CELL and c not in vals:
+                    vals.append(c)
+            if vals:
+                out.append(f"- {vals[0]}：{'，'.join(vals[1:])}" if len(vals) > 1 else f"- {vals[0]}")
+            continue
+        out.append(line)
+    return out
+
+
 def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) -> str:
     """LLM 紀要後處理：轉台灣繁體、移除重複行 (小模型偶發重複迴圈直到 num_predict 用盡)，並限制摘要/決議點數。"""
     limits = max_items or {"摘要": 5, "決議": 3}
     out, seen, section, count = [], set(), None, 0
     for line in tidy_dates(to_taiwan_traditional(md or "")).splitlines():
         s = line.strip()
+        if s.startswith("|") and set(s) <= set("| "):   # 整列空白的表格列 (小模型偶爾連印 20 多列「| | | |」)
+            continue
         if s.startswith("## "):
             section, count = s[3:].strip(), 0
             out.append(s)
@@ -59,7 +89,8 @@ def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) 
             if lim and count > lim:
                 continue
         out.append(line.rstrip())
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(_fix_table_separators(out))).strip()
+    # 摘要表格在點數限制之後才改成條列：表格常有 6–13 列，先轉再限 5 點會丟掉後面議題的日期與負責人
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(_fix_table_separators(_summary_table_to_bullets(out)))).strip()
 
 
 
