@@ -1133,7 +1133,9 @@ class MeetingJobManager:
         accumulated = []
         used_backend_label = "n/a"
         try:
-            async for token, _done, backend in aiter_chat_stream(prompt, system=system_msg, temperature=0.2, num_predict=380, timeout=150.0):
+            # num_predict 380 → 480 (2026-10-31 228 A/B，9 份容易截斷的 3–5 分鐘逐字稿)：「待辦／決議未產生」4/9 → 1/9，
+            # 回顧事實與議題覆蓋持平，平均多 16 s (只有本來會被截斷的輸出才會變長)。
+            async for token, _done, backend in aiter_chat_stream(prompt, system=system_msg, temperature=0.2, num_predict=480, timeout=180.0):
                 used_backend_label = backend.label
                 if self._cancellation_token and self._cancellation_token.is_set():
                     print("[MeetingMinutes] LLM generation aborted by cancellation token.")
