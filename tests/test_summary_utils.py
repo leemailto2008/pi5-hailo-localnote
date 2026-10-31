@@ -113,6 +113,13 @@ def test_extract_todos_ignores_quantities_and_number_commas():
     assert rows == ["| 庫存1,200臺 | 林主任 | 3月20日 |", "| 交期延至4.23 | 楊工程師 | 4.23 |"]
 
 
+def test_dates_in_minutes_lose_inner_spaces():
+    md = clean_summary_markdown("## 摘要\n- 預算 6月14 日前送財務部，9 月 10 日完成\n- 版本 3.5 日誌")
+    assert "6月14日前" in md and "9月10日完成" in md and "3.5 日誌" in md
+    long_md = assemble_long_minutes(["- 公映模具交期延至 3月15 日，林主任負責"])
+    assert "3月15日" in long_md and "| 3月15日 |" in long_md
+
+
 def test_extract_todos_reads_the_spoken_todo_clause():
     rows = extract_todos(["是訂單調. 定單方面，決議是先簽50臺示單，待辦事項是林主任週三前回復華新機店",
                           "招募方面，決議是11月28日前完成報到，待辦事項是許經理主持面試",

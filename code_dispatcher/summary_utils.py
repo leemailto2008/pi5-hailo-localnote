@@ -26,11 +26,19 @@ def to_taiwan_traditional(text: str) -> str:
         return text
 
 
+# 紀要裡的日期也去掉空白：小模型常把逐字稿的「6月14日」寫成「6月14 日」或「6 月 14 日」(10-31 10 分鐘 e2e)
+_SPACED_DATE_RE = re.compile(r"(?<!\d)(1[0-2]|[1-9])\s*月\s*(3[01]|[12]\d|[1-9])\s*日")
+
+
+def tidy_dates(text: str) -> str:
+    return _SPACED_DATE_RE.sub(r"\1月\2日", text or "")
+
+
 def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) -> str:
     """LLM 紀要後處理：轉台灣繁體、移除重複行 (小模型偶發重複迴圈直到 num_predict 用盡)，並限制摘要/決議點數。"""
     limits = max_items or {"摘要": 5, "決議": 3}
     out, seen, section, count = [], set(), None, 0
-    for line in to_taiwan_traditional(md or "").splitlines():
+    for line in tidy_dates(to_taiwan_traditional(md or "")).splitlines():
         s = line.strip()
         if s.startswith("## "):
             section, count = s[3:].strip(), 0
@@ -365,7 +373,7 @@ def assemble_long_minutes(chunk_notes: List[str], max_summary: int = 8, max_deci
     """chunk_notes：每段的 compact_notes() 輸出 (依時間順序)。
     摘要：最後一段 (會議結尾常有總結) 先保留 tail_lines 條，其餘名額每段先取第 1 條、有剩再取第 2 條…，維持時間順序；
     待辦/決議由規則從全部重點擷取。"""
-    per_all = [_note_lines(to_taiwan_traditional(n)) for n in chunk_notes]
+    per_all = [_note_lines(tidy_dates(to_taiwan_traditional(n))) for n in chunk_notes]
     all_lines = [l for p in per_all for l in p]
     decisions = [l for l in all_lines if _DECISION_RE.search(l)][:max_decisions]
     # 選進「決議」的條目不再放進「摘要」(2026-10-29 228 30 分鐘 e2e：同一條同時出現在兩段，duplicate_lines 不過門檻)；
