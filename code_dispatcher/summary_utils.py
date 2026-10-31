@@ -38,15 +38,18 @@ _EMPTY_CELL = {"", "-", "—", "無", "N/A", "n/a"}
 
 
 def _summary_table_to_bullets(lines: List[str]) -> List[str]:
-    """「## 摘要」寫成表格時改回條列 (10-31 228 307 份紀要中 12 份：小模型把系統提示的「議題、關鍵數字、日期、金額、人名」
-    當成欄位畫表，常有整欄「-」和重複的日期)。表頭與分隔線丟掉，每列寫成「- 議題：值，值」，空白與重複的格子略過。"""
+    """「待辦」以外的段落寫成表格時改回條列。
+    - 10-31 228 307 份紀要中 12 份把「## 摘要」畫成表：小模型把系統提示的「議題、關鍵數字、日期、金額、人名」當成欄位，
+      常有整欄「-」和重複的日期。
+    - 10 份「## 決議」有表格列或單獨一條分隔線 (待辦表寫到一半延伸過來)。
+    表頭與分隔線丟掉，每列寫成「- 議題：值，值」，空白與重複的格子略過；段落裡已有其他條目時，模型自己寫的「- 無」也拿掉。"""
     out: List[str] = []
-    section = None
+    section, converted = None, False
     for i, line in enumerate(lines):
         s = line.strip()
         if s.startswith("## "):
-            section = s[3:].strip()
-        if section == "摘要" and s.startswith("|"):
+            section, converted = s[3:].strip(), False
+        if section and section != "待辦" and s.startswith("|"):
             nxt = lines[i + 1].strip() if i + 1 < len(lines) else ""
             if _is_sep(s) or _is_sep(nxt):          # 分隔線、表頭
                 continue
@@ -57,6 +60,9 @@ def _summary_table_to_bullets(lines: List[str]) -> List[str]:
                     vals.append(c)
             if vals:
                 out.append(f"- {vals[0]}：{'，'.join(vals[1:])}" if len(vals) > 1 else f"- {vals[0]}")
+                converted = True
+            continue
+        if converted and s in ("- 無", "-無"):
             continue
         out.append(line)
     return out

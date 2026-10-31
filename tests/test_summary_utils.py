@@ -122,6 +122,10 @@ def test_summary_table_becomes_bullets_and_empty_rows_are_dropped():
     rows = "".join(f"| {i}. 議題{i} | {i}0臺 | 3.28L | - | - |\n" for i in range(1, 8))
     md7 = clean_summary_markdown("## 摘要\n| 議題 | 關鍵數字 | 日期 | 金額 | 人名 |\n|---|---|---|---|---|\n" + rows)
     assert md7.count("\n- ") == 7 and "- 議題7：70臺，3.28L" in md7      # 表格轉條列不受 5 點限制、不去「3.28」的小數點
+    dec = clean_summary_markdown("## 摘要\n- 甲\n\n## 決議\n|---|---|---|\n| 產線加開一站檢查 | - | - |\n| 11月28日前完成報到 | - | - |\n\n- 無")
+    assert dec.endswith("## 決議\n- 產線加開一站檢查\n- 11月28日前完成報到")                 # 決議段的表格也改條列，多餘的「- 無」拿掉
+    stray = clean_summary_markdown("## 摘要\n- 甲\n\n## 決議\n|---|---|---|---|---|\n- 維持原價")
+    assert stray.endswith("## 決議\n- 維持原價")
 
 
 def test_dates_in_minutes_lose_inner_spaces():
