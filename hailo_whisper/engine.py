@@ -94,6 +94,13 @@ _RECRUIT_FIX_RE = re.compile(r"(?:招\s*[木目牧幕慕暮]|朝\s*[目幕木])"
                              r"(?![前標的光錄睹材工頭板雕匠質場民區師草人羊後僚府牆布])")
 
 
+# 「第二個議題是…」：「議題」常被寫成「一提／一題／一體／議提／意提／意題…」(10-31 228 84 份逐字稿，
+# 「第N個XX是」句型 2168 次中，正確的「議題」878 次、「一提」610、「一題」340、「一體」96、「議提」67…)。
+# 只在「第N個」後面、而且接著「是」時才改；「第一題是」(沒有「個」) 這類正常用法不動。
+_TOPIC_FIX_RE = re.compile(r"(第\s*[一二三四五六七八九十\d]{1,3}\s*[個格的隔]\s*)"
+                           r"(?:一\s*[提題體]|[議意]\s*[提題體])(?=\s*[是市示事])")
+
+
 # 日期寫法統一：Whisper 常把「二月十五日」寫成「2.15日」或「2 月 15 日」(10-31 228 69 份逐字稿：分別 119 與 233 次，
 # 正常的「2月15日」2230 次)。統一成「2月15日」：24 份會改到的逐字稿，事實召回 0.692 → 0.704 (12 份變好、0 份變差)，CER 沒有變差。
 # 只認 1–12 月、1–31 日，且前面不能接數字或小數點 (避免「13.5日」「1.25.3日」之類)。
@@ -108,6 +115,7 @@ def fix_meeting_terms(text: str) -> str:
         return text or ""
     text = _TODO_FIX_RE.sub("待辦事項", _DECISION_FIX_RE.sub("決議", text))
     text = _RECRUIT_FIX_RE.sub("招募", _QUALITY_FIX_RE.sub("品質", text))
+    text = _TOPIC_FIX_RE.sub(r"\1議題", text)
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
 
