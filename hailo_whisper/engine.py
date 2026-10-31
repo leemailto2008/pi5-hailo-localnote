@@ -83,10 +83,19 @@ _TODO_FIX_RE = re.compile(r"(?:待辦|代辦|代版|戴板|戴版|待半|大辦|
                           r"(?:事\s*[項像相象向下巷想]|(?:[是職時]\s*[項像相象向下巷想]|事)(?=\s*是))")
 
 
+# 日期寫法統一：Whisper 常把「二月十五日」寫成「2.15日」或「2 月 15 日」(10-31 228 69 份逐字稿：分別 119 與 233 次，
+# 正常的「2月15日」2230 次)。統一成「2月15日」：24 份會改到的逐字稿，事實召回 0.692 → 0.704 (12 份變好、0 份變差)，CER 沒有變差。
+# 只認 1–12 月、1–31 日，且前面不能接數字或小數點 (避免「13.5日」「1.25.3日」之類)。
+_DOT_DATE_RE = re.compile(r"(?<![\d.])(1[0-2]|[1-9])\.(3[01]|[12]\d|[1-9])\s*日")
+_SPACED_DATE_RE = re.compile(r"(?<!\d)(1[0-2]|[1-9])\s*月\s*(3[01]|[12]\d|[1-9])\s*日")
+
+
 def fix_meeting_terms(text: str) -> str:
     if not text:
         return text or ""
-    return _TODO_FIX_RE.sub("待辦事項", _DECISION_FIX_RE.sub("決議", text))
+    text = _TODO_FIX_RE.sub("待辦事項", _DECISION_FIX_RE.sub("決議", text))
+    text = _DOT_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
+    return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
 
 
 try:
