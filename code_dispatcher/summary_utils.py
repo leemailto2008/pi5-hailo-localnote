@@ -364,7 +364,7 @@ def _pad_todo_rows(lines: List[str]) -> List[str]:
 def ensure_sections(md: str) -> str:
     """紀要被 num_predict 截斷時，補上缺少的段落標題並明確標示未產生 (不捏造內容)；
     最後一列若是被截斷的半行表格也一併移除。三段順序調成摘要、待辦、決議，待辦表格太短的列補「-」。"""
-    lines = _pad_todo_rows(_reorder_sections((md or "").rstrip().splitlines()))
+    lines = (md or "").rstrip().splitlines()
     if lines and lines[-1].lstrip().startswith("|") and not lines[-1].rstrip().endswith("|"):
         lines.pop()
     if lines and lines[-1].strip() in ("##", "#"):
@@ -373,7 +373,8 @@ def ensure_sections(md: str) -> str:
     for sec in ("## 摘要", "## 待辦", "## 決議"):
         if sec not in text:
             text += f"\n\n{sec}\n- {SECTION_MISSING_NOTE}"
-    return text.strip()
+    # 補上的缺段也要排回原位 (10-31 3 分鐘 e2e：模型先寫決議、待辦被截斷，補上的「## 待辦」原本會落在最後)
+    return "\n".join(_pad_todo_rows(_reorder_sections(text.strip().splitlines()))).strip()
 
 
 # 長會議紀要組裝 (2026-10-27)：qwen3:1.7b 無法跨 20+ 條重點做歸納 (實測會照抄、待辦表留空、決議擠掉)，
