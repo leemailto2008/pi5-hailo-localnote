@@ -250,6 +250,8 @@ def test_recap_notes_keep_owners_and_dates_verbatim():
     assert len(lines) <= 6 and recap_notes("") == ""
     assert lines[0].startswith("- 韌體方面") and lines[1].startswith("- 庫存方面")   # 一行一個議題
     assert recap_notes("最後總結一下任體方面，修正版上線").startswith("- 任體方面")       # 黏在前面的總結用語去掉
+    glued = recap_notes("最後總結一下，展覽方面，決議是參加新竹展覽，待辦事項是吳副理週四前交文宣出稿今天就到這裡 謝謝")
+    assert "吳副理週四前交文宣出稿" in glued and "今天就到" not in glued and "謝謝" not in glued   # 只去客套話，不丟待辦
 
 
 def test_is_recap_chunk():

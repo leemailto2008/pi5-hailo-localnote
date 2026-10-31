@@ -173,9 +173,9 @@ def is_recap_chunk(piece: str) -> bool:
     return bool(_RECAP_RE.match((piece or "").strip()))
 
 
-# 結尾總結裡不帶資訊的子句 (「好」「最後總結一下」「今天就到這裡」「謝謝大家」)
-_RECAP_FILLER_RE = re.compile(r"^(?:好|那|嗯|ok|OK)?\s*(?:我們)?(?:最後)?(?:來)?(?:總結|整理|結論)(?:一下)?$|今天(?:就)?(?:先)?(?:到|開到)(?:這裡|這邊)"
-                              r"|^謝謝(?:大家)?|^(?:好|那|嗯|ok|OK)$")
+# 結尾總結裡的客套話：從子句中「去掉」而不是整句丟掉 (STT 常把「…出稿今天就到這裡」黏成一句，整句丟會連待辦一起丟)
+_RECAP_FILLER_SUB = re.compile(r"今天(?:就|先)*(?:到|開到)(?:這裡|這邊)?|謝謝(?:大家|各位)?|^(?:好|那|嗯|ok|OK)(?=\s|$)")
+_RECAP_INTRO_RE = re.compile(r"(?:我們)?(?:最後)?(?:來)?(?:總結|整理|結論)(?:一下)?")
 
 
 def recap_notes(recap: str, max_lines: int = 6, max_len: int = 50) -> str:
@@ -190,7 +190,8 @@ def recap_notes(recap: str, max_lines: int = 6, max_len: int = 50) -> str:
     clauses = [c.strip() for c in re.split(r"[，,。；;！!？?\n]", recap or "") if c.strip()]
     if clauses:   # 「最後總結一下任體方面」：去掉黏在第一個子句前面的總結用語
         clauses[0] = re.sub(r"^.*?(?:最後總結一下|總結一下|最後總結|做個總結|做一下總結)", "", clauses[0]).strip() or clauses[0]
-    clauses = [c for c in clauses if len(c) >= 3 and not _RECAP_FILLER_RE.search(c)]
+    clauses = [_RECAP_FILLER_SUB.sub("", c).strip() for c in clauses]
+    clauses = [c for c in clauses if len(c) >= 3 and not _RECAP_INTRO_RE.fullmatch(c)]
     groups: List[List[str]] = []
     for c in clauses:
         if "方面" in c or not groups:
