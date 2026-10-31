@@ -223,6 +223,11 @@ def test_empty_decisions_filled_from_spoken_decisions():
     assert "- 11月28日前完成報到" in fill_decisions_from_transcript(missing, _CLOSING)
 
 
+def test_empty_decisions_heading_at_end_is_filled():
+    md = "## 摘要\n- a\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| x | y | z |\n\n## 決議"
+    assert fill_decisions_from_transcript(md, _CLOSING).endswith("## 決議\n- 11月28日前完成報到\n- 產線加開一站檢查")
+
+
 def test_spoken_decisions_left_alone_when_not_needed():
     md = "## 摘要\n- 產線加開一站檢查\n\n## 決議\n- 無"
     assert fill_decisions_from_transcript("## 決議\n- 維持原價", _CLOSING) == "## 決議\n- 維持原價"   # 已有決議

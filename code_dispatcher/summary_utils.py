@@ -254,6 +254,8 @@ def fill_decisions_from_transcript(md: str, transcript: str, max_items: int = 3)
     """
     if not md or not transcript:
         return md
+    if re.search(r"^## 決議[ \t]*\Z", md, re.M):
+        md += "\n"                     # 2026-10-31 e2e：模型輸出以「## 決議」結尾、後面沒有換行也沒有條目
     m = re.search(r"(^## 決議[ \t]*\n)(.*?)(?=^## |\Z)", md, re.S | re.M)
     if not m:
         return md
