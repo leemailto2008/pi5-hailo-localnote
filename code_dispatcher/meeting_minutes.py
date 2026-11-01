@@ -680,8 +680,14 @@ class MeetingJobManager:
                     idx = len(self._premap_notes) + 1
                     t_req = time.time()
                     try:
-                        text, _backend = await achat_complete(map_user_prompt(piece, idx, 0), system=MAP_SYSTEM_MSG,
-                            temperature=0.2, num_predict=160, timeout=120.0, hailo_retries=1)
+                        # 用串流：錄音結束時取消串流，hailo-ollama 會立刻停止生成 (非串流請求取消後伺服器仍會跑完，
+                        # 228 實測下一個請求要多等 32 s)，NPU 才能馬上回去處理最後幾段逐字稿
+                        toks = []
+                        async for tok, _d, _b in aiter_chat_stream(map_user_prompt(piece, idx, 0), system=MAP_SYSTEM_MSG,
+                                                                  temperature=0.2, num_predict=160, timeout=120.0):
+                            if tok:
+                                toks.append(tok)
+                        text = "".join(toks)
                     except LLMError as e:
                         print(f"[MeetingMinutes] 錄音中預先整理第 {idx} 段失敗，停止預先整理: {e}")
                         return
@@ -776,6 +782,20 @@ class MeetingJobManager:
                 self.status.metrics["link_dropout_pct"] = rec_stats["dropout_pct"]
                 self.status.metrics["link_inserted_s"] = rec_stats.get("inserted_s")
                 self.status.metrics["link_arrival_pct"] = rec_stats.get("arrival_pct")
+
+            # 錄音中預先整理：錄音一結束就停掉 (取消進行中的那段，NPU 讓給最後幾段逐字稿；
+            # 7669dd3 原本等它整理完，30 分鐘 e2e 尾端等待從 3 s 變 21 s)。已完成的段落交給長會議整理沿用。
+            if self._premap_task:
+                premap_stop.set()
+                if not self._premap_task.done():
+                    self._premap_task.cancel()
+                try:
+                    await self._premap_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    print(f"[MeetingMinutes] 錄音中預先整理結束時出錯: {e}")
+                self._premap_task = None
 
             # 等待剩餘切片隊列消化完畢 (依據隊列深度動態等待，保證全軌切片 100% 入稿)
             await chunk_queue.put(None)
@@ -945,15 +965,6 @@ class MeetingJobManager:
                 except Exception as c_err:
                     print(f"[MeetingMinutes] Notice broadcasting completed: {c_err}")
                 return
-
-            # 錄音中預先整理：停止並等目前這段整理完 (最多一次 map，約 40 s)，結果交給長會議整理沿用
-            if self._premap_task:
-                premap_stop.set()
-                try:
-                    await self._premap_task
-                except Exception as e:
-                    print(f"[MeetingMinutes] 錄音中預先整理結束時出錯: {e}")
-                self._premap_task = None
 
             # Intermediate result update: frontend can immediately inspect transcript while AI summarizes
             self.status.phase = "summarize"
