@@ -377,20 +377,33 @@ def _reorder_sections(lines: List[str]) -> List[str]:
     return [l for b in blocks for l in b]
 
 
-def _pad_todo_rows(lines: List[str]) -> List[str]:
-    """待辦表格列的格數少於表頭時補「-」(例：模型寫到「| 出差報告 |」就停，10-31 5 分鐘 e2e)。"""
-    out, section, width = [], None, 0
+def _pad_todo_rows(lines: List[str], empty_row: str = "| 無 | - | - |") -> List[str]:
+    """待辦表格列的格數少於表頭時補「-」(例：模型寫到「| 出差報告 |」就停，10-31 5 分鐘 e2e)。
+    表格只有表頭沒有資料列時補一列「| 無 | - | - |」(11-01 5 分鐘 e2e：模型只印了 20 多列空白列，清掉後表格是空的)。"""
+    out, section, width, rows, sep_at = [], None, 0, 0, None
+
+    def close_table():
+        if section == "待辦" and width and not rows and sep_at is not None:
+            out.insert(sep_at + 1, empty_row)
+
     for line in lines:
         s = line.strip()
         if s.startswith("## "):
-            section, width = s[3:].strip(), 0
-        if section == "待辦" and s.startswith("|") and s.endswith("|") and not _is_sep(s):
-            cells = s.count("|") - 1
-            if not width:
-                width = cells
-            elif cells < width:
-                line = s + " - |" * (width - cells)
+            close_table()
+            section, width, rows, sep_at = s[3:].strip(), 0, 0, None
+        if section == "待辦" and s.startswith("|") and s.endswith("|"):
+            if _is_sep(s):
+                sep_at = len(out)
+            else:
+                cells = s.count("|") - 1
+                if not width:
+                    width = cells
+                else:
+                    rows += 1
+                    if cells < width:
+                        line = s + " - |" * (width - cells)
         out.append(line)
+    close_table()
     return out
 
 
@@ -398,8 +411,11 @@ def ensure_sections(md: str) -> str:
     """紀要被 num_predict 截斷時，補上缺少的段落標題並明確標示未產生 (不捏造內容)；
     最後一列若是被截斷的半行表格也一併移除。三段順序調成摘要、待辦、決議，待辦表格太短的列補「-」。"""
     lines = (md or "").rstrip().splitlines()
+    todo_cut = False      # 待辦表寫到半行就被截斷：表格若因此變空，標示「未產生」而不是「無」
     if lines and lines[-1].lstrip().startswith("|") and not lines[-1].rstrip().endswith("|"):
         lines.pop()
+        heads = [l.strip()[3:].strip() for l in lines if l.strip().startswith("## ")]
+        todo_cut = bool(heads) and heads[-1] == "待辦"
     if lines and lines[-1].strip() in ("##", "#"):
         lines.pop()
     text = "\n".join(lines).rstrip()
@@ -407,7 +423,8 @@ def ensure_sections(md: str) -> str:
         if sec not in text:
             text += f"\n\n{sec}\n- {SECTION_MISSING_NOTE}"
     # 補上的缺段也要排回原位 (10-31 3 分鐘 e2e：模型先寫決議、待辦被截斷，補上的「## 待辦」原本會落在最後)
-    return "\n".join(_pad_todo_rows(_reorder_sections(text.strip().splitlines()))).strip()
+    empty_row = f"| {SECTION_MISSING_NOTE} | - | - |" if todo_cut else "| 無 | - | - |"
+    return "\n".join(_pad_todo_rows(_reorder_sections(text.strip().splitlines()), empty_row)).strip()
 
 
 # 長會議紀要組裝 (2026-10-27)：qwen3:1.7b 無法跨 20+ 條重點做歸納 (實測會照抄、待辦表留空、決議擠掉)，

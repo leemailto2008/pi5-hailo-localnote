@@ -135,8 +135,12 @@ def test_ensure_sections_fixes_order_and_short_todo_rows():
                   "| 出差報告 | - | - |\n\n## 決議\n- 招募：8月26日前完成報到")
     same = "## 摘要\n- 甲\n\n## 待辦\n| 無 | - | - |\n\n## 決議\n- 無"
     assert ensure_sections(same) == same
+    empty = ensure_sections("## 摘要\n- 甲\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n\n## 決議\n- 乙")
+    assert "|---|---|---|\n| 無 | - | - |\n\n## 決議" in empty                      # 只有表頭：補「無」
+    one = ensure_sections("## 摘要\n- 甲\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 送預算表 | 劉課長 | 10月7日 |\n\n## 決議\n- 乙")
+    assert "| 無 |" not in one
     cut = ensure_sections("## 摘要\n- 甲\n\n## 決議\n- 乙\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 送預算")
-    assert cut.startswith("## 摘要\n- 甲\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n\n## 決議\n- 乙")   # 半行先丟、再排序
+    assert cut.startswith(f"## 摘要\n- 甲\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| {SECTION_MISSING_NOTE} | - | - |\n\n## 決議\n- 乙")   # 半行先丟、再排序；截斷造成的空表標示未產生
     miss = ensure_sections("## 摘要\n- 甲\n\n## 決議\n- 乙")
     assert miss == f"## 摘要\n- 甲\n\n## 待辦\n- {SECTION_MISSING_NOTE}\n\n## 決議\n- 乙"      # 補上的缺段排回中間
 
