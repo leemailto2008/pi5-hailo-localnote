@@ -141,6 +141,20 @@ def test_ensure_sections_fixes_order_and_short_todo_rows():
     assert miss == f"## 摘要\n- 甲\n\n## 待辦\n- {SECTION_MISSING_NOTE}\n\n## 決議\n- 乙"      # 補上的缺段排回中間
 
 
+def test_take_stable_chunk_and_live_tidy():
+    text = "，".join(f"第{i}句話說了一些內容" for i in range(400))      # 約 4400 字，只有逗號
+    assert summary_utils.take_stable_chunk(text, 0, 1000, 1000) is not None
+    end = summary_utils.take_stable_chunk(text, 0, 1000, 1000)
+    assert 600 <= end <= 1000 and text[end - 1] == "，"                 # 切在子句邊界
+    assert summary_utils.take_stable_chunk(text, len(text) - 1500, 1000, 1000) is None   # 後面不足 lag：先不切
+    assert summary_utils.take_stable_chunk("甲" * 2500, 0, 1000, 1000) == 1000          # 沒有標點：硬切
+    live = "好，，我們開始\ufffd今天的會議。。 第一個議題"
+    assert summary_utils.tidy_live_transcript(live) == "好，我們開始今天的會議 第一個議題"    # 與原本錄音結束後的整理完全相同 (連續標點留最後一個)
+    # 前段整理結果與全文整理結果一致 (預先整理的前提)
+    full = summary_utils.tidy_live_transcript(text + "，，最後總結一下")
+    assert full.startswith(summary_utils.tidy_live_transcript(text)[:end])
+
+
 def test_dates_in_minutes_lose_inner_spaces():
     md = clean_summary_markdown("## 摘要\n- 預算 6月14 日前送財務部，9 月 10 日完成\n- 版本 3.5 日誌")
     assert "6月14日前" in md and "9月10日完成" in md and "3.5 日誌" in md

@@ -197,6 +197,27 @@ def split_transcript(text: str, max_chars: int = 1000) -> List[str]:
     return [c for c in chunks if c]
 
 
+def tidy_live_transcript(text: str) -> str:
+    """即時切片串接成的逐字稿 → 紀要用的全文：去掉亂碼字元、合併連續標點。錄音中預先整理與錄音結束後用同一套，前段才會逐字相同。"""
+    t = (text or "").strip().replace("\ufffd", "")
+    return re.sub(r"([，、。！？\s]){2,}", r"\1", t)
+
+
+_STABLE_CUT_CHARS = "。！？!?；;\n，,、：:"
+
+
+def take_stable_chunk(text: str, start: int, max_chars: int = 1000, lag: int = 1000) -> Optional[int]:
+    """錄音中預先整理 (PI5_SUMMARY_PREMAP)：從 text[start:] 取一段 <= max_chars 的區塊，回傳結束位置。
+    後面至少還要有 lag 字才取：最後一段可能是結尾總結 (split_with_recap 要另外切)，標點也可能還會被合併。
+    盡量切在句子／子句邊界 (區塊後 40% 內最後一個標點之後)；找不到就硬切。"""
+    if len(text) - start < max_chars + lag:
+        return None
+    window = text[start:start + max_chars]
+    cut = max(window.rfind(c) for c in _STABLE_CUT_CHARS)
+    end = start + (cut + 1 if cut >= int(max_chars * 0.6) else max_chars)
+    return end
+
+
 _RECAP_RE = re.compile(r"(最後總結|總結一下|做個總結|做一下總結|總結來說|最後來總結|以下總結)")
 
 

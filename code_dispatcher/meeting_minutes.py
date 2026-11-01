@@ -39,7 +39,7 @@ AUDIO_CACHE_DIR = get_in_memory_cache_dir()
 from llm_backend import achat_complete, aiter_chat_stream, LLMError
 from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, fill_decisions_from_transcript,
                            ground_todo_table, is_recap_chunk, keep_alive_plan, recap_notes,
-                           split_with_recap, summary_limits)
+                           split_with_recap, summary_limits, take_stable_chunk, tidy_live_transcript)
 
 # 長會議紀要 (2026-10-27 e2e)：Hailo qwen3:1.7b 單次請求約 1500 字就 context full (HTTP 500)，
 # 5 分鐘會議 (約 1000 字) 單次整理品質良好 → 1200 字以內維持單次；超過則切成 <= 1000 字的區塊逐段抽重點，
@@ -55,6 +55,12 @@ SUMMARY_RECAP_VERBATIM_MAX = int(os.environ.get("PI5_SUMMARY_RECAP_VERBATIM_MAX"
 # 由 summary_utils.keep_alive_plan() 在視窗最後一段主動卸載、下一段重新載入。
 SUMMARY_MAP_SEC_PER_CHUNK = int(os.environ.get("PI5_SUMMARY_MAP_SEC_PER_CHUNK", "75"))
 SUMMARY_MAP_KEEP_ALIVE_MAX = 1800
+# 錄音中預先整理 (2026-11-01)：長會議錄音時，已經穩定的前段逐字稿先逐段交給 LLM 抽重點，錄音結束只剩最後 1–3 段。
+# 只在 NPU 共用模式 (Whisper 與 qwen3 同時常駐) 下啟用；LLM 在 NPU 上跑，228 實測整機 CPU 平均 1.7%、單核最高 9%。
+# 預設關閉：CLAUDE.md「錄音中禁止背景推論」規則需使用者確認後才改預設。PI5_SUMMARY_PREMAP=1 開啟。
+SUMMARY_PREMAP = os.environ.get("PI5_SUMMARY_PREMAP", "0") == "1"
+SUMMARY_PREMAP_LAG = int(os.environ.get("PI5_SUMMARY_PREMAP_LAG", "1000"))     # 尾端保留不預先整理的字數
+SUMMARY_PREMAP_POLL_S = 10.0
 
 
 def map_user_prompt(piece: str, idx: int, total: int) -> str:
@@ -62,6 +68,8 @@ def map_user_prompt(piece: str, idx: int, total: int) -> str:
     if idx == total and total > 1:
         return (f"會議逐字稿（第 {idx}/{total} 段，會議最後一段）：\n{piece}\n\n"
                 "如果最後有總結，請優先條列總結提到的事項與負責人；沒有總結就條列本段重點：")
+    if total <= 0:   # 錄音中預先整理：總段數還不知道
+        return f"會議逐字稿（第 {idx} 段）：\n{piece}\n\n請條列本段重點："
     return f"會議逐字稿（第 {idx}/{total} 段）：\n{piece}\n\n請條列本段重點："
 
 
@@ -248,6 +256,9 @@ class MeetingJobManager:
         self._current_task: Optional[asyncio.Task] = None
         self._record_task: Optional[asyncio.Task] = None
         self._chunk_worker_task: Optional[asyncio.Task] = None
+        self._premap_task: Optional[asyncio.Task] = None
+        self._premap_prefix: str = ""          # 錄音中已預先整理的逐字稿前段 (tidy_live_transcript 後)
+        self._premap_notes: List[str] = []     # 對應的各段重點 (compact_notes 後)
         self._hailo_pinned: bool = False   # map 階段讓 hailo-ollama 模型常駐 NPU 中
         self._main_loop: Optional[asyncio.AbstractEventLoop] = None
         self.offline_detector = OfflineDetector(check_interval=10.0)
@@ -386,6 +397,9 @@ class MeetingJobManager:
         if self._chunk_worker_task and not self._chunk_worker_task.done():
             self._chunk_worker_task.cancel()
             self._chunk_worker_task = None
+        if self._premap_task and not self._premap_task.done():
+            self._premap_task.cancel()
+        self._premap_task = None
 
         # 3. Cancel asyncio pipeline task
         if self._current_task and not self._current_task.done():
@@ -647,6 +661,48 @@ class MeetingJobManager:
             chunk_worker_task = asyncio.create_task(_chunk_stt_worker())
             self._chunk_worker_task = chunk_worker_task
 
+            self._premap_prefix, self._premap_notes = "", []
+            premap_stop = asyncio.Event()
+
+            async def _premap_loop():
+                """錄音中預先整理：逐字稿前段穩定後 (後面還有 SUMMARY_PREMAP_LAG 字) 就逐段抽重點，結果留給錄音後的長會議整理沿用。"""
+                done_upto = 0
+                while not premap_stop.is_set() and not self._cancellation_token.is_set():
+                    try:
+                        await asyncio.wait_for(premap_stop.wait(), timeout=SUMMARY_PREMAP_POLL_S)
+                    except asyncio.TimeoutError:
+                        pass
+                    live = tidy_live_transcript(curr_preview)
+                    end = take_stable_chunk(live, done_upto, SUMMARY_CHUNK_CHARS, SUMMARY_PREMAP_LAG)
+                    if end is None or premap_stop.is_set() or self._cancellation_token.is_set():
+                        continue
+                    piece = live[done_upto:end].strip()
+                    idx = len(self._premap_notes) + 1
+                    t_req = time.time()
+                    try:
+                        text, _backend = await achat_complete(map_user_prompt(piece, idx, 0), system=MAP_SYSTEM_MSG,
+                            temperature=0.2, num_predict=160, timeout=120.0, hailo_retries=1)
+                    except LLMError as e:
+                        print(f"[MeetingMinutes] 錄音中預先整理第 {idx} 段失敗，停止預先整理: {e}")
+                        return
+                    if self._cancellation_token.is_set():
+                        return
+                    text = compact_notes(text or "") or compact_notes("- " + piece[:120], max_lines=1, max_len=60)
+                    self._premap_notes.append(text)
+                    self._premap_prefix = live[:end]
+                    done_upto = end
+                    self.status.metrics["summary_premap_chunks"] = idx
+                    print(f"[MeetingMinutes] 錄音中預先整理第 {idx} 段：{len(piece)} → {len(text)} 字 ({time.time() - t_req:.1f}s)")
+
+            self._premap_task = None
+            if SUMMARY_PREMAP and not bypass_summary:
+                try:
+                    from npu_share import shared_group
+                    if shared_group():
+                        self._premap_task = asyncio.create_task(_premap_loop())
+                except Exception as e:
+                    print(f"[MeetingMinutes] 錄音中預先整理未啟用: {e}")
+
             async def _on_pcm_slice(slice_data: bytes, is_final: bool):
                 """PCM 滑動切片即時投遞至隊列"""
                 nonlocal first_chunk_ready_time
@@ -797,9 +853,7 @@ class MeetingJobManager:
                 final_preview = "，".join(live_segments)
 
             if final_preview and len(final_preview.strip()) >= 5:
-                transcript = final_preview.strip()
-                transcript = transcript.replace("\ufffd", "").replace("\uFFFD", "")
-                transcript = re.sub(r"([，、。！？\s]){2,}", r"\1", transcript)
+                transcript = tidy_live_transcript(final_preview)    # 與錄音中預先整理用同一套整理
                 print(f"[MeetingMinutes] ⚡ 0秒尾端等待！成功取用即時切片串流 STT (字數: {len(transcript)}，段落數: {len(live_segments)})！")
             else:
                 # 保底：若即時切片為空，快速執行一次母帶轉錄
@@ -892,6 +946,15 @@ class MeetingJobManager:
                     print(f"[MeetingMinutes] Notice broadcasting completed: {c_err}")
                 return
 
+            # 錄音中預先整理：停止並等目前這段整理完 (最多一次 map，約 40 s)，結果交給長會議整理沿用
+            if self._premap_task:
+                premap_stop.set()
+                try:
+                    await self._premap_task
+                except Exception as e:
+                    print(f"[MeetingMinutes] 錄音中預先整理結束時出錯: {e}")
+                self._premap_task = None
+
             # Intermediate result update: frontend can immediately inspect transcript while AI summarizes
             self.status.phase = "summarize"
             self.status.progress = 65
@@ -983,6 +1046,11 @@ class MeetingJobManager:
             self.status.state = "error"
             self.status.msg = f"處理失敗: {str(e)}"
             self.notify_status_update()
+        finally:
+            # 任何提早結束的路徑 (取消、找不到麥克風、例外) 都要停掉錄音中預先整理
+            if self._premap_task and not self._premap_task.done():
+                self._premap_task.cancel()
+            self._premap_task = None
 
     async def regenerate(self) -> str:
         """Regenerate meeting summary from existing transcript without recording again."""
@@ -1066,13 +1134,22 @@ class MeetingJobManager:
         from ws_manager import ws_manager
 
         t_map = time.time()
-        chunks = split_with_recap(transcript, SUMMARY_CHUNK_CHARS)   # 結尾總結自成一段
-        total = len(chunks)
+        notes: List[str] = []
+        rest = transcript
+        pre, prefix = self._premap_notes, self._premap_prefix
+        self._premap_notes, self._premap_prefix = [], ""     # 只用一次 (重新整理紀要時從頭來)
+        if pre and prefix and transcript.startswith(prefix):
+            notes, rest = list(pre), transcript[len(prefix):].strip()
+            print(f"[MeetingMinutes] 沿用錄音中預先整理的 {len(pre)} 段 ({len(prefix)} 字)，剩 {len(rest)} 字")
+        elif pre:
+            print("[MeetingMinutes] 逐字稿前段與預先整理時不同，不沿用，全部重新整理")
+        chunks = split_with_recap(rest, SUMMARY_CHUNK_CHARS) if rest else []   # 結尾總結自成一段
+        total = len(notes) + len(chunks)
         print(f"[MeetingMinutes] 📚 長逐字稿 {len(transcript)} 字 → {total} 段 (每段 <= {SUMMARY_CHUNK_CHARS} 字)，逐段整理")
         self.status.metrics["summary_chunks"] = total
+        self.status.metrics["summary_premap_used"] = len(notes)
         plan = keep_alive_plan(total, SUMMARY_MAP_SEC_PER_CHUNK, SUMMARY_MAP_KEEP_ALIVE_MAX)
-        notes: List[str] = []
-        for idx, piece in enumerate(chunks, 1):
+        for idx, piece in enumerate(chunks, len(notes) + 1):
             if self._cancellation_token and self._cancellation_token.is_set():
                 return ""
             self.status.progress = int(60 + (idx - 1) / max(1, total) * 35)
