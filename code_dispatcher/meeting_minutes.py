@@ -58,6 +58,9 @@ SUMMARY_MAP_KEEP_ALIVE_MAX = 1800
 # 錄音中預先整理 (2026-11-01)：長會議錄音時，已經穩定的前段逐字稿先逐段交給 LLM 抽重點，錄音結束只剩最後 1–3 段。
 # 只在 NPU 共用模式 (Whisper 與 qwen3 同時常駐) 下啟用；LLM 在 NPU 上跑，228 實測整機 CPU 平均 1.7%、單核最高 9%。
 # 預設關閉：CLAUDE.md「錄音中禁止背景推論」規則需使用者確認後才改預設。PI5_SUMMARY_PREMAP=1 開啟。
+# 2026-11-01 228 實測代價：同一段 10 分鐘喇叭→藍牙錄音中固定時間打 4 次 LLM 請求 (stage/llm_bursts.py)，
+# LLM 在跑的 47 s 時窗內藍牙 mSBC 壞幀 4.2 次/s、超過 20 ms 的封包間隔 0.41 次/s；時窗外 1.7 次/s、0.03 次/s。
+# 4 個時窗全部偏高 (不是 RF 起伏)。換來的是 30 分鐘會議紀要 242 s → 82–123 s。CPU 沒有變忙，推測是 NPU 滿載時的干擾。
 SUMMARY_PREMAP = os.environ.get("PI5_SUMMARY_PREMAP", "0") == "1"
 SUMMARY_PREMAP_LAG = int(os.environ.get("PI5_SUMMARY_PREMAP_LAG", "1000"))     # 尾端保留不預先整理的字數
 SUMMARY_PREMAP_POLL_S = 10.0
