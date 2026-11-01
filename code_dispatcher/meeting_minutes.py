@@ -36,10 +36,10 @@ from voice_pipeline import NoMicrophoneError, record_audio_from_mic, speech_to_t
 AUDIO_CACHE_DIR = get_in_memory_cache_dir()
 
 # LLM backend selection (Hailo-10H qwen3:1.7b preferred, CPU Ollama fallback) lives in llm_backend.py
-from llm_backend import achat_complete, aiter_chat_stream, LLMError
+from llm_backend import aiter_chat_stream, LLMError
 from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, fill_decisions_from_transcript,
                            ground_todo_table, is_recap_chunk, keep_alive_plan, recap_notes,
-                           split_with_recap, summary_limits, take_stable_chunk, tidy_live_transcript)
+                           map_notes_complete, split_with_recap, summary_limits, take_stable_chunk, tidy_live_transcript)
 
 # 長會議紀要 (2026-10-27 e2e)：Hailo qwen3:1.7b 單次請求約 1500 字就 context full (HTTP 500)，
 # 5 分鐘會議 (約 1000 字) 單次整理品質良好 → 1200 字以內維持單次；超過則切成 <= 1000 字的區塊逐段抽重點，
@@ -64,6 +64,31 @@ SUMMARY_MAP_KEEP_ALIVE_MAX = 1800
 SUMMARY_PREMAP = os.environ.get("PI5_SUMMARY_PREMAP", "0") == "1"
 SUMMARY_PREMAP_LAG = int(os.environ.get("PI5_SUMMARY_PREMAP_LAG", "1000"))     # 尾端保留不預先整理的字數
 SUMMARY_PREMAP_POLL_S = 10.0
+
+
+async def stream_map_notes(prompt: str, keep_alive: Optional[int] = None):
+    """長會議逐段抽重點：串流生成，compact_notes() 會留下的 4 條都寫完就停 (map_notes_complete)。
+    取消串流時 hailo-ollama 會立刻停止生成 (2026-11-01 228 實測)；非串流必須等 num_predict 用完，模型常多寫一兩條被丟掉。
+    Hailo 偶發失敗時等 3 s 重試一次 (等同原本 achat_complete 的 hailo_retries=1)。回傳 (文字, backend)。"""
+    from contextlib import aclosing
+    last_err: Optional[Exception] = None
+    for attempt in range(2):
+        acc, backend = "", None
+        try:
+            async with aclosing(aiter_chat_stream(prompt, system=MAP_SYSTEM_MSG, temperature=0.2, num_predict=160,
+                                                  timeout=120.0, hailo_keep_alive=keep_alive)) as stream:
+                async for tok, _done, b in stream:
+                    backend = b
+                    if tok:
+                        acc += tok
+                        if map_notes_complete(acc):
+                            break
+            return acc.strip(), backend
+        except LLMError as e:
+            last_err = e
+            if attempt == 0:
+                await asyncio.sleep(3.0)
+    raise last_err
 
 
 def map_user_prompt(piece: str, idx: int, total: int) -> str:
@@ -685,12 +710,7 @@ class MeetingJobManager:
                     try:
                         # 用串流：錄音結束時取消串流，hailo-ollama 會立刻停止生成 (非串流請求取消後伺服器仍會跑完，
                         # 228 實測下一個請求要多等 32 s)，NPU 才能馬上回去處理最後幾段逐字稿
-                        toks = []
-                        async for tok, _d, _b in aiter_chat_stream(map_user_prompt(piece, idx, 0), system=MAP_SYSTEM_MSG,
-                                                                  temperature=0.2, num_predict=160, timeout=120.0):
-                            if tok:
-                                toks.append(tok)
-                        text = "".join(toks)
+                        text, _backend = await stream_map_notes(map_user_prompt(piece, idx, 0))
                     except LLMError as e:
                         print(f"[MeetingMinutes] 錄音中預先整理第 {idx} 段失敗，停止預先整理: {e}")
                         return
@@ -1179,11 +1199,10 @@ class MeetingJobManager:
                 continue
             try:
                 self._hailo_pinned = True
-                text, backend = await achat_complete(map_user_prompt(piece, idx, total), system=MAP_SYSTEM_MSG,
-                    temperature=0.2, num_predict=160, timeout=120.0, hailo_retries=1,
-                    hailo_keep_alive=ka)
-                self.status.metrics["llm_backend"] = backend.label
-                if ka is None and backend.is_hailo:
+                text, backend = await stream_map_notes(map_user_prompt(piece, idx, total), keep_alive=ka)
+                if backend is not None:
+                    self.status.metrics["llm_backend"] = backend.label
+                if ka is None and backend is not None and backend.is_hailo:
                     self._hailo_pinned = False   # 帶預設 keep_alive=0，完成即釋放 NPU
             except LLMError as e:
                 print(f"[MeetingMinutes] 第 {idx}/{total} 段整理失敗: {e}")

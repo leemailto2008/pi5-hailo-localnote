@@ -155,6 +155,16 @@ def test_take_stable_chunk_and_live_tidy():
     assert full.startswith(summary_utils.tidy_live_transcript(text)[:end])
 
 
+def test_map_notes_complete():
+    three = "- 教育訓練：報名22人\n- 預算：80萬元\n- 招募：下週面試\n"
+    assert not summary_utils.map_notes_complete(three)
+    assert not summary_utils.map_notes_complete(three + "- 客戶訂單：先簽")              # 第 4 條還沒寫完
+    assert summary_utils.map_notes_complete(three + "- 客戶訂單：先簽50臺\n")
+    assert summary_utils.map_notes_complete(three + "- 客戶訂單：" + "甲" * 45)          # 第 4 條已超過 40 字
+    assert summary_utils.map_notes_complete("## 重點\n- 會議日期：7.25\n" + three + "- 品質：加開一站\n")   # 標題、日期行不算
+    assert not summary_utils.map_notes_complete("")
+
+
 def test_dates_in_minutes_lose_inner_spaces():
     md = clean_summary_markdown("## 摘要\n- 預算 6月14 日前送財務部，9 月 10 日完成\n- 版本 3.5 日誌")
     assert "6月14日前" in md and "9月10日完成" in md and "3.5 日誌" in md
