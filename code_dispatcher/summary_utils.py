@@ -91,6 +91,11 @@ def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) 
             continue
         is_item = s.startswith(("-", "*", "•")) or re.match(r"^\d+[\.、)]", s) is not None
         is_row = s.startswith("|") and not set(s) <= set("|-: ")
+        if is_item and _CLOSING_FILLER_RE.search(s):     # 「…主持面試，今天就到這裡」：結尾客套話不是內容
+            s = _CLOSING_FILLER_RE.sub("", s).rstrip("，,、 ")
+            line = s
+            if len(_BULLET_RE.sub("", s).strip()) < 2:
+                continue
         if is_item or is_row:
             if s in seen:
                 continue
@@ -102,7 +107,35 @@ def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) 
                 continue
         out.append(line.rstrip())
     # 摘要表格在點數限制之後才改成條列：表格常有 6–13 列，先轉再限 5 點會丟掉後面議題的日期與負責人
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(_fix_table_separators(_summary_table_to_bullets(out)))).strip()
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(_fix_table_separators(_join_split_tables(_summary_table_to_bullets(out))))).strip()
+
+
+_CLOSING_FILLER_RE = re.compile(r"[，,。\s]*(?:好\s*[，,]?\s*)?(?:今天(?:就|先)?(?:到|開到)(?:這裡|這邊)|謝謝(?:大家|各位))[^，。\n]*")
+
+
+def _join_split_tables(lines: List[str]) -> List[str]:
+    """表格中間夾了空行或多一條分隔線 (11-02 3 分鐘 e2e：「| 劉客送預算表 |…」、空行、「|---|---|---|」、再接兩列)，
+    後半段會變成沒有表頭的另一張表。把表格列之間的空行去掉，只保留表頭下面那一條分隔線。"""
+    joined: List[str] = []
+    for i, line in enumerate(lines):
+        if not line.strip():
+            prev = next((l.strip() for l in reversed(joined) if l.strip()), "")
+            nxt = next((l.strip() for l in lines[i + 1:] if l.strip()), "")
+            if prev.startswith("|") and nxt.startswith("|"):
+                continue
+        joined.append(line)
+    out: List[str] = []
+    run = 0                      # 目前這張表已有幾列 (不含被丟掉的分隔線)
+    for line in joined:
+        s = line.strip()
+        if s.startswith("|"):
+            if _is_sep(s) and run != 1:
+                continue
+            run += 1
+        else:
+            run = 0
+        out.append(line)
+    return out
 
 
 
@@ -531,7 +564,14 @@ def _todo_parts(line: str):
     mo, mt = _OWNER_RE.search(line), _TIME_RE.search(line)
     if not (mo and mt):
         return None
-    return (_CLAUSE_SPLIT_RE.split(line)[0].strip()[:20] or line[:20]), mo.group(1), mt.group(1)
+    first = _CLAUSE_SPLIT_RE.split(line)[0].strip()
+    if mo.end() <= len(first):
+        # 負責人就在第一個子句裡 (STT 把「待辦事項是」聽成別的字時，整段總結常沒有標點)：事項取負責人後面的動作
+        rest = first[mo.end():].replace(mt.group(0), "", 1)
+        rest = _ACTION_LEAD_RE.sub("", rest.strip()).strip()
+        if len(rest) >= 4:
+            return rest[:20], mo.group(1), mt.group(1)
+    return (first[:20] or line[:20]), mo.group(1), mt.group(1)
 
 
 def extract_todos(lines: List[str], max_rows: int = 6) -> List[str]:
@@ -657,9 +697,9 @@ def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_de
         table = [l for l in body if l.strip().startswith("|") and not _is_sep(l.strip())]
         data = table[1:] if table else []
         placeholder = [l for l in data if l.count("|") >= 2 and l.split("|")[1].strip() in ("無", SECTION_MISSING_NOTE)]
-        owners = {l.split("|")[2].strip() for l in data if l.count("|") >= 4}
+        table_text = "\n".join(data)       # 負責人可能被寫在「事項」欄 (「| 王經理主持面試 | - | - |」)
         real = [l for l in data if l not in placeholder]
-        add = [r for r in rows if r.split("|")[2].strip() not in owners][:max(0, max_rows - len(real))]
+        add = [r for r in rows if r.split("|")[2].strip() not in table_text][:max(0, max_rows - len(real))]
         if add and table:
             new_body = [l for l in body if l not in placeholder] + add
             rest = md[m.end():]

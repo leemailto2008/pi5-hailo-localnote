@@ -399,3 +399,17 @@ def test_todo_clause_without_shi_after_shixiang():
     assert summary_utils._todo_parts("決議是簡報技巧課程9月2日開課待辦事項十個部門週四前把名單交給吳副理") == \
         ("十個部門前把名單交給", "吳副理", "週四")
     assert summary_utils._todo_parts("待辦很多，大家辛苦了") is None
+
+
+def test_split_todo_table_is_joined_and_closing_filler_dropped():
+    md = ("## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 送預算表 | 王經理 | 10月7日 |\n\n|---|---|---|\n"
+          "| 主持面試 | 王經理 | 12月3日 |\n\n## 決議\n- 決議是王經理主持面試，今天就到這裡\n- 今天就到這裡，謝謝大家")
+    out = clean_summary_markdown(md)
+    assert out.count("|---|---|---|") == 1 and "10月7日 |\n| 主持面試" in out
+    assert "- 決議是王經理主持面試" in out and "今天就到這裡" not in out and "謝謝大家" not in out
+
+
+def test_todo_without_marker_takes_the_action_after_the_owner():
+    assert summary_utils._todo_parts("依依商方面 決意施替代料持續驗證像是理協理週五回報星光材料的交期") == \
+        ("回報星光材料的交期", "理協理", "週五")
+    assert summary_utils._todo_parts("公安：8月15日前完成，許經理負責") == ("公安：8月15日前完成", "許經理", "8月15日")
