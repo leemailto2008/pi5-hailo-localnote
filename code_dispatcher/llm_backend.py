@@ -379,36 +379,49 @@ async def aiter_chat_stream(
     num_predict: int = 200,
     timeout: float = 90.0,
     hailo_keep_alive: Optional[int] = None,
+    hailo_retries: int = 0,
+    hailo_retry_wait: float = 5.0,
+    hailo_only: bool = False,
 ) -> AsyncIterator[Tuple[str, bool, LLMBackend]]:
+    """hailo_retries：Hailo 在第一個 token 前就失敗時，先等 hailo_retry_wait 秒重試幾次，再換下一個後端。
+    2026-11-02 228 容錯測試：長會議整理途中重啟 hailo-ollama，原本立刻改用 CPU Ollama (qwen2.5:3b)，
+    那一段要 81 s (Hailo 約 35 s)，RAM 峰值 3.9 GB；hailo-ollama 重啟到能回應約需 10 s。
+    hailo_only：只用 Hailo、不退回 CPU (錄音中禁止 CPU 推論，見 CLAUDE.md；錄音中預先整理用)。"""
     last_err: Optional[Exception] = None
     messages = build_messages(prompt, system)
-    for backend in backends_in_order():
-        if backend.is_hailo:
-            await asyncio.to_thread(_free_npu_for_llm)
-        payload = backend.build_chat_payload(messages, stream=True, temperature=temperature, num_predict=num_predict, hailo_keep_alive=hailo_keep_alive)
-        emitted = False
-        try:
-            async with _hailo_activity(backend.is_hailo), httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream("POST", backend.chat_url, json=payload) as resp:
-                    if resp.status_code != 200:
-                        body = await resp.aread()
-                        raise LLMError(f"{backend.label} HTTP {resp.status_code}: {body[:200]!r}")
-                    async for line in resp.aiter_lines():
-                        line = line.strip()
-                        if not line:
-                            continue
-                        chunk = json.loads(line)
-                        tok = extract_token(chunk)
-                        done = bool(chunk.get("done", False))
-                        if tok:
-                            emitted = True
-                        yield tok, done, backend
-                        if done:
-                            return
-            return
-        except (httpx.HTTPError, ValueError, LLMError) as e:
-            last_err = e
-            if emitted:
-                raise LLMError(f"{backend.label} stream interrupted: {e}") from e
-            logger.warning(f"[LLM] {backend.label} stream failed before first token, trying next backend: {e}")
+    for backend in ([HAILO_BACKEND] if hailo_only else backends_in_order()):
+        attempts = 1 + (hailo_retries if backend.is_hailo else 0)
+        for attempt in range(attempts):
+            if backend.is_hailo:
+                await asyncio.to_thread(_free_npu_for_llm)
+            payload = backend.build_chat_payload(messages, stream=True, temperature=temperature, num_predict=num_predict, hailo_keep_alive=hailo_keep_alive)
+            emitted = False
+            try:
+                async with _hailo_activity(backend.is_hailo), httpx.AsyncClient(timeout=timeout) as client:
+                    async with client.stream("POST", backend.chat_url, json=payload) as resp:
+                        if resp.status_code != 200:
+                            body = await resp.aread()
+                            raise LLMError(f"{backend.label} HTTP {resp.status_code}: {body[:200]!r}")
+                        async for line in resp.aiter_lines():
+                            line = line.strip()
+                            if not line:
+                                continue
+                            chunk = json.loads(line)
+                            tok = extract_token(chunk)
+                            done = bool(chunk.get("done", False))
+                            if tok:
+                                emitted = True
+                            yield tok, done, backend
+                            if done:
+                                return
+                return
+            except (httpx.HTTPError, ValueError, LLMError) as e:
+                last_err = e
+                if emitted:
+                    raise LLMError(f"{backend.label} stream interrupted: {e}") from e
+                if attempt + 1 < attempts:
+                    logger.warning(f"[LLM] {backend.label} stream failed before first token (attempt {attempt + 1}), retrying in {hailo_retry_wait:.0f}s: {e}")
+                    await asyncio.sleep(hailo_retry_wait)
+                    continue
+                logger.warning(f"[LLM] {backend.label} stream failed before first token, trying next backend: {e}")
     raise LLMError(f"all LLM backends failed: {last_err}")

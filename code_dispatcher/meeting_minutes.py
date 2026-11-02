@@ -67,29 +67,22 @@ SUMMARY_PREMAP_LAG = int(os.environ.get("PI5_SUMMARY_PREMAP_LAG", "1000"))     #
 SUMMARY_PREMAP_POLL_S = 10.0
 
 
-async def stream_map_notes(prompt: str, keep_alive: Optional[int] = None):
+async def stream_map_notes(prompt: str, keep_alive: Optional[int] = None, hailo_only: bool = False):
     """長會議逐段抽重點：串流生成，compact_notes() 會留下的 4 條都寫完就停 (map_notes_complete)。
     取消串流時 hailo-ollama 會立刻停止生成 (2026-11-01 228 實測)；非串流必須等 num_predict 用完，模型常多寫一兩條被丟掉。
-    Hailo 偶發失敗時等 3 s 重試一次 (等同原本 achat_complete 的 hailo_retries=1)。回傳 (文字, backend)。"""
+    Hailo 在第一個 token 前失敗 (例如 hailo-ollama 正在重啟) 時，每 5 s 重試、最多 2 次，才改用 CPU 後端。回傳 (文字, backend)。"""
     from contextlib import aclosing
-    last_err: Optional[Exception] = None
-    for attempt in range(2):
-        acc, backend = "", None
-        try:
-            async with aclosing(aiter_chat_stream(prompt, system=MAP_SYSTEM_MSG, temperature=0.2, num_predict=160,
-                                                  timeout=120.0, hailo_keep_alive=keep_alive)) as stream:
-                async for tok, _done, b in stream:
-                    backend = b
-                    if tok:
-                        acc += tok
-                        if map_notes_complete(acc):
-                            break
-            return acc.strip(), backend
-        except LLMError as e:
-            last_err = e
-            if attempt == 0:
-                await asyncio.sleep(3.0)
-    raise last_err
+    acc, backend = "", None
+    async with aclosing(aiter_chat_stream(prompt, system=MAP_SYSTEM_MSG, temperature=0.2, num_predict=160,
+                                          timeout=120.0, hailo_keep_alive=keep_alive, hailo_retries=2,
+                                          hailo_only=hailo_only)) as stream:
+        async for tok, _done, b in stream:
+            backend = b
+            if tok:
+                acc += tok
+                if map_notes_complete(acc):
+                    break
+    return acc.strip(), backend
 
 
 def map_user_prompt(piece: str, idx: int, total: int) -> str:
@@ -711,7 +704,7 @@ class MeetingJobManager:
                     try:
                         # 用串流：錄音結束時取消串流，hailo-ollama 會立刻停止生成 (非串流請求取消後伺服器仍會跑完，
                         # 228 實測下一個請求要多等 32 s)，NPU 才能馬上回去處理最後幾段逐字稿
-                        text, _backend = await stream_map_notes(map_user_prompt(piece, idx, 0))
+                        text, _backend = await stream_map_notes(map_user_prompt(piece, idx, 0), hailo_only=True)   # 錄音中不可退回 CPU
                     except LLMError as e:
                         print(f"[MeetingMinutes] 錄音中預先整理第 {idx} 段失敗，停止預先整理: {e}")
                         return
@@ -1249,7 +1242,8 @@ class MeetingJobManager:
             # 逐字稿超過 SUMMARY_LONG_SINGLE_CHARS 字 (約 4–5 分鐘) 時上限再放寬到 600 (2026-11-02 228 A/B，5 份 5 分鐘逐字稿各 2 次)：
             # 480 時 10 次有 3 次「待辦未產生」，600 時 1 次；平均多 5 s、最多 131 s；回顧 0.80／0.70、議題 0.90／0.90 都在雜訊內。
             npred = 600 if len(clean_transcript) > SUMMARY_LONG_SINGLE_CHARS else 480
-            async for token, _done, backend in aiter_chat_stream(prompt, system=system_msg, temperature=0.2, num_predict=npred, timeout=180.0):
+            async for token, _done, backend in aiter_chat_stream(prompt, system=system_msg, temperature=0.2, num_predict=npred, timeout=180.0,
+                                                                 hailo_retries=2):
                 used_backend_label = backend.label
                 if self._cancellation_token and self._cancellation_token.is_set():
                     print("[MeetingMinutes] LLM generation aborted by cancellation token.")
