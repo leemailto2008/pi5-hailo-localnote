@@ -392,3 +392,10 @@ def test_short_minutes_get_the_closing_recap_todos_and_decisions():
     assert len(lines) == len(set(lines))
     # 沒有結尾總結的逐字稿：原樣不動
     assert summary_utils.merge_recap_into_minutes(md, "第一個議題是出差，吳副理下個月要去東京。") == md
+
+
+def test_todo_clause_without_shi_after_shixiang():
+    # STT 漏了「是」：「…開課待辦事項十個部門週四前把名單交給吳副理」
+    assert summary_utils._todo_parts("決議是簡報技巧課程9月2日開課待辦事項十個部門週四前把名單交給吳副理") == \
+        ("十個部門前把名單交給", "吳副理", "週四")
+    assert summary_utils._todo_parts("待辦很多，大家辛苦了") is None

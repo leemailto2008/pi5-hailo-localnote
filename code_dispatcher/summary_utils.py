@@ -499,7 +499,8 @@ def _note_lines(notes: str) -> List[str]:
     return [l[2:].strip() for l in (notes or "").splitlines() if l.startswith("- ") and l[2:].strip()]
 
 
-_TODO_MARK_RE = re.compile(r"待辦(?:事項)?\s*(?:是|為|：|:)\s*")
+# 「待辦事項十個部門週四前…」：STT 常漏掉「是」，有「事項」兩字時「是」可省略 (11-02 30 分鐘 e2e)
+_TODO_MARK_RE = re.compile(r"待辦事項\s*(?:是|為|：|:)?\s*|待辦\s*(?:是|為|：|:)\s*")
 _CLAUSE_SPLIT_RE = re.compile(r"[，；;。]|,(?!\d)")          # 不切「1,200」這類數字
 _ACTION_LEAD_RE = re.compile(r"^(?:在|於|要|會|將|請|負責|之前|以前|前)+")
 
