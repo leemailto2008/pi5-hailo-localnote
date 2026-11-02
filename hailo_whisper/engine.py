@@ -104,6 +104,22 @@ _TOPIC_FIX_RE = re.compile(r"(第\s*[一二三四五六七八九十\d]{1,3}\s*[�
                            r"(?:一\s*[提題體]|[議意]\s*[提題體])(?=\s*[是市示事])")
 
 
+# 職稱的同音錯字 (11-02 228 95 份逐字稿，約 32 萬字)：負責人要靠職稱才認得出來 (紀要待辦表的 _OWNER_RE)，
+#   「工程師」508 次正確，但另有「公成師」138、「工成師」59、「公城市」39、「公城師」28、「工城市」27… 共約 400 次；
+#   「課長」只有 17 次正確，「客長」212、「客掌」104；「組長」155 次，「族長／旬長／祖長」77；
+#   「協理」195 次，「協利／協裡／協禮／協李」139；「副理」26 次，「負理／負裡／負禮」66。
+#   這些錯字都不是詞，只要避開跨詞的正常組合：「工程時間」「做這個工程時」「顧客長期」「乘客」「家族長輩」「負利率」「正負理論」等。
+#   「協力」「精力」「經歷」「科長」「富里」是正常用語，不改。
+_ENGINEER_FIX_RE = re.compile(r"(?<![辦化加施手分員完開動竣停復電人])"
+                              r"(?:[工公宮]\s*[成城承沉陳]\s*[師市失時詩事]|[工公宮]\s*程\s*[失詩事]|[公宮]\s*程\s*[師市時]"
+                              r"|工\s*程\s*時(?=\s*[負主安調掉]))")
+_SECTION_CHIEF_FIX_RE = re.compile(r"(?<![顧乘旅遊訪房租常熟新老過貴政駭說刺俠墨劍商來賓酒散主])"
+                                   r"(?:[客克]\s*[長棟漲]|[客克課]\s*掌(?!握|控|管|上|心|中|聲|櫃))(?![期久遠大達度年輩高短老])")
+_GROUP_LEAD_FIX_RE = re.compile(r"(?<![家民種部氏貴宗皇王上中下初])[族旬祖]\s*[長掌](?![期久遠大達度年輩老者握控])")
+_ASSOC_MGR_FIX_RE = re.compile(r"(?<![互])協\s*[利裡禮李](?![益率潤息])")
+_DEPUTY_MGR_FIX_RE = re.compile(r"(?<![正勝抱擔])負\s*[理裡禮](?![論由想念性財解])")
+
+
 # 日期寫法統一：Whisper 常把「二月十五日」寫成「2.15日」或「2 月 15 日」(10-31 228 69 份逐字稿：分別 119 與 233 次，
 # 正常的「2月15日」2230 次)。統一成「2月15日」：24 份會改到的逐字稿，事實召回 0.692 → 0.704 (12 份變好、0 份變差)，CER 沒有變差。
 # 只認 1–12 月、1–31 日，且前面不能接數字或小數點 (避免「13.5日」「1.25.3日」之類)。
@@ -119,6 +135,9 @@ def fix_meeting_terms(text: str) -> str:
     text = _TODO_FIX_RE.sub("待辦事項", _DECISION_FIX_RE.sub("決議", text))
     text = _RECRUIT_FIX_RE.sub("招募", _QUALITY_FIX_RE.sub("品質", text))
     text = _TOPIC_FIX_RE.sub(r"\1議題", text)
+    text = _ENGINEER_FIX_RE.sub("工程師", _SECTION_CHIEF_FIX_RE.sub("課長", text))
+    text = _ASSOC_MGR_FIX_RE.sub("協理", _GROUP_LEAD_FIX_RE.sub("組長", text))
+    text = _DEPUTY_MGR_FIX_RE.sub("副理", text)
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
 
