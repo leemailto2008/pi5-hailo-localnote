@@ -162,6 +162,27 @@ def _fix_hiring_and_order_terms(text: str) -> str:
     return _RETRAIN_FIX_RE.sub("全員複訓", _NEW_QUOTE_FIX_RE.sub("新報價", text))
 
 
+# 夾在中文中間的英文碎片 (11-02 95 份逐字稿約 1000 處)：Whisper 會把中文數字寫成英文 (「three 個職缺」「6 weeks」)，
+# 或插入沒有意義的字尾 (「持續's 驗證」「至少要做三輪回 its test」「er」「est」)。
+# 只動「前後都是中文或中文標點」的小寫字：數字詞改回中文，下列明顯是雜訊的虛詞與字尾刪掉；
+# 其他英文 (ERP、test、bug、pin…) 都保留，硬體會議常講。40 份會改到的逐字稿：CER 0.3643 → 0.3615，沒有一份變差。
+_LATIN_IN_CJK_RE = re.compile(r"(?<=[\u4e00-\u9fff，。、,\s])\s*('?[a-z][a-z']{0,7})\s*(?=[\u4e00-\u9fff，。、,])")
+_EN_NUMBERS = {"one": "一", "two": "二", "three": "三", "four": "四", "five": "五", "six": "六", "seven": "七",
+               "eight": "八", "nine": "九", "ten": "十"}
+_EN_NOISE = {"er", "est", "ed", "y", "v", "es", "e", "en", "ors", "'s", "r", "um", "ers", "ly", "ing", "ar", "al", "nd",
+             "le", "ry", "u", "j", "ce", "st", "ong", "et", "the", "is", "to", "in", "on", "of", "an", "as", "he", "its",
+             "that", "with", "them", "will", "our", "and"}
+
+
+def _fix_latin_in_cjk(text: str) -> str:
+    def sub(m):
+        w = m.group(1)
+        if w in _EN_NUMBERS:
+            return _EN_NUMBERS[w]
+        return "" if w in _EN_NOISE else m.group(0)
+    return _LATIN_IN_CJK_RE.sub(sub, text)
+
+
 # 日期寫法統一：Whisper 常把「二月十五日」寫成「2.15日」或「2 月 15 日」(10-31 228 69 份逐字稿：分別 119 與 233 次，
 # 正常的「2月15日」2230 次)。統一成「2月15日」：24 份會改到的逐字稿，事實召回 0.692 → 0.704 (12 份變好、0 份變差)，CER 沒有變差。
 # 只認 1–12 月、1–31 日，且前面不能接數字或小數點 (避免「13.5日」「1.25.3日」之類)。
@@ -183,7 +204,7 @@ def fix_meeting_terms(text: str) -> str:
     text = _DEPUTY_MGR_CTX_FIX_RE.sub(r"\1副理", _DEPUTY_MGR_FIX_RE.sub("副理", text))
     text = _FIRMWARE_FIX_RE.sub("韌體", text)
     text = _VERIFY_FIX_RE.sub("驗證", _YIELD_FIX_RE.sub("良率", text))
-    text = _fix_hiring_and_order_terms(text)
+    text = _fix_hiring_and_order_terms(_fix_latin_in_cjk(text))
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
 
