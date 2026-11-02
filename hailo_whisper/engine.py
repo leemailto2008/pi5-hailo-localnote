@@ -122,6 +122,11 @@ _SECTION_CHIEF_FIX_RE = re.compile(r"(?<![顧乘旅遊訪房租常熟新老過�
 _GROUP_LEAD_FIX_RE = re.compile(r"(?<![家民種部氏貴宗皇王上中下初])[族旬祖]\s*[長掌](?![期久遠大達度年輩老者握控])")
 _ASSOC_MGR_FIX_RE = re.compile(r"(?<![互])協\s*[利裡禮李](?![益率潤息])")
 _DEPUTY_MGR_FIX_RE = re.compile(r"(?<![正勝抱擔])負\s*[理裡禮](?![論由想念性財解])")
+# 「副理」其他寫法 (父禮 16、付禮 14、父裡 13、富理 11、富里 36、付裡 10…，約 160 次) 多半是正常字詞的一部分 (富里鄉、付禮金)，
+# 只在負責人的句型裡改：前面是「請／交給／由／是／安排／有」加一個姓氏字，後面接「負責／主持／會在／跟／調貨／下個月…」。
+_DEPUTY_MGR_CTX_FIX_RE = re.compile(r"((?:交給|請|由|是|安排|有)\s*[，,]?\s*(?![在到去來從往的了是和與及])[\u4e00-\u9fff])\s*"
+                                    r"[父付富傅負腹福復副]\s*[理裡禮李利里力]"
+                                    r"(?=\s*(?:負|主|會|在|跟|安排|調|掉|下個|下的|回|[，,。]|第|$))")
 
 
 # 韌體／良率／驗證的同音錯字 (11-02 228 95 份逐字稿)：
@@ -153,7 +158,7 @@ def fix_meeting_terms(text: str) -> str:
     text = _TOPIC_FIX_RE.sub(r"\1議題", text)
     text = _ENGINEER_FIX_RE.sub("工程師", _SECTION_CHIEF_FIX_RE.sub("課長", text))
     text = _ASSOC_MGR_FIX_RE.sub("協理", _GROUP_LEAD_FIX_RE.sub("組長", text))
-    text = _DEPUTY_MGR_FIX_RE.sub("副理", text)
+    text = _DEPUTY_MGR_CTX_FIX_RE.sub(r"\1副理", _DEPUTY_MGR_FIX_RE.sub("副理", text))
     text = _FIRMWARE_FIX_RE.sub("韌體", text)
     text = _VERIFY_FIX_RE.sub("驗證", _YIELD_FIX_RE.sub("良率", text))
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
