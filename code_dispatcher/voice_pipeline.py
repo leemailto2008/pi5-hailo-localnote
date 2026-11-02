@@ -131,6 +131,18 @@ def convert_oga_to_wav(input_oga_path: str, output_wav_path: str) -> bool:
         return False
 
 
+def collapse_phrase_loops(text: str) -> str:
+    """連續重複 3 次以上、長度 2~30 的片語 (可用逗號、頓號、空白分隔) 壓成一次。"""
+    # 針對包含逗號、頓號、空白或無標點的連續重複片語進行壓縮 (短語長度 2~30)
+    for _ in range(3):
+        def repl(match):
+            phrase = match.group(1)
+            sep = match.group(2)
+            return phrase + (sep if sep else "")
+        text = re.sub(r'([^\s，,。！？!?]{2,30})([，,、\s]?)(?:\1\2){2,}', repl, text)
+    return text
+
+
 def clean_hallucination_repetitions(text: str) -> str:
     """
     抑制 Whisper 偶發之自回歸解碼重複迴圈 (Hallucination Repetition Loops)。
@@ -140,13 +152,7 @@ def clean_hallucination_repetitions(text: str) -> str:
     if not text:
         return text
 
-    # 針對包含逗號、頓號、空白或無標點的連續重複片語進行壓縮 (短語長度 2~30)
-    for _ in range(3):
-        def repl(match):
-            phrase = match.group(1)
-            sep = match.group(2)
-            return phrase + (sep if sep else "")
-        text = re.sub(r'([^\s，,。！？!?]{2,30})([，,、\s]?)(?:\1\2){2,}', repl, text)
+    text = collapse_phrase_loops(text)
 
     # 清理結尾殘缺的重複片段（例如最後被 token limit 截斷剩下的殘字，如 "，我們"）
     m = re.search(r'([^\s，,。！？!?]{2,20})[，,、\s]*([^\s，,。！？!?]{1,10})$', text)
@@ -156,6 +162,28 @@ def clean_hallucination_repetitions(text: str) -> str:
             text = text[:-len(tail)].rstrip("，,、 ")
 
     return text.strip()
+
+
+_WORD_LOOP_RE = re.compile(r"((?:[A-Za-z']+[\s,]+){2,6}?)\1{2,}")     # 2~6 個字的片語連續 3 次 (「yes yes yes」不算)
+_LETTER_RUN_RE = re.compile(r"([A-Za-z])\1{3,}", re.IGNORECASE)
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def clean_stt_segment(text: str) -> str:
+    """Hailo NPU 每個切片的輸出清理 (2026-11-02)：原本只有 CPU 路徑會經過 clean_hallucination_repetitions()，
+    NPU 路徑直接回傳。228 從 10-25 起 10929 個 NPU 切片中有 23 個帶著解碼迴圈進了逐字稿，例如：
+    「…全面更新ZZZZZZZZZZZZ」「第21 第21 第21 第21…」「15-se-se-se-se」，以及安靜時的
+    「I'm a little bit of a little bit of a little bit of…」。
+    - 同一個英文字母連續 4 次以上 (不分大小寫) 整串刪掉 (正常語音不會出現)。
+    - 中文／符號片語的重複迴圈：collapse_phrase_loops() 只留一次。不用 clean_hallucination_repetitions() 的
+      「結尾殘字」規則：那是給 CPU 路徑 token 用盡時用的，套在切片上會把「五輪回測」砍成「五輪回」。
+    - 沒有中文、而且是 2 個字以上的英文片語重複 3 次以上：整段當成幻覺丟掉。"""
+    if not text:
+        return text
+    if not _CJK_RE.search(text) and _WORD_LOOP_RE.search(text + " "):
+        return ""
+    text = _LETTER_RUN_RE.sub("", text)
+    return collapse_phrase_loops(text).strip()
 
 
 def join_bilingual_tokens(tokens: List[str]) -> str:
@@ -224,6 +252,10 @@ def speech_to_text(
                 txt = h10_res.get("text", "")
                 if txt:
                     print(f"[VoicePipeline] ⚡ Hailo-10H 轉錄完成: '{txt}' (耗時: {h10_res.get('inference_time_ms', 0)}ms)")
+                    cleaned = clean_stt_segment(txt)
+                    if cleaned != txt:
+                        print(f"[VoicePipeline] 清掉解碼迴圈: '{txt}' → '{cleaned}'")
+                    txt = cleaned
                 return txt
         except Exception as h10_err:
             print(f"[VoicePipeline] Hailo-10H 轉錄探測異常，平滑降級: {h10_err}")
