@@ -305,6 +305,8 @@ def recap_notes(recap: str, max_lines: int = 6, max_len: int = 50) -> str:
             groups[-1].append(c)
     lines: List[str] = []
     for g in groups:
+        if len(g) == 1 and re.fullmatch(r".{0,6}方面", g[0]):
+            continue        # 只剩「依應商方面」：後面的內容 STT 沒聽出來，單獨一行沒有資訊 (11-02 喇叭 30 分鐘)
         cur = ""
         for c in g:
             if cur and len(cur) + 1 + len(c) > max_len:

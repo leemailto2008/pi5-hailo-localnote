@@ -413,3 +413,8 @@ def test_todo_without_marker_takes_the_action_after_the_owner():
     assert summary_utils._todo_parts("依依商方面 決意施替代料持續驗證像是理協理週五回報星光材料的交期") == \
         ("回報星光材料的交期", "理協理", "週五")
     assert summary_utils._todo_parts("公安：8月15日前完成，許經理負責") == ("公安：8月15日前完成", "許經理", "8月15日")
+
+
+def test_recap_drops_a_bare_topic_label():
+    out = summary_utils.recap_notes("最後總結一下，招募方面，決議是週五前完成報到，依應商方面,，展覽方面，決議是參加新竹展覽，今天就到這裡")
+    assert "依應商方面" not in out and "招募方面" in out and "展覽方面" in out
