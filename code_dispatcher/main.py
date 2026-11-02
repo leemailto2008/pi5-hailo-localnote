@@ -232,6 +232,29 @@ def get_web_ui():
     return HTMLResponse(content="<h1>LocalNote 聽記盒</h1><p>ui_client.html not found.</p>", headers=headers)
 
 
+MYTEK_BRAND = "MyTek LocalNote 聽記盒"
+MYTEK_LOGO_HTML = '<img class="mytek-logo" src="/static/mytek_logo.png" alt="MyTek">'
+MYTEK_LOGO_CSS = (".mytek-logo{height:40px;width:auto;border-radius:8px;flex:none;display:block}"
+                  "@media (max-width:600px){.mytek-logo{height:32px}}")
+
+
+@app.get("/Mytek", response_class=HTMLResponse, tags=["Web UI"])
+@app.get("/mytek", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/MyTek", response_class=HTMLResponse, include_in_schema=False)
+def get_mytek_ui():
+    """與首頁 (/) 相同的 LocalNote 介面，但頁首最前面加上 MyTek Logo，產品名稱改成「MyTek LocalNote 聽記盒」。
+    直接改寫 ui_client.html 的輸出，首頁本身不受影響。"""
+    headers = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+    if not os.path.exists(HTML_CLIENT_UI_PATH):
+        return get_web_ui()
+    with open(HTML_CLIENT_UI_PATH, "r", encoding="utf-8") as f:
+        html = f.read()
+    html = html.replace("LocalNote 聽記盒", MYTEK_BRAND)
+    html = html.replace('<span class="logo">LN</span>', MYTEK_LOGO_HTML + '\n    <span class="logo">LN</span>', 1)
+    html = html.replace("</style>", MYTEK_LOGO_CSS + "\n</style>", 1)
+    return HTMLResponse(content=html, headers=headers)
+
+
 @app.get("/dbg01", response_class=HTMLResponse, tags=["Web UI"])
 @app.get("/dgb01", response_class=HTMLResponse, include_in_schema=False)
 @app.get("/arena", response_class=HTMLResponse, tags=["Web UI"])
