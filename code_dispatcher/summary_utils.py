@@ -45,10 +45,13 @@ def _summary_table_to_bullets(lines: List[str]) -> List[str]:
     表頭與分隔線丟掉，每列寫成「- 議題：值，值」，空白與重複的格子略過；段落裡已有其他條目時，模型自己寫的「- 無」也拿掉。"""
     out: List[str] = []
     section, converted = None, False
+    seen = set()          # 已有的條目：表格轉出來的條目若重複就略過 (11-02 229 1 分鐘 e2e：兩列都只剩「產線加開檢查」)
     for i, line in enumerate(lines):
         s = line.strip()
         if s.startswith("## "):
             section, converted = s[3:].strip(), False
+        if s.startswith("- "):
+            seen.add(s)
         if section and section != "待辦" and s.startswith("|"):
             nxt = lines[i + 1].strip() if i + 1 < len(lines) else ""
             if _is_sep(s) or _is_sep(nxt):          # 分隔線、表頭
@@ -59,7 +62,10 @@ def _summary_table_to_bullets(lines: List[str]) -> List[str]:
                 if c not in _EMPTY_CELL and c not in vals:
                     vals.append(c)
             if vals:
-                out.append(f"- {vals[0]}：{'，'.join(vals[1:])}" if len(vals) > 1 else f"- {vals[0]}")
+                bullet = f"- {vals[0]}：{'，'.join(vals[1:])}" if len(vals) > 1 else f"- {vals[0]}"
+                if bullet not in seen:
+                    seen.add(bullet)
+                    out.append(bullet)
                 converted = True
             continue
         if converted and s in ("- 無", "-無"):

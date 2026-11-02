@@ -124,6 +124,8 @@ def test_summary_table_becomes_bullets_and_empty_rows_are_dropped():
     assert md7.count("\n- ") == 7 and "- 議題7：70臺，3.28L" in md7      # 表格轉條列不受 5 點限制、不去「3.28」的小數點
     dec = clean_summary_markdown("## 摘要\n- 甲\n\n## 決議\n|---|---|---|\n| 產線加開一站檢查 | - | - |\n| 11月28日前完成報到 | - | - |\n\n- 無")
     assert dec.endswith("## 決議\n- 產線加開一站檢查\n- 11月28日前完成報到")                 # 決議段的表格也改條列，多餘的「- 無」拿掉
+    dup = clean_summary_markdown("## 摘要\n| 議題 | 數字 |\n|---|---|\n| 產線加開檢查 | - |\n| 產線加開檢查 | 無 |\n| 品質 | 18件 |")
+    assert dup.count("- 產線加開檢查") == 1 and "- 品質：18件" in dup                       # 轉出來重複的條目只留一條
     stray = clean_summary_markdown("## 摘要\n- 甲\n\n## 決議\n|---|---|---|---|---|\n- 維持原價")
     assert stray.endswith("## 決議\n- 維持原價")
 
