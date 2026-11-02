@@ -46,6 +46,7 @@ from summary_utils import (assemble_long_minutes, clean_summary_markdown, compac
 # 再由 summary_utils.assemble_long_minutes() 組成三段式紀要 (1.7B 模型無法跨 20+ 條重點歸納，實測會照抄並擠掉待辦/決議)。
 SUMMARY_SINGLE_MAX_CHARS = int(os.environ.get("PI5_SUMMARY_SINGLE_MAX", "1200"))
 SUMMARY_CHUNK_CHARS = int(os.environ.get("PI5_SUMMARY_CHUNK", "1000"))
+SUMMARY_LONG_SINGLE_CHARS = int(os.environ.get("PI5_SUMMARY_LONG_SINGLE", "800"))   # 單次紀要超過這個字數，輸出上限 480 → 600
 # 長會議的結尾總結在這個長度以內就直接用原句 (recap_notes)，不交給 LLM 改寫；設 0 關閉
 SUMMARY_RECAP_VERBATIM_MAX = int(os.environ.get("PI5_SUMMARY_RECAP_VERBATIM_MAX", "400"))
 # 分段整理期間讓 hailo-ollama 模型常駐，避免每段重新載入 7–28 秒；最後一段用預設 0 釋放 NPU。
@@ -1245,7 +1246,10 @@ class MeetingJobManager:
         try:
             # num_predict 380 → 480 (2026-10-31 228 A/B，9 份容易截斷的 3–5 分鐘逐字稿)：「待辦／決議未產生」4/9 → 1/9，
             # 回顧事實與議題覆蓋持平，平均多 16 s (只有本來會被截斷的輸出才會變長)。
-            async for token, _done, backend in aiter_chat_stream(prompt, system=system_msg, temperature=0.2, num_predict=480, timeout=180.0):
+            # 逐字稿超過 SUMMARY_LONG_SINGLE_CHARS 字 (約 4–5 分鐘) 時上限再放寬到 600 (2026-11-02 228 A/B，5 份 5 分鐘逐字稿各 2 次)：
+            # 480 時 10 次有 3 次「待辦未產生」，600 時 1 次；平均多 5 s、最多 131 s；回顧 0.80／0.70、議題 0.90／0.90 都在雜訊內。
+            npred = 600 if len(clean_transcript) > SUMMARY_LONG_SINGLE_CHARS else 480
+            async for token, _done, backend in aiter_chat_stream(prompt, system=system_msg, temperature=0.2, num_predict=npred, timeout=180.0):
                 used_backend_label = backend.label
                 if self._cancellation_token and self._cancellation_token.is_set():
                     print("[MeetingMinutes] LLM generation aborted by cancellation token.")
