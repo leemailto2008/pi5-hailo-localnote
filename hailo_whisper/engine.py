@@ -79,6 +79,10 @@ def speech_seconds(audio: "np.ndarray", sr: int = 16000) -> Optional[float]:
 # 「待辦職像／待半時像」各 1 次，一併收進來。「事X」照舊直接改；「是X／職X／時X」和單獨的「事」
 # 必須後面接著「是」(「待辦事項是…」的句型) 才改，避免「代辦是向國稅局申請」這類正常用法被改掉。
 _DECISION_FIX_RE = re.compile(r"(?:決意|捷一|決一|絕一|覺一)(?=\s*是)")
+# 11-02 228 95 份逐字稿：「X方面，__是」的 __ 還有「主一／學藝／學一／扇一／捷意／紙一／冶一／卻一／學意／決義／決逸」各 1–2 次，
+# 結尾總結開頭還有「最後總結一下，舊一是…」。這些只在「方面」或「總結一下」後面、接著「是」時才改 (「學藝」本身是詞)。
+_DECISION_CTX_FIX_RE = re.compile(r"((?:方面|總結一下|最後總結)\s*[，,、]?\s*)"
+                                  r"(?:[決捷學主扇紙冶卻覺絕舊][一意義逸藝議])(?=\s*是)")
 # 10-31 夜間 30 分鐘喇叭自測又出現「代半事向」「待幹是像是」；84 份逐字稿裡「待板／代半／待幹／太辦／代伴」各 1–2 次，都不是詞，一併收進來
 # (「大半」是正常用語，仍不改)。
 _TODO_FIX_RE = re.compile(r"(?:待辦|代辦|代版|戴板|戴版|待半|大辦|帶辦|待板|代半|待幹|太辦|代伴)\s*"
@@ -144,6 +148,7 @@ def fix_meeting_terms(text: str) -> str:
     if not text:
         return text or ""
     text = _TODO_FIX_RE.sub("待辦事項", _DECISION_FIX_RE.sub("決議", text))
+    text = _DECISION_CTX_FIX_RE.sub(r"\1決議", text)
     text = _RECRUIT_FIX_RE.sub("招募", _QUALITY_FIX_RE.sub("品質", text))
     text = _TOPIC_FIX_RE.sub(r"\1議題", text)
     text = _ENGINEER_FIX_RE.sub("工程師", _SECTION_CHIEF_FIX_RE.sub("課長", text))
