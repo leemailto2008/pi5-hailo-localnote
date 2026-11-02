@@ -199,7 +199,12 @@ def _fix_latin_in_cjk(text: str) -> str:
         if w in _EN_NUMBERS:
             return _EN_NUMBERS[w]
         return "" if w in _EN_NOISE else m.group(0)
-    return _LATIN_IN_CJK_RE.sub(sub, text)
+    for _ in range(4):   # 刪掉一個碎片後，旁邊的字可能才變成「前後都是中文」(「two of 職」)，重複到不再變動
+        fixed = _LATIN_IN_CJK_RE.sub(sub, text)
+        if fixed == text:
+            break
+        text = fixed
+    return text
 
 
 # 日期寫法統一：Whisper 常把「二月十五日」寫成「2.15日」或「2 月 15 日」(10-31 228 69 份逐字稿：分別 119 與 233 次，

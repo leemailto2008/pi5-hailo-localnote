@@ -37,6 +37,15 @@ AUDIO_CACHE_DIR = get_in_memory_cache_dir()
 
 # LLM backend selection (Hailo-10H qwen3:1.7b preferred, CPU Ollama fallback) lives in llm_backend.py
 from llm_backend import aiter_chat_stream, LLMError
+try:
+    # 部署後 hailo_whisper 在 code_dispatcher 底下。NPU 每個切片 (約 6 秒) 已各自修過一次術語，
+    # 但「最後總結一下，｜舊一是…」「交給吳｜父裡」這類跨切片的句型要等整份逐字稿接起來才看得到，所以全文再修一次 (規則可重複套用)。
+    from hailo_whisper.engine import fix_meeting_terms
+except Exception as _fix_err:   # 開發環境找不到時，只是少了跨切片的修正
+    print(f"[MeetingMinutes] fix_meeting_terms unavailable: {_fix_err}")
+
+    def fix_meeting_terms(text: str) -> str:
+        return text
 from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, fill_decisions_from_transcript,
                            ground_todo_table, is_recap_chunk, keep_alive_plan, recap_notes,
                            map_notes_complete, split_with_recap, summary_limits, take_stable_chunk, tidy_live_transcript)
@@ -694,7 +703,7 @@ class MeetingJobManager:
                         await asyncio.wait_for(premap_stop.wait(), timeout=SUMMARY_PREMAP_POLL_S)
                     except asyncio.TimeoutError:
                         pass
-                    live = tidy_live_transcript(curr_preview)
+                    live = fix_meeting_terms(tidy_live_transcript(curr_preview))
                     end = take_stable_chunk(live, done_upto, SUMMARY_CHUNK_CHARS, SUMMARY_PREMAP_LAG)
                     if end is None or premap_stop.is_set() or self._cancellation_token.is_set():
                         continue
@@ -890,7 +899,7 @@ class MeetingJobManager:
                 final_preview = "，".join(live_segments)
 
             if final_preview and len(final_preview.strip()) >= 5:
-                transcript = tidy_live_transcript(final_preview)    # 與錄音中預先整理用同一套整理
+                transcript = fix_meeting_terms(tidy_live_transcript(final_preview))    # 與錄音中預先整理用同一套整理
                 print(f"[MeetingMinutes] ⚡ 0秒尾端等待！成功取用即時切片串流 STT (字數: {len(transcript)}，段落數: {len(live_segments)})！")
             else:
                 # 保底：若即時切片為空，快速執行一次母帶轉錄
@@ -900,7 +909,7 @@ class MeetingJobManager:
                     raw_ogg,
                     self._thread_cancellation_token
                 )
-                transcript = (master_res or "").strip().replace("\ufffd", "").replace("\uFFFD", "") if master_res else "（未能辨識出清晰人聲語音）"
+                transcript = fix_meeting_terms((master_res or "").strip().replace("\ufffd", "").replace("\uFFFD", "")) if master_res else "（未能辨識出清晰人聲語音）"
 
             if self._cancellation_token.is_set():
                 print("[MeetingMinutes] Transcribe aborted by cancellation token.")

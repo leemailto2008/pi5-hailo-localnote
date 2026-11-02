@@ -216,3 +216,11 @@ def test_meeting_terms_fixed_in_npu_output(fake_engine):
     e = fake_engine(["最後總結一下，預算方面決意是維持原案"])
     assert e.transcribe(_speech(), language="auto")["text"].endswith("預算方面決議是維持原案")
 
+
+def test_fix_meeting_terms_is_idempotent():
+    # 切片各修一次、整份逐字稿接起來再修一次，結果要和只修一次相同
+    for raw in ("業務部目前，two of 職已經面世了15位候選人", "最後總結一下，舊一是簡報技巧課程，交給吳父裡，楊公成師負責",
+                "a small accident no one ，已經加裝四支"):
+        once = eng.fix_meeting_terms(raw)
+        assert eng.fix_meeting_terms(once) == once
+
