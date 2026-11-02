@@ -354,3 +354,20 @@ def test_long_minutes_decision_drops_a_todo_clause_already_in_the_table():
     assert "- 供應商方面，決議是替代料持續驗證，決議是參加新竹展覽" in decisions
     # 待辦表沒收到 (認不出負責人) 的照舊整句保留
     assert "- 預算方面，決議是維持原案，待辦事項是盡快送出" in decisions
+
+
+def test_ensure_sections_merges_a_repeated_heading_and_builds_a_missing_todo_table():
+    md = ("## 摘要\n- 出差安排：東京拜訪，6月15日報告\n\n"
+          "## 決議\n- 決議：8月26日前完成報到\n- 待辦：劉課長主持面試，週一前回報\n\n"
+          "## 決議\n- 出差新加坡待辦事項是李協理，週會報告，今天就到這裡，謝謝大家!")
+    out = ensure_sections(md)
+    assert out.count("## 決議") == 1 and SECTION_MISSING_NOTE not in out
+    assert "| 主持面試 | 劉課長 | 週一 |" in out
+    assert "- 待辦：劉課長" not in out                      # 已移進待辦表
+    assert out.index("## 摘要") < out.index("## 待辦") < out.index("## 決議")
+    assert "今天 |" not in out                              # 「今天就到這裡」不是期限
+
+
+def test_ensure_sections_still_marks_a_missing_todo_without_owner_and_time():
+    out = ensure_sections("## 摘要\n- 預算維持原案\n\n## 決議\n- 維持原案")
+    assert f"## 待辦\n- {SECTION_MISSING_NOTE}" in out

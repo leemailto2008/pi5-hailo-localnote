@@ -413,6 +413,55 @@ def _pad_todo_rows(lines: List[str], empty_row: str = "| 無 | - | - |") -> List
     return out
 
 
+def _merge_duplicate_sections(lines: List[str]) -> List[str]:
+    """同一個段落標題出現兩次時 (11-02 5 分鐘 e2e：「## 決議」寫了兩次、沒有「## 待辦」)，第二段的內容併到第一段後面。"""
+    blocks: List[List[str]] = [[]]
+    for line in lines:
+        if line.strip().startswith("## "):
+            blocks.append([])
+        blocks[-1].append(line)
+    out_blocks: List[List[str]] = []
+    first: Dict[str, List[str]] = {}
+    for b in blocks:
+        title = b[0].strip()[3:].strip() if b and b[0].strip().startswith("## ") else None
+        if title in _SECTION_ORDER and title in first:
+            body = [l for l in b[1:] if l.strip()]
+            dst = first[title]
+            while dst and not dst[-1].strip():
+                dst.pop()
+            dst.extend(body + [""])
+            continue
+        if title in _SECTION_ORDER:
+            first[title] = b
+        out_blocks.append(b)
+    return [l for b in out_blocks for l in b]
+
+
+def _todo_table_from_bullets(lines: List[str]) -> List[str]:
+    """模型沒寫「## 待辦」，但別段的條目裡有負責人與期限 (「- 待辦：劉課長主持面試，週一前回報」) 時，
+    用這些條目組出待辦表，而不是標示「未產生」；以「待辦」開頭的條目移進表格後就不再留在原段。
+    負責人與時間之後仍會由 ground_todo_table() 對照逐字稿。"""
+    rows, keep = [], []
+    for line in lines:
+        t = line.strip()
+        got = _todo_parts(t[2:].strip()) if t.startswith("- ") else None
+        if got:
+            row = f"| {got[0]} | {got[1]} | {got[2].replace(' ', '')} |"
+            if row not in rows:
+                rows.append(row)
+            if _TODO_LEAD_RE.match(t[2:].strip()):
+                continue
+        keep.append(line)
+    if not rows:
+        return lines
+    while keep and not keep[-1].strip():
+        keep.pop()
+    return keep + ["", "## 待辦", "| 事項 | 負責人 | 時間 |", "|---|---|---|"] + rows[:6]
+
+
+_TODO_LEAD_RE = re.compile(r"^待辦(?:事項)?\s*(?:是|為|：|:)")
+
+
 def ensure_sections(md: str) -> str:
     """紀要被 num_predict 截斷時，補上缺少的段落標題並明確標示未產生 (不捏造內容)；
     最後一列若是被截斷的半行表格也一併移除。三段順序調成摘要、待辦、決議，待辦表格太短的列補「-」。"""
@@ -424,6 +473,9 @@ def ensure_sections(md: str) -> str:
         todo_cut = bool(heads) and heads[-1] == "待辦"
     if lines and lines[-1].strip() in ("##", "#"):
         lines.pop()
+    lines = _merge_duplicate_sections(lines)
+    if not any(l.strip() == "## 待辦" for l in lines):
+        lines = _todo_table_from_bullets(lines)
     text = "\n".join(lines).rstrip()
     for sec in ("## 摘要", "## 待辦", "## 決議"):
         if sec not in text:
@@ -439,7 +491,7 @@ def ensure_sections(md: str) -> str:
 # 「是」也排除：結尾總結「待辦事項是林主任…」的「項是林主任」不能整串當成負責人 (10-31 10 分鐘 e2e)
 _NAME_CHAR = r"(?:(?![需請加由交給與和的位名個人是一二三四五六七八九十兩])[\u4e00-\u9fff])"
 _OWNER_RE = re.compile(r"(?:負責人(?:是|為)?\s*)?(" + _NAME_CHAR + r"{1,3}(?:經理|副理|協理|主任|專員|工程師|公程師|處長|課長|組長|主管|老師))")
-_TIME_RE = re.compile(r"(\d{1,2}\s*月\s*\d{1,2}\s*日|\d{1,2}[./-]\d{1,2}(?:日)?|\d{1,2}\s*日前|下?週[一二三四五六日]|月底|下週|明天|今天|年底)")
+_TIME_RE = re.compile(r"(\d{1,2}\s*月\s*\d{1,2}\s*日|\d{1,2}[./-]\d{1,2}(?:日)?|\d{1,2}\s*日前|下?週[一二三四五六日]|月底|下週|明天|今天(?![就先到開])|年底)")
 _DECISION_RE = re.compile(r"決定|決議|定案|確定|通過|同意|維持|改為|改成|暫停|取消")
 
 
@@ -471,7 +523,9 @@ def _todo_parts(line: str):
                 action = seg.replace(mo.group(0), "", 1)
             if mt:
                 action = _ACTION_LEAD_RE.sub("", action.strip()).strip()
-                item = action if len(action) >= 2 else (_CLAUSE_SPLIT_RE.split(line)[0].strip() or line)
+                topic = _CLAUSE_SPLIT_RE.split(parts[0])[0].strip()
+                topic = re.sub(r"\s*待辦(?:事項)?\s*$", "", topic).strip()
+                item = action if len(action) >= 2 else (topic or _CLAUSE_SPLIT_RE.split(line)[0].strip() or line)
                 return item[:20], mo.group(1), mt.group(1)
     mo, mt = _OWNER_RE.search(line), _TIME_RE.search(line)
     if not (mo and mt):
