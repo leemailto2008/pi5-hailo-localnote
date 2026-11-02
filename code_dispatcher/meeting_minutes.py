@@ -47,7 +47,7 @@ except Exception as _fix_err:   # 開發環境找不到時，只是少了跨切�
     def fix_meeting_terms(text: str) -> str:
         return text
 from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, fill_decisions_from_transcript,
-                           ground_todo_table, is_recap_chunk, keep_alive_plan, recap_notes,
+                           ground_todo_table, is_recap_chunk, keep_alive_plan, merge_recap_into_minutes, recap_notes,
                            map_notes_complete, split_with_recap, summary_limits, take_stable_chunk, tidy_live_transcript)
 
 # 長會議紀要 (2026-10-27 e2e)：Hailo qwen3:1.7b 單次請求約 1500 字就 context full (HTTP 500)，
@@ -1273,6 +1273,7 @@ class MeetingJobManager:
             full_text = clean_summary_markdown("".join(accumulated))
             if full_text:
                 full_text = ensure_sections(full_text)   # 被 num_predict 截斷時明確標示缺段，不捏造
+                full_text = merge_recap_into_minutes(full_text, clean_transcript)   # 補上結尾口頭總結漏掉的待辦與決議 (逐字稿原句)
                 self.status.summary_stream = full_text
                 self.status.metrics["llm_tokens"] = len(accumulated)
                 self.status.metrics["llm_backend"] = used_backend_label
@@ -1288,7 +1289,7 @@ class MeetingJobManager:
             print(f"[MeetingMinutes] Streaming LLM error ({used_backend_label}): {e}")
 
         if accumulated:
-            return ensure_sections(clean_summary_markdown("".join(accumulated)))
+            return merge_recap_into_minutes(ensure_sections(clean_summary_markdown("".join(accumulated))), clean_transcript)
         return "## 摘要\n- 會議內容已完整保留於逐字稿\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 確認逐字稿細節 | 全體 | 待定 |\n\n## 決議\n- 錄音與逐字稿存檔完成"
 
     async def transcribe_region(self, job_id: Optional[str], start_sec: float, end_sec: float) -> Dict[str, Any]:

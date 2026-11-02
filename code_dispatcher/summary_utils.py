@@ -615,6 +615,77 @@ def assemble_long_minutes(chunk_notes: List[str], max_summary: int = 8, max_deci
 
 
 
+def _minutes_section(md: str, title: str):
+    return re.search(rf"(^## {title}[ \t]*\n)(.*?)(?=^## |\Z)", md, re.S | re.M)
+
+
+_DATE_TOKEN_RE = re.compile(r"\d{1,2}月\d{1,2}日")
+
+
+def _already_said(core: str, md_norm: str, decisions: List[str]) -> bool:
+    """結尾總結的決議是否已經寫在紀要裡：原句出現過、同一個日期已在決議段，或與某條決議的用字重疊七成以上。"""
+    norm = lambda x: re.sub(r"[\s，,。、：:]", "", x)
+    c = norm(core)
+    if not c or c in md_norm:
+        return True
+    dates = _DATE_TOKEN_RE.findall(c)
+    if dates and any(d in norm(x) for d in dates for x in decisions):
+        return True
+    return any(len(set(c) & set(norm(x))) >= 0.7 * len(set(c)) for x in decisions)
+
+
+def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_decisions: int = 5) -> str:
+    """單次紀要 (短會議) 補上結尾口頭總結：qwen3:1.7b 常只寫前面幾個議題，把最後「X方面，決議是…，待辦事項是…」漏掉。
+    與長會議相同，總結用逐字稿原句 (recap_notes)；待辦表補上負責人還沒出現的列，決議段補上還沒寫到的決議。
+    內容全部出自逐字稿，負責人與時間仍會再經 ground_todo_table() 對照。
+
+    2026-11-02 離線重放 59 份 1–5 分鐘 e2e 紀要：回顧事實 (逐字稿內) 0.825 → 0.90x，10 份變好、0 份變差，沒有重複條目。
+    """
+    if not md or not transcript:
+        return md
+    parts = split_with_recap(transcript)
+    if len(parts) < 2 or not is_recap_chunk(parts[-1]):
+        return md
+    lines = _note_lines(recap_notes(parts[-1]))
+    if not lines:
+        return md
+    m = _minutes_section(md, "待辦")
+    rows = extract_todos(lines, max_rows=max_rows)
+    if m and rows:
+        body = m.group(2).rstrip("\n").splitlines()
+        table = [l for l in body if l.strip().startswith("|") and not _is_sep(l.strip())]
+        data = table[1:] if table else []
+        placeholder = [l for l in data if l.count("|") >= 2 and l.split("|")[1].strip() in ("無", SECTION_MISSING_NOTE)]
+        owners = {l.split("|")[2].strip() for l in data if l.count("|") >= 4}
+        real = [l for l in data if l not in placeholder]
+        add = [r for r in rows if r.split("|")[2].strip() not in owners][:max(0, max_rows - len(real))]
+        if add and table:
+            new_body = [l for l in body if l not in placeholder] + add
+            rest = md[m.end():]
+            md = md[:m.start(2)] + "\n".join(new_body) + ("\n\n" + rest.lstrip("\n") if rest.strip() else "\n")
+    m = _minutes_section(md, "決議")
+    if m:
+        items = [l.strip() for l in m.group(2).splitlines() if l.strip().startswith("- ")]
+        real = [l for l in items if l[2:].strip() not in ("無", SECTION_MISSING_NOTE)]
+        tm = _minutes_section(md, "待辦")
+        todo_rows = [l.strip() for l in (tm.group(2).splitlines() if tm else []) if l.strip().startswith("|")]
+        md_norm = re.sub(r"[\s，,。、：:]", "", md)
+        add = []
+        for line in lines:
+            if "決議" not in line:
+                continue
+            d = _drop_listed_todo_clause([line], todo_rows)[0]
+            core = _CLAUSE_SPLIT_RE.split(re.split(r"決議\s*(?:是|為|：|:)", d, 1)[-1])[0].strip()
+            if len(core) >= 4 and not _already_said(core, md_norm, [x[2:] for x in real] + add):
+                add.append(d)
+        add = add[:max(0, max_decisions - len(real))]
+        if add:
+            rest = md[m.end():]
+            body = "\n".join(real + [f"- {x}" for x in add])
+            md = md[:m.start(2)] + body + ("\n\n" + rest.lstrip("\n") if rest.strip() else "\n")
+    return md.rstrip() + "\n" if md.endswith("\n") else md.rstrip()
+
+
 def keep_alive_plan(n_chunks: int, sec_per_chunk: int = 75, cap: int = 1800, margin: int = 120) -> List[Optional[int]]:
     """分段整理時每一段請求要帶的 hailo-ollama keep_alive (秒)；None = 用預設 0 (請求完成即卸載)。
 

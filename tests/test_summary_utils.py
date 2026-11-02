@@ -371,3 +371,24 @@ def test_ensure_sections_merges_a_repeated_heading_and_builds_a_missing_todo_tab
 def test_ensure_sections_still_marks_a_missing_todo_without_owner_and_time():
     out = ensure_sections("## 摘要\n- 預算維持原案\n\n## 決議\n- 維持原案")
     assert f"## 待辦\n- {SECTION_MISSING_NOTE}" in out
+
+
+def test_short_minutes_get_the_closing_recap_todos_and_decisions():
+    transcript = ("第一個議題是出差，吳副理下個月要去東京，行程四天，預算抓十二萬元，機票已經訂好了。" * 4 +
+                  "第二個議題是招募，業務部三個職缺，"
+                  "希望在8月26日前完成報到。第三個議題是出差，李協理下個月要去新加坡。"
+                  "好，最後總結一下，招募方面，決議是8月26日前完成報到，待辦事項是劉課長週一前主持面試，"
+                  "出差方面，決議是李協理出差新加坡，待辦事項是李協理在5月14日的週會報告，今天就到這裡，謝謝大家")
+    md = ("## 摘要\n- 出差：吳副理下個月去東京，行程四天\n\n"
+          "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 無 | - | - |\n\n"
+          "## 決議\n- 招募：8月26日前完成報到")
+    out = summary_utils.merge_recap_into_minutes(md, transcript)
+    todo = out.split("## 待辦")[1].split("## 決議")[0]
+    assert "| 劉課長 |" in todo and "| 李協理 |" in todo and "| 無 |" not in todo
+    decisions = out.split("## 決議")[1]
+    assert decisions.count("8月26日") == 1                      # 已寫過的決議 (同一個日期) 不重複
+    assert "新加坡" in decisions
+    lines = [l for l in out.splitlines() if l.startswith("- ")]
+    assert len(lines) == len(set(lines))
+    # 沒有結尾總結的逐字稿：原樣不動
+    assert summary_utils.merge_recap_into_minutes(md, "第一個議題是出差，吳副理下個月要去東京。") == md
