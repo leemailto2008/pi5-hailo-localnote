@@ -342,3 +342,15 @@ def test_long_minutes_never_repeat_a_decision_in_the_summary():
     only = assemble_long_minutes(["- 決議：維持原價"])             # 全部都是決議時，摘要仍保留
     assert only.split("## 待辦")[0].count("維持原價") == 1
 
+
+
+def test_long_minutes_decision_drops_a_todo_clause_already_in_the_table():
+    notes = ("- 供應商方面，決議是替代料持續驗證，待辦事項是黃專員週三回報宏遠科技的交期，決議是參加新竹展覽\n"
+             "- 預算方面，決議是維持原案，待辦事項是盡快送出")
+    md = assemble_long_minutes([notes])
+    assert "| 回報宏遠科技的交期 | 黃專員 | 週三 |" in md
+    decisions = md.split("## 決議")[1]
+    # 已在待辦表的半句拿掉，後面黏著的另一個決議保留
+    assert "- 供應商方面，決議是替代料持續驗證，決議是參加新竹展覽" in decisions
+    # 待辦表沒收到 (認不出負責人) 的照舊整句保留
+    assert "- 預算方面，決議是維持原案，待辦事項是盡快送出" in decisions

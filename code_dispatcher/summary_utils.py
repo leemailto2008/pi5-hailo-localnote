@@ -496,6 +496,26 @@ def extract_todos(lines: List[str], max_rows: int = 6) -> List[str]:
     return rows
 
 
+def _drop_listed_todo_clause(decisions: List[str], todo_rows: List[str]) -> List[str]:
+    """結尾總結的決議條目常是「X方面，決議是…，待辦事項是某人某日前…」。待辦那半句已經寫進待辦表
+    (認得出負責人與時間) 時，決議只留前半句，不在兩段重複；待辦表沒收到的照舊整句保留，負責人不會不見。"""
+    listed = {r.split("|")[1].strip() for r in todo_rows if r.count("|") >= 4}
+    out = []
+    for line in decisions:
+        parts = _TODO_MARK_RE.split(line, 1)
+        got = _todo_parts(line) if len(parts) == 2 else None
+        if not got or got[0] not in listed:
+            out.append(line)
+            continue
+        # 只拿掉待辦那一個子句；後面若還接著別的議題 (STT 漏了「方面」時常黏成一行) 照樣保留
+        seg = _CLAUSE_SPLIT_RE.split(parts[1], 1)[0]
+        head = re.sub(r"[，,；;、\s]*待辦(?:事項)?\s*$", "", parts[0]).rstrip("，,；;、 ")
+        rest = parts[1][len(seg):].lstrip("，,；;。、 ")
+        trimmed = f"{head}，{rest}" if head and rest else (head or rest)
+        out.append(trimmed if len(head) >= 4 else line)
+    return out
+
+
 def _topic_key(line: str) -> str:
     head = re.split(r"[：:]", line, 1)
     return head[0].strip() if len(head) == 2 and 1 <= len(head[0].strip()) <= 8 else line[:4]
@@ -533,6 +553,7 @@ def assemble_long_minutes(chunk_notes: List[str], max_summary: int = 8, max_deci
             rank += 1
     picked.sort()
     todos = extract_todos(all_lines, max_rows=max_todos)
+    decisions = _drop_listed_todo_clause(decisions, todos)
     out = ["## 摘要"] + [f"- {l}" for _, _, l in picked] if picked else ["## 摘要", "- 無"]
     out += ["", "## 待辦", "| 事項 | 負責人 | 時間 |", "|---|---|---|"] + (todos or ["| 無 | - | - |"])
     out += ["", "## 決議"] + ([f"- {l}" for l in decisions] or ["- 無"])
