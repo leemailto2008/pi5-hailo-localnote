@@ -140,6 +140,28 @@ _YIELD_FIX_RE = re.compile(r"(?:(?<![流產含能質重容數電用銷音存變�
 _VERIFY_FIX_RE = re.compile(r"驗\s*(?:譁|症)(?!狀|候)")
 
 
+# 招募／訂單句型的同音錯字 (11-02 228 95 份逐字稿)：
+#   「已經面試了 12 位候選人」寫成「面世了／面是了／面市了」約 250 次 (正確 102)，「安排三場面試」寫成「三場面是／面事」；
+#   「12月3日前完成報到」寫成「完成報道／報導」278 次 (正確 32)；「還剩 8 個名額」寫成「個名兒／個名，」約 200 次；
+#   「先簽 50 臺的試單」寫成「市單／示單／是單／事單」約 80 次；「新報價」寫成「新爆價／新爆假」86 次；
+#   「全員複訓」寫成「全原附訊／全元付訊／全原復訊…」。
+#   「面世」「面市」「報導」本身是詞，只在上述句型裡改 (後面接「N 位」、前面接「N 場」、前面是日期等)。
+_INTERVIEW_FIX_RE = re.compile(r"(已\s*經?\s*)面\s*[世是市事室]\s*了(?=\s*[\d一二三四五六七八九十兩]+\s*位)"
+                               r"|([\d一二三四五六七八九十兩]\s*場\s*)面\s*[是市事室世](?=\s*[,，。有由])")
+_ONBOARD_FIX_RE = re.compile(r"(日\s*(?:之?前)?\s*)完成\s*報\s*[道導]")
+_QUOTA_FIX_RE = re.compile(r"((?:剩|還有|只有)\s*[\d一二三四五六七八九十兩]+\s*個\s*)名\s*(?:兒|鶴)?(?!額)(?=\s*[，,。.請\s]|$)")
+_TRIAL_ORDER_FIX_RE = re.compile(r"([臺台]\s*的\s*)[市示是事式誕誤]\s*單|([臺台]\s*)[市示事式]\s*單")
+_NEW_QUOTE_FIX_RE = re.compile(r"新\s*爆\s*[價假架]")
+_RETRAIN_FIX_RE = re.compile(r"全\s*[原元員源圓]\s*[附付復複富]\s*[訊訓信迅]")
+
+
+def _fix_hiring_and_order_terms(text: str) -> str:
+    text = _INTERVIEW_FIX_RE.sub(lambda m: f"{m.group(1)}面試了" if m.group(1) is not None else f"{m.group(2)}面試", text)
+    text = _QUOTA_FIX_RE.sub(r"\1名額", _ONBOARD_FIX_RE.sub(r"\1完成報到", text))
+    text = _TRIAL_ORDER_FIX_RE.sub(lambda m: f"{m.group(1) if m.group(1) is not None else m.group(2)}試單", text)
+    return _RETRAIN_FIX_RE.sub("全員複訓", _NEW_QUOTE_FIX_RE.sub("新報價", text))
+
+
 # 日期寫法統一：Whisper 常把「二月十五日」寫成「2.15日」或「2 月 15 日」(10-31 228 69 份逐字稿：分別 119 與 233 次，
 # 正常的「2月15日」2230 次)。統一成「2月15日」：24 份會改到的逐字稿，事實召回 0.692 → 0.704 (12 份變好、0 份變差)，CER 沒有變差。
 # 只認 1–12 月、1–31 日，且前面不能接數字或小數點 (避免「13.5日」「1.25.3日」之類)。
@@ -161,6 +183,7 @@ def fix_meeting_terms(text: str) -> str:
     text = _DEPUTY_MGR_CTX_FIX_RE.sub(r"\1副理", _DEPUTY_MGR_FIX_RE.sub("副理", text))
     text = _FIRMWARE_FIX_RE.sub("韌體", text)
     text = _VERIFY_FIX_RE.sub("驗證", _YIELD_FIX_RE.sub("良率", text))
+    text = _fix_hiring_and_order_terms(text)
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
 
