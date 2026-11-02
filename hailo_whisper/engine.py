@@ -127,6 +127,12 @@ _DEPUTY_MGR_FIX_RE = re.compile(r"(?<![正勝抱擔])負\s*[理裡禮](?![論由
 _DEPUTY_MGR_CTX_FIX_RE = re.compile(r"((?:交給|請|由|是|安排|有)\s*[，,]?\s*(?![在到去來從往的了是和與及])[\u4e00-\u9fff])\s*"
                                     r"[父付富傅負腹福復副]\s*[理裡禮李利里力]"
                                     r"(?=\s*(?:負|主|會|在|跟|安排|調|掉|下個|下的|回|[，,。]|第|$))")
+# 「經理」也一樣：精理 10、金李 9、金裡 8、經力 8… (「精力」「經歷」本身是詞)，同樣只在負責人句型裡改。
+_MANAGER_CTX_FIX_RE = re.compile(r"((?:交給|請|由|是|安排|有)\s*[，,]?\s*(?![在到去來從往的了是和與及大])[\u4e00-\u9fff])\s*"
+                                 r"(?!經理)[精驚京晶金經]\s*[理裡禮力利李歷]"
+                                 r"(?=\s*(?:負|主|會|在|跟|安排|調|掉|下個|下的|回|[，,。]|第|$))")
+# 「劉課長主持面是」：主持後面的「面是／面事／面市…」是面試
+_HOST_INTERVIEW_FIX_RE = re.compile(r"(主\s*[持吃])\s*面\s*[是市事室世](?!\s*[前後上下])")
 
 
 # 韌體／良率／驗證的同音錯字 (11-02 228 95 份逐字稿)：
@@ -226,6 +232,7 @@ def fix_meeting_terms(text: str) -> str:
     text = _ENGINEER_FIX_RE.sub("工程師", _SECTION_CHIEF_FIX_RE.sub("課長", text))
     text = _ASSOC_MGR_FIX_RE.sub("協理", _GROUP_LEAD_FIX_RE.sub("組長", text))
     text = _DEPUTY_MGR_CTX_FIX_RE.sub(r"\1副理", _DEPUTY_MGR_FIX_RE.sub("副理", text))
+    text = _HOST_INTERVIEW_FIX_RE.sub(r"\1面試", _MANAGER_CTX_FIX_RE.sub(r"\1經理", text))
     text = _FIRMWARE_FIX_RE.sub("韌體", text)
     text = _VERIFY_FIX_RE.sub("驗證", _YIELD_FIX_RE.sub("良率", text))
     text = _fix_product_terms(_fix_hiring_and_order_terms(_fix_latin_in_cjk(text)))
