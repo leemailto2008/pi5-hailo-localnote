@@ -120,6 +120,17 @@ _ASSOC_MGR_FIX_RE = re.compile(r"(?<![互])協\s*[利裡禮李](?![益率潤息]
 _DEPUTY_MGR_FIX_RE = re.compile(r"(?<![正勝抱擔])負\s*[理裡禮](?![論由想念性財解])")
 
 
+# 韌體／良率／驗證的同音錯字 (11-02 228 95 份逐字稿)：
+#   「韌體」只有 26 次正確，「任體」310 次 (後面幾乎都接「更新／當機／方面／修正」)，另有「認體／韁體／韍體／韼體…」約 30 次；
+#   「良率」489 次，「量率」152、「糧率」15；「驗證」190 次，「驗譁」30、「驗症」15。
+#   「任體」只在後面接韌體相關詞時才改 (避開「擔任體育…」)；「量率」要後面接著數字 (「目前量率是 90%」)，
+#   並排除「流量率、產量率、含量率…」；「驗症」排除「檢驗症狀」。
+_FIRMWARE_FIX_RE = re.compile(r"(?:任|認|韁|韍|韼|訥|訂|韻|韶|韓|響)\s*體(?=\s*(?:更新|當機|方面|修正|升級|版本))")
+_YIELD_FIX_RE = re.compile(r"(?:(?<![流產含能質重容數電用銷音存變增總測])量|糧|涼)\s*[率律]"
+                           r"(?=\s*(?:是|為|從|大約|約|只有|達到|已經|目前)?\s*(?:百分之|\d))")
+_VERIFY_FIX_RE = re.compile(r"驗\s*(?:譁|症)(?!狀|候)")
+
+
 # 日期寫法統一：Whisper 常把「二月十五日」寫成「2.15日」或「2 月 15 日」(10-31 228 69 份逐字稿：分別 119 與 233 次，
 # 正常的「2月15日」2230 次)。統一成「2月15日」：24 份會改到的逐字稿，事實召回 0.692 → 0.704 (12 份變好、0 份變差)，CER 沒有變差。
 # 只認 1–12 月、1–31 日，且前面不能接數字或小數點 (避免「13.5日」「1.25.3日」之類)。
@@ -138,6 +149,8 @@ def fix_meeting_terms(text: str) -> str:
     text = _ENGINEER_FIX_RE.sub("工程師", _SECTION_CHIEF_FIX_RE.sub("課長", text))
     text = _ASSOC_MGR_FIX_RE.sub("協理", _GROUP_LEAD_FIX_RE.sub("組長", text))
     text = _DEPUTY_MGR_FIX_RE.sub("副理", text)
+    text = _FIRMWARE_FIX_RE.sub("韌體", text)
+    text = _VERIFY_FIX_RE.sub("驗證", _YIELD_FIX_RE.sub("良率", text))
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
 
