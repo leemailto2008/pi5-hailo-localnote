@@ -162,6 +162,25 @@ def _fix_hiring_and_order_terms(text: str) -> str:
     return _RETRAIN_FIX_RE.sub("全員複訓", _NEW_QUOTE_FIX_RE.sub("新報價", text))
 
 
+# 展覽／測試／產品名的同音錯字 (11-02 95 份逐字稿)：「攤位費」寫成「攀位費／攀胃費／胃胃費…」約 150 次 (正確 44)；
+# 「展覽」的第二字常變成罕用字 (覃覚覆覵覾覷…) 約 35 次；「測試」寫成「測式」50 次 (排除「預測式」等)；
+# 「三輪回歸測試」寫成「三輪回測／回試／回歷測式」；「電源供應器」寫成「電源供印器／電源印器」約 40 次；
+# 「溫控模組」寫成「文控模組」102 次 (比正確的 83 次還多)，只在後面接「模組」時改。
+_BOOTH_FEE_FIX_RE = re.compile(r"(?:[攀潘潛潮潤盤攜]\s*[位胃未味]|[胃安]\s*胃)\s*費")
+_EXPO_FIX_RE = re.compile(r"展\s*[覃覚覆覵覾覷覉覥婭]")
+_TEST_FIX_RE = re.compile(r"(?<![預推觀量檢監偵])測\s*式")
+_REGRESSION_FIX_RE = re.compile(r"([\d一二三四五六七八九十兩]\s*輪\s*)回\s*[歸龜規彈歷覆覫,，\-]?\s*(?:測\s*[試式測]*|試)")
+_PSU_FIX_RE = re.compile(r"電\s*源\s*[供工公]?\s*[印依]\s*器")
+_THERMAL_FIX_RE = re.compile(r"(?:[文渾漁問聞]\s*[控空]|溫\s*空)\s*(?=模\s*組)")
+
+
+def _fix_product_terms(text: str) -> str:
+    text = _EXPO_FIX_RE.sub("展覽", _BOOTH_FEE_FIX_RE.sub("攤位費", text))
+    text = _REGRESSION_FIX_RE.sub(r"\1回歸測試", text)
+    text = _TEST_FIX_RE.sub("測試", text)
+    return _THERMAL_FIX_RE.sub("溫控", _PSU_FIX_RE.sub("電源供應器", text))
+
+
 # 夾在中文中間的英文碎片 (11-02 95 份逐字稿約 1000 處)：Whisper 會把中文數字寫成英文 (「three 個職缺」「6 weeks」)，
 # 或插入沒有意義的字尾 (「持續's 驗證」「至少要做三輪回 its test」「er」「est」)。
 # 只動「前後都是中文或中文標點」的小寫字：數字詞改回中文，下列明顯是雜訊的虛詞與字尾刪掉；
@@ -204,7 +223,7 @@ def fix_meeting_terms(text: str) -> str:
     text = _DEPUTY_MGR_CTX_FIX_RE.sub(r"\1副理", _DEPUTY_MGR_FIX_RE.sub("副理", text))
     text = _FIRMWARE_FIX_RE.sub("韌體", text)
     text = _VERIFY_FIX_RE.sub("驗證", _YIELD_FIX_RE.sub("良率", text))
-    text = _fix_hiring_and_order_terms(_fix_latin_in_cjk(text))
+    text = _fix_product_terms(_fix_hiring_and_order_terms(_fix_latin_in_cjk(text)))
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
 
