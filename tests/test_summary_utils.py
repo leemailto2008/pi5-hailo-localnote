@@ -607,3 +607,10 @@ def test_long_minutes_take_the_recap_decisions_first_and_valid_months():
     assert "7月4日前完成全員複訓" not in md.split("## 待辦")[0]                   # 也就不會跑到摘要
     assert summary_utils._TIME_RE.findall("日1月13月19日完成報到，12月3日") == ["3月19日", "12月3日"]
 
+
+def test_recap_line_splits_at_a_second_decision_without_topic():
+    rec = "最後總結，公安方面，決議是七月四日，完成全員複訓，待辦事項，是蔡組長負責，決議是3月19日完成報到，待辦事項是林主任主持面試，今天就到這裡"
+    lines = summary_utils._note_lines(summary_utils.recap_notes(rec))
+    assert lines[0].startswith("公安方面") and "3月19日" not in lines[0]
+    assert lines[1].startswith("決議是3月19日完成報到")
+

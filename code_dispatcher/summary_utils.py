@@ -573,7 +573,10 @@ def recap_notes(recap: str, max_lines: int = 6, max_len: int = 50) -> str:
     clauses = [x for c in clauses for x in _split_topic_start(c)]
     groups: List[List[str]] = []
     for c in clauses:
-        if "方面" in c or not groups:
+        # 「X方面」開新的一行；議題名稱被 STT 聽丟時，同一行出現第二個「決議是」也另起一行
+        # (11-03 夜間 120 分鐘：「決議是七月四日…待辦事項，是蔡組長…，決議是3月19日完成報到」)
+        second_decision = groups and re.match(r"決議\s*(?:是|為)", c) and any("決議" in x for x in groups[-1])
+        if "方面" in c or not groups or second_decision:
             groups.append([c])
         else:
             groups[-1].append(c)
