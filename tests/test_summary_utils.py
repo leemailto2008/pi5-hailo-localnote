@@ -441,3 +441,16 @@ def test_english_todos_and_decisions_in_long_minutes():
         ["- Budget: decided to keep 2M for next year", "- Orders: John will send the quote by Friday"]), "en")
     assert "| send the quote | John | Friday |" in md and "- Budget: decided to keep 2M for next year" in md.split("## Decisions")[1]
 
+
+
+def test_empty_owner_and_due_are_taken_from_the_item():
+    md = ("## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| Reply to Lotus Tech by Wednesday | John | - |\n"
+          "| Confirm firmware testing by Kevin | - | - |\n| 王經理主持面試 | - | - |\n| 送預算表 | 劉課長 | 10月7日 |")
+    tr = "Kevin will arrange the testing. John will reply to Lotus Tech by Wednesday. 王經理主持面試，劉課長10月7日前送預算表"
+    out = ground_todo_table(md, tr)
+    assert "| Reply to Lotus Tech | John | Wednesday |" in out
+    assert "| Confirm firmware testing | Kevin | - |" in out
+    assert "| 王經理主持面試 | 王經理 | - |" in out and "| 送預算表 | 劉課長 | 10月7日 |" in out
+    # 從事項取出的值也要在逐字稿裡找得到
+    assert "| Call Mike | - | Monday |" in ground_todo_table(
+        "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| Call Mike by Monday | - | - |", "Someone should call by Monday.")

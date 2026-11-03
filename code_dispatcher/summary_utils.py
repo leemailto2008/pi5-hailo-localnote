@@ -196,10 +196,49 @@ def _ground_norm(text: str) -> str:
     return to_taiwan_traditional(text or "").replace(" ", "").replace("　", "").replace("臺", "台").lower()
 
 
+_EN_BY_NAME_RE = re.compile(r"\bby\s+([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\b")
+_EN_NOT_NAMES = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "january", "february",
+                 "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",
+                 "next", "the", "end", "tomorrow", "today"}
+
+
+def _fill_todo_cells(md: str) -> str:
+    """模型常把負責人、期限寫在「事項」欄，另外兩欄留「-」(11-03 英文 e2e：「| Reply to Lotus Tech by Wednesday | John | - |」、
+    「| Confirm firmware testing by Kevin | - | - |」)。空欄時從事項欄取出來，事項只留動作；之後仍經 ground_todo_table 對照逐字稿。"""
+    out, section = [], None
+    for line in md.splitlines():
+        s = line.strip()
+        if s.startswith("## "):
+            section = s[3:].strip()
+        if section == "待辦" and s.startswith("|") and not _is_sep(s):
+            cols = [c.strip() for c in s.strip("|").split("|")]
+            if len(cols) >= 3 and cols[0] not in ("事項", "無") and (cols[1] in _TODO_SKIP or cols[2] in _TODO_SKIP):
+                item = cols[0]
+                if not _CJK_RE.search(item) and _LATIN_RE.search(item):      # 短的英文事項不到 detect_language 的 20 個字母
+                    if cols[2] in _TODO_SKIP and (mt := _EN_TIME_RE.search(item)):
+                        cols[2], item = mt.group(1), (item[:mt.start()] + item[mt.end():]).strip(" ,;")
+                    if cols[1] in _TODO_SKIP:
+                        mo = next((m for m in _EN_BY_NAME_RE.finditer(item) if m.group(1).split()[0].lower() not in _EN_NOT_NAMES), None)
+                        if mo:
+                            cols[1], item = mo.group(1), (item[:mo.start()] + item[mo.end():]).strip(" ,;")
+                else:
+                    if cols[2] in _TODO_SKIP and (mt := _TIME_RE.search(item)):
+                        cols[2] = mt.group(1).replace(" ", "")
+                    if cols[1] in _TODO_SKIP and (mo := _OWNER_RE.search(item)):
+                        cols[1] = mo.group(1)
+                if len(item) >= 2:
+                    cols[0] = item
+                line = "| " + " | ".join(cols) + " |"
+        out.append(line)
+    return "\n".join(out)
+
+
 def ground_todo_table(md: str, transcript: str) -> str:
-    """待辦表每列的負責人、時間欄若在逐字稿中找不到，改成「-」 (多人時只留找得到的人)；事項欄與其他段落不動。"""
+    """待辦表每列的負責人、時間欄若在逐字稿中找不到，改成「-」 (多人時只留找得到的人)；事項欄與其他段落不動。
+    空的負責人／時間欄先從事項欄補 (_fill_todo_cells)，補上的也一樣要在逐字稿裡找得到。"""
     if not md or not transcript or "## 待辦" not in md:
         return md
+    md = _fill_todo_cells(md)
     tr = _ground_norm(transcript)
     out, section = [], None
     for line in md.splitlines():
