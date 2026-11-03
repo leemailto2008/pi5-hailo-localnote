@@ -176,6 +176,11 @@ _SAFETY_FIX_RE = re.compile(r"公\s*安(?=\s*[，,]?\s*(?:上週|上個?月|上�
 # 「供應商」的第一個字常被寫錯或漏掉 (「依應商」「侶應商」「儂應商」「是應商」)；「對應／回應／反應／適應」後面接商不改。
 _SUPPLIER_FIX_RE = re.compile(r"(?<![供反對回適呼響效感因順相答])(?:[依儂侶衣醫宜疑]\s*)?應\s*商(?![品家業機場標量談務人圈店界])")
 
+# 「週五前回覆客戶」95 份逐字稿只有 7 次寫對，另有約 250 次寫成「回不客戶／回副客／回付客戶／回客，」；
+# 「溫控模組的客訴有九件」的「客訴」1 次寫對、149 次寫成「客宿／客速」。只在期限 (…前) 後面、或客訴後接件數時改。
+_REPLY_CUSTOMER_FIX_RE = re.compile(r"(前\s*)(?:恢\s*)?回\s*[副不夠復付服福腹覆]?\s*客\s*戶?(?=\s*[，,。第好]|$)")
+_COMPLAINT_FIX_RE = re.compile(r"客\s*[宿速素塑溯](?=\s*(?:有|是|共|件|方面|案|數|問題|處理|主要|增加|減少|[\d一二三四五六七八九十兩]+\s*[件起筆個案]))")
+
 
 def _fix_owner_names(text: str) -> str:
     text = _OWNER_PLEASE_FIX_RE.sub("請", _HAS_WU_FIX_RE.sub("有吳", _PLEASE_LI_FIX_RE.sub("請李", text)))
@@ -292,6 +297,7 @@ def fix_meeting_terms(text: str) -> str:
     text = _FIRMWARE_FIX_RE.sub("韌體", text)
     text = _VERIFY_FIX_RE.sub("驗證", _YIELD_FIX_RE.sub("良率", text))
     text = _SUPPLIER_FIX_RE.sub("供應商", _SAFETY_FIX_RE.sub("工安", text))
+    text = _COMPLAINT_FIX_RE.sub("客訴", _REPLY_CUSTOMER_FIX_RE.sub(r"\1回覆客戶", text))
     text = _ascii_punct_if_english(_fix_product_terms(_fix_hiring_and_order_terms(_fix_latin_in_cjk(text))))
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
