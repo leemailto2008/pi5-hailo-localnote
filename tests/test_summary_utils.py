@@ -500,3 +500,14 @@ def test_years_the_meeting_never_said_are_dropped():
     assert "Budget for 2026" in out and "March 15 2026" in out          # 逐字稿有 2026：保留
     assert "9月2日開課，2026年3月1日上線" in out and "2023年" not in out
 
+
+def test_recap_decision_glued_to_its_todo_is_not_added_twice():
+    # 1d1eb6f 3 分鐘 e2e：STT 沒斷句，「決議是12日前完成報到待辦事項是王經理主持面」整句被當成新決議補進去
+    transcript = ("第七個議題是招募，業務部目前二個職缺，下週會再安排四場面試，由王經理主持，希望在12月3日前完成報到。" * 3 +
+                  "好，最後總結，招募方面 決議是12日前完成報到待辦事項是王經理主持面，今天就到這裡，謝謝大家")
+    md = ("## 摘要\n- 招募：二個職缺，四場面試\n\n"
+          "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 招募面試 | 王經理 | 12月3日前 |\n\n"
+          "## 決議\n- 12月3日前完成報到\n- 王經理主持面試")
+    out = summary_utils.merge_recap_into_minutes(md, transcript)
+    assert "待辦事項是" not in out.split("## 決議")[1]
+

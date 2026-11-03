@@ -909,6 +909,8 @@ def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_de
             if "決議" in line:
                 d = _drop_listed_todo_clause([line], todo_rows)[0]
                 core = _CLAUSE_SPLIT_RE.split(re.split(r"決議\s*(?:是|為|：|:)", d, 1)[-1])[0].strip()
+                # 「決議是12日前完成報到待辦事項是王經理主持面」：STT 沒斷句時待辦黏在決議後面，比對只看決議本身
+                core = _TODO_MARK_RE.split(core, 1)[0].strip()
             elif not _CJK_RE.search(line) and (md_ := _DECISION_RE.search(line)):     # 英文總結：「we agreed on …」
                 d = line
                 core = re.split(r"[,;]", line[md_.start():])[0].strip()
