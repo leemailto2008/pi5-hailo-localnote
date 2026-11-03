@@ -511,3 +511,15 @@ def test_recap_decision_glued_to_its_todo_is_not_added_twice():
     out = summary_utils.merge_recap_into_minutes(md, transcript)
     assert "待辦事項是" not in out.split("## 決議")[1]
 
+
+def test_english_todo_owner_filled_when_the_transcript_names_them_as_owner():
+    tr = ("we decided to release the fix on March 15th, and Kevin owns the testing. Please send your names to Mary by "
+          "Thursday. John will reply to Lotus Tech by Wednesday.")
+    md = ("## Summary\n- Firmware release March 15\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n"
+          "| Confirm firmware testing with Kevin | - | March 15 |\n| Send training names to Mary | - | Thursday |\n"
+          "| Reply to Lotus Tech | John | Wednesday |\n\n## 決議\n- Release on March 15")
+    out = summary_utils.ground_todo_table(md, tr)
+    assert "| Confirm firmware testing with Kevin | Kevin | March 15 |" in out
+    assert "| Send training names to Mary | - | Thursday |" in out        # 收件人不是負責人
+    assert "| Reply to Lotus Tech | John | Wednesday |" in out
+

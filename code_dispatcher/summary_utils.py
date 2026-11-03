@@ -266,12 +266,41 @@ def _fill_todo_cells(md: str) -> str:
     return "\n".join(out)
 
 
+_EN_PRONOUNS = ("we", "they", "i", "you", "it", "this", "that", "the", "all", "everyone", "team")
+
+
+def _fill_en_owner_from_transcript(md: str, transcript: str) -> str:
+    """英文待辦表負責人仍空著、事項欄只提到一個人名，而逐字稿裡這個人正是負責人 (「Kevin owns the testing」「Susan will handle it」)
+    時補上。11-03 en_long：「| Confirm firmware testing with Kevin | - | March 15 |」。收件人 (「send your names to Mary」) 不算負責人。"""
+    owners = set()
+    for m in _EN_OWNER_RE.finditer(transcript or ""):
+        o = m.group(1) or m.group(4)
+        if o and o.split()[0].lower() not in _EN_PRONOUNS and o.split()[0].lower() not in _EN_NOT_NAMES:
+            owners.add(o.split()[0])
+    if not owners:
+        return md
+    out, section = [], None
+    for line in md.splitlines():
+        s = line.strip()
+        if s.startswith("## "):
+            section = s[3:].strip()
+        if section == "待辦" and s.startswith("|") and not _is_sep(s):
+            cols = [c.strip() for c in s.strip("|").split("|")]
+            if len(cols) >= 3 and cols[1] in _TODO_SKIP and not _CJK_RE.search(cols[0]):
+                names = {w for w in re.findall(r"\b[A-Z][a-z]+\b", cols[0]) if w in owners}
+                if len(names) == 1:
+                    cols[1] = names.pop()
+                    line = "| " + " | ".join(cols) + " |"
+        out.append(line)
+    return "\n".join(out)
+
+
 def ground_todo_table(md: str, transcript: str) -> str:
     """待辦表每列的負責人、時間欄若在逐字稿中找不到，改成「-」 (多人時只留找得到的人)；事項欄與其他段落不動。
     空的負責人／時間欄先從事項欄補 (_fill_todo_cells)，補上的也一樣要在逐字稿裡找得到。"""
     if not md or not transcript or "## 待辦" not in md:
         return md
-    md = _fill_todo_cells(md)
+    md = _fill_en_owner_from_transcript(_fill_todo_cells(md), transcript)
     tr = _ground_norm(transcript)
     out, section = [], None
     for line in md.splitlines():
