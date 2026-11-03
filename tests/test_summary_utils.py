@@ -580,3 +580,14 @@ def test_todo_marker_with_stray_punctuation():
     got = summary_utils._todo_parts("工安方面，決議是7月4日前完成全員複訓，待辦事項,是蔡組長,負責工安複訓")
     assert got and got[1] == "蔡組長" and got[2] == "7月4日" and "複訓" in got[0]
 
+
+def test_recap_splits_a_topic_glued_to_the_previous_todo():
+    # 11-03 夜間 30 分鐘喇叭實錄：「…回報宏宇科技的交期展覽方面,決議是參加新竹展覽」沒有斷句
+    recap = ("最後總結，供應商方面,決議是替代料持續驗證，待辦事項是黃專員週三回報宏宇科技的交期展覽方面,決議是參加新竹展覽，"
+             "待辦事項,是吳副理週五前交出文宣稿，今天就到這裡,謝謝")
+    lines = summary_utils._note_lines(summary_utils.recap_notes(recap))
+    assert lines[0].startswith("供應商方面") and lines[0].endswith("交期")
+    assert lines[1].startswith("展覽方面，決議是參加新竹展覽")
+    assert summary_utils._todo_parts(lines[0])[1:] == ("黃專員", "週三")
+    assert summary_utils._split_topic_start("教育訓練方面，決議是開課") == ["教育訓練方面，決議是開課"]
+

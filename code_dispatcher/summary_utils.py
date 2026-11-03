@@ -528,6 +528,31 @@ def _recap_notes_en(recap: str, max_lines: int = 6, max_len: int = 160) -> str:
     return "\n".join(out[:max_lines])
 
 
+# 結尾總結常見的議題名稱 (講稿與真實會議的週會常用語)；STT 漏了逗號時用來找出下一個議題從哪裡開始
+_RECAP_TOPICS = ("教育訓練", "行銷活動", "倉儲管理", "客戶訂單", "品質異常", "供應商", "新系統", "訓練", "工安", "公安", "展覽",
+                 "預算", "招募", "品質", "訂單", "庫存", "出差", "韌體", "上線", "倉儲", "行銷", "採購", "客訴", "研發", "人事")
+
+
+def _split_topic_start(clause: str) -> List[str]:
+    """「待辦事項是黃專員週三回報宏宇科技的交期展覽方面」：STT 沒在下一個議題前斷句，「X方面」黏在上一句後面。
+    從「方面」往前找議題名稱 (已知議題名或前一個英文碎片的邊界)，拆成兩句；「方面」在句首附近時不動。"""
+    i = clause.find("方面")
+    if i <= 6:
+        return [clause]
+    head = clause[:i]
+    for t in _RECAP_TOPICS:
+        if head.endswith(t):
+            cut = i - len(t)
+            break
+    else:
+        m = re.search(r"[A-Za-z\s\-]+([\u4e00-\u9fff]{2,4})$", head)
+        if not m:
+            return [clause]
+        cut = i - len(m.group(1))
+    before, after = clause[:cut].rstrip(" ,，-"), clause[cut:]
+    return [before, after] if len(before) >= 3 else [clause]
+
+
 def recap_notes(recap: str, max_lines: int = 6, max_len: int = 50) -> str:
     """長會議的結尾總結改用逐字稿原句：依逗號／句號切成子句，去掉客套話；遇到「X方面」就換行 (一行一個議題)，
     同一議題內再依序打包成 <= max_len 字的條列。
@@ -545,6 +570,7 @@ def recap_notes(recap: str, max_lines: int = 6, max_len: int = 50) -> str:
         clauses[0] = re.sub(r"^.*?(?:最後總結一下|總結一下|最後總結|做個總結|做一下總結)", "", clauses[0]).strip() or clauses[0]
     clauses = [_RECAP_FILLER_SUB.sub("", c).strip() for c in clauses]
     clauses = [c for c in clauses if len(c) >= 3 and not _RECAP_INTRO_RE.fullmatch(c)]
+    clauses = [x for c in clauses for x in _split_topic_start(c)]
     groups: List[List[str]] = []
     for c in clauses:
         if "方面" in c or not groups:
