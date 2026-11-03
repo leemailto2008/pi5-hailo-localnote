@@ -818,7 +818,8 @@ def _note_lines(notes: str) -> List[str]:
 
 
 # 「待辦事項十個部門週四前…」：STT 常漏掉「是」，有「事項」兩字時「是」可省略 (11-02 30 分鐘 e2e)
-_TODO_MARK_RE = re.compile(r"待辦事項\s*(?:是|為|：|:)?\s*|待辦\s*(?:是|為|：|:)\s*")
+# STT 常在「待辦事項」與負責人之間多打標點 (「待辦事項,是蔡組長,負責工安複訓」，95 份裡 11 次)，標點一起吃掉
+_TODO_MARK_RE = re.compile(r"待辦事項\s*[,，、.]?\s*(?:是|為|：|:)?\s*[,，、.]?\s*|待辦\s*(?:是|為|：|:)\s*[,，、.]?\s*")
 _CLAUSE_SPLIT_RE = re.compile(r"[，；;。]|,(?!\d)")          # 不切「1,200」這類數字
 _ACTION_LEAD_RE = re.compile(r"^(?:在|於|要|會|將|請|負責|之前|以前|前)+")
 
@@ -831,7 +832,10 @@ def _todo_parts(line: str):
     原本會取第一個子句「訂單方面」當事項，時間也可能抓到決議裡的日期。"""
     parts = _TODO_MARK_RE.split(line)
     if len(parts) > 1:
-        seg = _CLAUSE_SPLIT_RE.split(parts[-1])[0].strip()
+        clauses = _CLAUSE_SPLIT_RE.split(parts[-1])
+        seg = clauses[0].strip()
+        if len(clauses) > 1 and _OWNER_RE.fullmatch(seg):      # 「蔡組長,負責工安複訓」：負責人自成一句時接上下一句
+            seg = seg + clauses[1].strip()
         mo = _OWNER_RE.search(seg)
         if mo:
             mt = _TIME_RE.search(seg)

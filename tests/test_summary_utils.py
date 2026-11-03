@@ -575,3 +575,8 @@ def test_today_is_a_deadline_only_when_used_as_one():
     got = summary_utils._todo_parts("待辦事項是王經理今天下班前回覆客戶")
     assert got and got[1] == "王經理" and got[2] == "今天"
 
+
+def test_todo_marker_with_stray_punctuation():
+    got = summary_utils._todo_parts("工安方面，決議是7月4日前完成全員複訓，待辦事項,是蔡組長,負責工安複訓")
+    assert got and got[1] == "蔡組長" and got[2] == "7月4日" and "複訓" in got[0]
+
