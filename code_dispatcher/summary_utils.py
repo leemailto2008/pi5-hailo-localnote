@@ -139,6 +139,8 @@ def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) 
             continue
         is_item = s.startswith(("-", "*", "•")) or re.match(r"^\d+[\.、)]", s) is not None
         is_row = s.startswith("|") and not set(s) <= set("|-: ")
+        if is_item and re.match(r"^[-*•]\s*no (?:additional|other|further|specific|more)\b", s, re.I):
+            continue            # 「- No additional decisions made」：英文紀要的填充句
         if is_item and _CLOSING_FILLER_RE.search(s):     # 「…主持面試，今天就到這裡」：結尾客套話不是內容
             s = _CLOSING_FILLER_RE.sub("", s).rstrip("，,、 ")
             line = s
@@ -804,16 +806,31 @@ def _minutes_section(md: str, title: str):
 _DATE_TOKEN_RE = re.compile(r"\d{1,2}月\d{1,2}日")
 
 
+_EN_STOP = {"the", "and", "for", "with", "after", "at", "on", "of", "to", "by", "a", "an", "in", "we", "is", "was", "be", "new"}
+
+
+def _en_words(text: str) -> set:
+    out = set()
+    for w in re.findall(r"[a-z0-9]+", text.lower()):
+        if w in _EN_STOP:
+            continue
+        for suf in ("ed", "es", "s", "th", "st", "nd", "rd", "e"):
+            if len(w) > len(suf) + 2 and w.endswith(suf):
+                w = w[: -len(suf)]
+                break
+        out.add(w)
+    return out
+
+
 def _already_said(core: str, md_norm: str, decisions: List[str]) -> bool:
     """結尾總結的決議是否已經寫在紀要裡：原句出現過、同一個日期已在決議段，或與某條決議的用字重疊七成以上。"""
     norm = lambda x: re.sub(r"[\s，,。、：:]", "", x)
     c = norm(core)
     if not c or c in md_norm:
         return True
-    if not _CJK_RE.search(core):         # 英文：字母集合沒有意義，改看單字重疊
-        words = lambda x: {w for w in re.findall(r"[a-z0-9]+", x.lower()) if len(w) > 2}
-        cw = words(core)
-        return bool(cw) and any(len(cw & words(x)) >= 0.6 * len(cw) for x in decisions)
+    if not _CJK_RE.search(core):         # 英文：字母集合沒有意義，改看單字重疊 (粗略詞幹：released／release、15th／15)
+        cw = _en_words(core)
+        return bool(cw) and any(len(cw & _en_words(x)) >= 0.6 * len(cw) for x in decisions)
     dates = _DATE_TOKEN_RE.findall(c)
     if dates and any(d in norm(x) for d in dates for x in decisions):
         return True
