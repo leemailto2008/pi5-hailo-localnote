@@ -1380,7 +1380,7 @@ class MeetingJobManager:
             try:
                 ogg_files = [
                     os.path.join(AUDIO_CACHE_DIR, f) for f in os.listdir(AUDIO_CACHE_DIR)
-                    if f.endswith(".ogg") and not f.startswith("tts_")
+                    if f.endswith(".ogg") and not f.startswith("tts_") and not f.endswith(".smooth.ogg")   # 剪輯轉錄用原始錄音
                 ]
                 if ogg_files:
                     ogg_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)

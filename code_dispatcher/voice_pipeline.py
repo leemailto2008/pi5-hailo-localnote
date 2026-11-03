@@ -739,6 +739,23 @@ async def ensure_bluetooth_recording_ready() -> str:
     return target_source
 
 
+def _start_smooth(path: str):
+    """回放用的修平順版本 (2026-11-03 使用者要求可切換「修平順／原始」)；錄音結束後才在背景做。"""
+    try:
+        from audio_declick import start_smooth_job
+        start_smooth_job(path)
+    except Exception as e:
+        print(f"[VoicePipeline] smooth playback job not started: {e}")
+
+
+def _stop_smooth():
+    try:
+        from audio_declick import stop_smooth_job
+        stop_smooth_job()
+    except Exception:
+        pass
+
+
 async def record_audio_from_mic(
     duration_sec: int,
     output_path: str,
@@ -752,6 +769,7 @@ async def record_audio_from_mic(
 ) -> bool:
     """
     Record audio from Bluetooth headset mic using ffmpeg with explicit hardware source routing.
+    A finished recording gets a declicked playback copy (*.smooth.ogg) in a background process (audio_declick).
 
     Two-process pipeline (2026-10-22):
       capture ffmpeg (PipeWire pulse -> raw 16 kHz s16le) -> Python ZeroSplicer -> encoder ffmpeg
@@ -770,6 +788,7 @@ async def record_audio_from_mic(
         of mSBC packets that actually arrived (None when unknown).
     Both are passive reads; no HCI command is issued while recording.
     """
+    _stop_smooth()      # 錄音中不做運算：上一份的修平順背景工作若還沒完成就停掉
     from audio_splice import ZeroSplicer, pause_cut_index
     from bt_link_stats import ArrivalMeter, sco_rx_packets
 
@@ -995,6 +1014,7 @@ async def record_audio_from_mic(
             return False
 
         if enc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 500:
+            _start_smooth(output_path)
             return True
 
         # Fallback to default if explicit node failed

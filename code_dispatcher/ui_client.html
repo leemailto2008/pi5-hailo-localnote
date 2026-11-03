@@ -423,6 +423,7 @@ details[open] summary::after{content:"收起 ▴"}
             <button class="btn ghost" id="btnWaveStop" onclick="stopWavePlay()" style="padding:5px 10px;font-size:13px;">
               ⏹ 停止
             </button>
+            <button class="toggle-btn" id="btnPlaybackMode" onclick="togglePlaybackMode()" title="回放的音訊：修平順（藍牙掉包造成的跳音處平滑銜接）或原始錄音">🎚 回放：修平順</button>
             <span class="spacer"></span>
             <div style="display:inline-flex;align-items:center;gap:6px;font-size:12px;">
               <span id="regionLabel" style="color:var(--muted)">選取區間: 全段</span>
@@ -468,6 +469,7 @@ details[open] summary::after{content:"收起 ▴"}
                 <button class="btn" id="toZhBtn" disabled>Translate to Mandarin</button>
                 <button class="btn" id="toEnBtn" disabled>Translate to English</button>
                 <button class="btn" id="ttsBtn" disabled>在耳麥念出來</button>
+                <button class="toggle-btn" id="ttsTargetBtn" title="朗讀的播放位置：藍牙耳麥或這個網頁">🔈 輸出：耳麥</button>
               </div>
               <div class="en" id="enBox">—</div>
             </div>
@@ -1839,6 +1841,29 @@ function closeRegionTranscript() {
 
 let isLoadingAudio = false;
 let lastLoadedAudioJob = null;
+// 回放「修平順／原始」(2026-11-03)：修平順檔在錄音結束後於背景產生 (<job>.smooth.ogg)，還沒好時先播原始錄音
+let playbackSmooth = (() => { try { return localStorage.getItem('localnote_playback_smooth') !== '0'; } catch (_) { return true; } })();
+let smoothRetryJob = null;
+function updatePlaybackModeBtn() {
+  const b = document.getElementById('btnPlaybackMode');
+  if (b) b.textContent = playbackSmooth ? '🎚 回放：修平順' : '🎚 回放：原始';
+}
+async function togglePlaybackMode() {
+  playbackSmooth = !playbackSmooth;
+  try { localStorage.setItem('localnote_playback_smooth', playbackSmooth ? '1' : '0'); } catch (_) {}
+  updatePlaybackModeBtn();
+  try {
+    const res = await api(API.latestAudio);
+    if (res.status === 'success' && res.audio_url) {
+      if (playbackSmooth && !res.smooth_url) toast('修平順版本還在處理，先播放原始錄音');
+      if (wavesurfer && wavesurfer.isPlaying && wavesurfer.isPlaying()) wavesurfer.stop();
+      lastLoadedAudioJob = null;
+      await loadAudioWaveform(null, res.peaks, playbackSmooth && res.smooth_url ? res.smooth_url : res.audio_url);
+    }
+  } catch (e) { toast('切換失敗：' + e.message); }
+}
+window.togglePlaybackMode = togglePlaybackMode;
+updatePlaybackModeBtn();
 
 async function loadAudioWaveform(jobId, precomputedPeaks, directAudioUrl) {
   if (jobId && lastLoadedAudioJob === jobId && wavesurfer && wavesurfer.getDuration()) {
@@ -1853,8 +1878,16 @@ async function loadAudioWaveform(jobId, precomputedPeaks, directAudioUrl) {
     if (!targetUrl) {
       const res = await api(API.latestAudio);
       if (res.status === 'success' && res.audio_url) {
-        targetUrl = res.audio_url;
+        targetUrl = playbackSmooth && res.smooth_url ? res.smooth_url : res.audio_url;
         peaks = peaks || res.peaks;
+        if (playbackSmooth && !res.smooth_url && jobId && smoothRetryJob !== jobId) {   // 修平順檔約幾秒後才好，晚點再載一次
+          smoothRetryJob = jobId;
+          setTimeout(() => {
+            if (wavesurfer && wavesurfer.isPlaying && wavesurfer.isPlaying()) return;
+            lastLoadedAudioJob = null;
+            loadAudioWaveform(jobId);
+          }, 15000);
+        }
       }
     }
     if (targetUrl) {
@@ -2055,6 +2088,21 @@ async function translateMinutesTo(target, btn) {
 el.toZhBtn.addEventListener('click', () => translateMinutesTo('zh', el.toZhBtn));
 el.toEnBtn.addEventListener('click', () => translateMinutesTo('en', el.toEnBtn));
 
+// 朗讀輸出「耳麥／網頁」(2026-11-03)：網頁模式只在樹莓派合成，由瀏覽器播放
+let ttsTarget = (() => { try { return localStorage.getItem('localnote_tts_target') === 'web' ? 'web' : 'bt'; } catch (_) { return 'bt'; } })();
+let ttsAudio = null;
+function updateTtsTargetBtn() {
+  const b = $('ttsTargetBtn');
+  if (b) b.textContent = ttsTarget === 'web' ? '🔈 輸出：網頁' : '🔈 輸出：耳麥';
+  if (el.ttsBtn) el.ttsBtn.textContent = ttsTarget === 'web' ? '在網頁念出來' : '在耳麥念出來';
+}
+if ($('ttsTargetBtn')) $('ttsTargetBtn').addEventListener('click', () => {
+  ttsTarget = ttsTarget === 'web' ? 'bt' : 'web';
+  try { localStorage.setItem('localnote_tts_target', ttsTarget); } catch (_) {}
+  updateTtsTargetBtn();
+});
+updateTtsTargetBtn();
+
 el.ttsBtn.addEventListener('click', async () => {
   const txt = el.enBox.textContent;
   if (!txt || txt === '—' || txt.startsWith('翻譯') || txt.startsWith('Translating') || !txt.trim()) {
@@ -2062,10 +2110,23 @@ el.ttsBtn.addEventListener('click', async () => {
     return;
   }
   el.ttsBtn.disabled = true;
+  const web = ttsTarget === 'web';
+  if (web) {                         // 在點擊當下先解鎖播放 (iOS Safari 要求在使用者手勢內呼叫 play)
+    if (ttsAudio) ttsAudio.pause();
+    ttsAudio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=');
+    ttsAudio.play().catch(() => {});
+  }
   try {
-    toast('正在耳麥朗讀...');
-    await api(API.tts, { text: txt });
-    toast('耳麥朗讀完成');
+    toast(web ? '正在合成語音...' : '正在耳麥朗讀...');
+    const r = await api(API.tts, { text: txt, target: ttsTarget }, 60000);
+    if (web) {
+      if (!r.audio_url) throw new Error('沒有收到語音檔');
+      ttsAudio.src = r.audio_url;
+      await ttsAudio.play();
+      toast('網頁播放中');
+    } else {
+      toast('已送到耳麥播放');
+    }
   } catch (e) {
     toast('播放失敗：' + e.message);
   } finally {

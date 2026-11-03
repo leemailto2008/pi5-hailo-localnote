@@ -1380,6 +1380,7 @@ class DemoTranslateRequest(BaseModel):
 
 class DemoTTSRequest(BaseModel):
     text: str = Field(..., description="待朗讀文字")
+    target: str = Field("bt", description="bt：在藍牙耳麥播放；web：只合成，由網頁播放")
 
 
 class DemoNetSwitchRequest(BaseModel):
@@ -1659,7 +1660,7 @@ def get_latest_audio() -> Dict[str, Any]:
         try:
             ogg_files = [
                 f for f in os.listdir(AUDIO_CACHE_DIR)
-                if f.endswith(".ogg") and not f.startswith("tts_")
+                if f.endswith(".ogg") and not f.startswith("tts_") and not f.endswith(".smooth.ogg")
             ]
             if ogg_files:
                 ogg_files.sort(key=lambda x: os.path.getmtime(os.path.join(AUDIO_CACHE_DIR, x)), reverse=True)
@@ -1682,9 +1683,11 @@ def get_latest_audio() -> Dict[str, Any]:
             except Exception:
                 peaks = []
 
+        smooth = target_ogg[:-4] + ".smooth.ogg"
         return {
             "status": "success",
             "audio_url": f"/audio/{target_ogg}",
+            "smooth_url": f"/audio/{smooth}" if os.path.exists(os.path.join(AUDIO_CACHE_DIR, smooth)) else None,
             "filename": target_ogg,
             "duration": minutes_manager.result.duration if minutes_manager.result else 0,
             "peaks": peaks
@@ -1766,9 +1769,10 @@ async def post_demo_translate(req: DemoTranslateRequest) -> Dict[str, Any]:
 async def post_demo_tts(req: DemoTTSRequest) -> Dict[str, Any]:
     """Synthesize text and play directly on Bluetooth headset."""
     voice = "en-US-AriaNeural" if any(ord(c) < 128 and c.isalpha() for c in req.text[:20]) else "zh-TW-HsiaoChenNeural"
-    v_req = VoiceTTSRequest(text=req.text, voice=voice, play_on_speaker=True)
+    web = (req.target or "bt").lower() == "web"
+    v_req = VoiceTTSRequest(text=req.text, voice=voice, play_on_speaker=not web)
     res = await text_to_speech_endpoint(v_req)
-    return {"ok": res.get("status") == "success"}
+    return {"ok": res.get("status") == "success", "audio_url": res.get("audio_url"), "target": "web" if web else "bt"}
 
 
 @app.post("/api/net/switch", tags=["Demo UI"])
