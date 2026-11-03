@@ -804,7 +804,7 @@ _NAME_CHAR = r"(?:(?![需請加由交給與和的位名個人是一二三四五�
 _OWNER_RE = re.compile(r"(?:負責人(?:是|為)?\s*)?(" + _NAME_CHAR + r"{1,3}(?:經理|副理|協理|主任|專員|工程師|公程師|處長|課長|組長|主管|老師))")
 # 「今天」只有當期限用才算 (今天下班前、今天內)；「今天的週會」「今天有幾個議題」「今天這到 (今天就到這裡)」不是期限
 # (11-03 夜間 3 分鐘實錄：「待辦事項是王經理主持面試今天這到」的時間被填成「今天」)。
-_TIME_RE = re.compile(r"(\d{1,2}\s*月\s*\d{1,2}\s*日|\d{1,2}[./-]\d{1,2}(?:日)?|\d{1,2}\s*日前|下?週[一二三四五六日]|月底|下週|明天|今天(?![就先到開這說講的有是])|年底)")
+_TIME_RE = re.compile(r"((?:1[0-2]|0?[1-9])\s*月\s*(?:3[01]|[12]\d|0?[1-9])\s*日|\d{1,2}[./-]\d{1,2}(?:日)?|\d{1,2}\s*日前|下?週[一二三四五六日]|月底|下週|明天|今天(?![就先到開這說講的有是])|年底)")
 _DECISION_RE = re.compile(r"決定|決議|定案|確定|通過|同意|維持|改為|改成|暫停|取消"
                           r"|\b(?:decided|decision|agreed|approved|confirmed|keep the|go with|postponed?|cancel(?:l?ed)?|switch(?:ed)? to"
                           r"|sign a|signed an?|trial order|release (?:the )?fix|released)\b",
@@ -962,10 +962,24 @@ def assemble_long_minutes(chunk_notes: List[str], max_summary: int = 8, max_deci
     待辦/決議由規則從全部重點擷取。"""
     per_all = [_note_lines(tidy_dates(to_taiwan_traditional(n))) for n in chunk_notes]
     all_lines = [l for p in per_all for l in p]
-    decisions = [l for l in all_lines if _DECISION_RE.search(l)][:max_decisions]
+    # 決議先取最後一段 (結尾總結的原句，會議最後拍板的內容)，名額有剩再依時間順序補前面各段的 (11-03 夜間 60 分鐘實錄：
+    # 前段先佔滿 3 個名額，總結裡的兩條決議被擠到摘要，摘要因此出現「公安方面決議是…待辦事…」原句)
+    tail = per_all[-1] if per_all else []
+    ordered = [l for l in tail if _DECISION_RE.search(l)] + [l for p in per_all[:-1] for l in p if _DECISION_RE.search(l)]
+    decisions: List[str] = []
+    dup_of_decision = set()
+    for l in ordered:          # 同一件事在總結與前段各寫一次 (「總結：決議先簽60臺試單」「訂單：決議先簽60臺試單」) 只留一條
+        body = set(re.sub(r"[\s，,。、：:]", "", re.split(r"[：:]|方面", l, 1)[-1]))
+        if any(len(body & set(re.sub(r"[\s，,。、：:]", "", re.split(r"[：:]|方面", d, 1)[-1]))) >= 0.8 * max(1, len(body))
+               for d in decisions):
+            dup_of_decision.add(l)
+            continue
+        decisions.append(l)
+        if len(decisions) >= max_decisions:
+            break
     # 選進「決議」的條目不再放進「摘要」(2026-10-29 228 30 分鐘 e2e：同一條同時出現在兩段，duplicate_lines 不過門檻)；
     # 名額留給其他議題。全部條目都是決議時才退回原本的選法。
-    per = [[l for l in p if l not in decisions] for p in per_all]
+    per = [[l for l in p if l not in decisions and l not in dup_of_decision] for p in per_all]
     if not any(per):
         per = per_all
     picked = []

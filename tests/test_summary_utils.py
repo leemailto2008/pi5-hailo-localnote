@@ -338,7 +338,7 @@ def test_long_minutes_never_repeat_a_decision_in_the_summary():
     md = assemble_long_minutes(chunks, max_summary=5, tail_lines=2)
     lines = [l for l in md.splitlines() if l.startswith("- ")]
     assert len(lines) == len(set(lines))                     # e2e 的 duplicate_lines = 0
-    assert "## 決議\n- 訂單：決議先簽60臺試單" in md and "- 預算：明年預算200萬元" in md
+    assert md.count("決議先簽60臺試單") == 1 and "- 預算：明年預算200萬元" in md     # 總結與前段的同一條決議只留一條
     only = assemble_long_minutes(["- 決議：維持原價"])             # 全部都是決議時，摘要仍保留
     assert only.split("## 待辦")[0].count("維持原價") == 1
 
@@ -596,4 +596,14 @@ def test_stt_residue_is_not_part_of_the_owner_name():
     # 11-03 夜間 10 分鐘實錄：「待辦事項是李協理安排」聽成「待會兒時向市李協理安排」
     assert summary_utils._OWNER_RE.search("待會兒時向市李協理安排").group(1) == "李協理"
     assert summary_utils._OWNER_RE.search("交給王小明經理").group(1) == "王小明經理"
+
+
+def test_long_minutes_take_the_recap_decisions_first_and_valid_months():
+    chunks = ["- 品質：決議加開一站檢查\n- 訂單：決議維持新報價\n- 庫存：決議下一批三千臺", "- 出差：決議東京行程四天",
+              "- 工安方面，決議是7月4日前完成全員複訓，待辦事項是蔡組長負責\n- 招募方面，決議是3月19日前完成報到"]
+    md = assemble_long_minutes(chunks, max_summary=6, max_decisions=3)
+    dec = md.split("## 決議")[1]
+    assert "7月4日前完成全員複訓" in dec and "3月19日前完成報到" in dec           # 總結裡的決議不會被前段擠掉
+    assert "7月4日前完成全員複訓" not in md.split("## 待辦")[0]                   # 也就不會跑到摘要
+    assert summary_utils._TIME_RE.findall("日1月13月19日完成報到，12月3日") == ["3月19日", "12月3日"]
 
