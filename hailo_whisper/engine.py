@@ -183,8 +183,8 @@ _SUPPLIER_FIX_RE = re.compile(r"(?<![供反對回適呼響效感因順相答])(?
 
 # 「週五前回覆客戶」95 份逐字稿只有 7 次寫對，另有約 250 次寫成「回不客戶／回副客／回付客戶／回客，」；
 # 「溫控模組的客訴有九件」的「客訴」1 次寫對、149 次寫成「客宿／客速」。只在期限 (…前) 後面、或客訴後接件數時改。
-_REPLY_CUSTOMER_FIX_RE = re.compile(r"(前\s*)(?:恢\s*)?回\s*[副不夠復付服福腹覆]?\s*客\s*戶?(?=\s*[，,。第好]|$)")
-_COMPLAINT_FIX_RE = re.compile(r"[客刻克]\s*[宿速素塑溯](?=\s*(?:有|是|共|件|方面|案|數|問題|處理|主要|增加|減少|[\d一二三四五六七八九十兩]+\s*[件起筆個案]))")
+_REPLY_CUSTOMER_FIX_RE = re.compile(r"(前\s*)(?:恢\s*)?回\s*(?:[副不夠復付服福腹]\s*客\s*戶|[副不夠復付服福腹覆]?\s*客\s*戶?(?=\s*[，,。第好]|$))")
+_COMPLAINT_FIX_RE = re.compile(r"[客刻克特]\s*[宿速素塑溯斯](?=\s*(?:有|是|共|件|方面|案|數|問題|處理|主要|增加|減少|[\d一二三四五六七八九十兩]+\s*[件起筆個案]))")
 
 # 其他高頻同音錯字 (11-03 對照 95 份逐字稿與講稿逐字比對，次數為 15 分鐘以內的會議)：
 #   再→在 147 (「沒有問題在全面更新」「下週會在安排」「等試用結果在談」)、試→是／市 111 (「等是用結果」「裝置上市跑3天」)、
@@ -193,11 +193,36 @@ _COMPLAINT_FIX_RE = re.compile(r"[客刻克]\s*[宿速素塑溯](?=\s*(?:有|是
 #   電→店 (「智慧店表」)。都只在固定的前後文裡改：「正在安排」「會在4月5日前」「上市」「有人主持」「財物」本身不動。
 _AGAIN_FIX_RE = re.compile(r"(?:(?<=問題)|(?<=結果)|(?<=會)|(?<=之後)|(?<=然後))\s*在(?=\s*(?:全面|談|安排|確認|討論|追蹤|開會|上線))")
 _TRIAL_FIX_RE = re.compile(r"(?<=等)\s*[是市事式](?=\s*用\s*結果)|(?<=[臺台]裝置上)\s*[市是事]\s*(?=跑)|(?<=[臺台]設備上)\s*[市是事]\s*(?=跑)")
-_HOSTED_BY_FIX_RE = re.compile(r"有(?=\s*[\u4e00-\u9fff]\s*(?:協理|經理|副理|課長|組長|工程師|專員|主任)\s*主\s*[持吃])")
+_HOSTED_BY_FIX_RE = re.compile(r"[有遊](?=\s*[\u4e00-\u9fff]\s*(?:協理|經理|副理|課長|組長|工程師|專員|主任)\s*主\s*[持吃])")
 _THIS_MATTER_FIX_RE = re.compile(r"(?<=這件)\s*是\s*(?=由)")
-_DEPT_FIX_RE = re.compile(r"財\s*物\s*部|平\s*[保寶]\s*[部圖布步]")
-_SITE_FIX_RE = re.compile(r"(?<=[產生])\s*現(?=\s*[已發加，,有的])|(?<=課)\s*城|(?<=位)\s*同\s*人|(?<=請)\s*個\s*(?=部門)|(?<=智慧)\s*店\s*(?=表)")
-_SIGN_FIX_RE = re.compile(r"(?<=先)\s*千(?=\s*[\d一二三四五六七八九十兩百]+\s*[臺台])")
+_DEPT_FIX_RE = re.compile(r"財\s*物\s*部|平\s*[保寶]\s*[部圖布步不固]")
+_SITE_FIX_RE = re.compile(r"(?<=[產生])\s*現(?=\s*[已發加，,有的])|(?<=課)\s*[城成](?!本)|(?<=位)\s*同\s*人|(?<=請)\s*個\s*(?=部門)|(?<=智慧)\s*店\s*(?=表)")
+_SIGN_FIX_RE = re.compile(r"(?:(?<=先)|(?<=是新))\s*千(?=\s*[\d一二三四五六七八九十兩百]+\s*[臺台])")
+# 第二批 (同一份逐字比對的下一段)：職缺→直 20、維持→為持／綴持 21、預計→預寄／預及 13、資安→自安 11、閘道器→炸到期／雜到期 19、
+# 外殼→外科／外可 10、負責→負負 10、通知→通之 9、替代料→替代了 9、議題是→議題示 9、調貨→掉貨 8、品質異常→品質一長 14、
+# 停車場→停車廠 7、八支→八指 6、正式→正是 (切換) 6、文宣→文生 (請) 5、交期→交其 (延) 5、專員→專源 5、意見→一件 (希望) 14
+_MISC2_FIX = [
+    (re.compile(r"([\d一二三四五六七八九十兩]\s*個\s*)直(?=\s*[，,]?\s*(?:已經|已|目前))"), r"\1職缺"),
+    (re.compile(r"[為綴]\s*持(?=\s*[新原舊現])"), "維持"),
+    (re.compile(r"預\s*[寄及](?=\s*[停展上完出切])"), "預計"),
+    (re.compile(r"自\s*安(?=\s*[課訓教])"), "資安"),
+    (re.compile(r"(?<=工業)\s*[炸雜閘乍]\s*[到道倒]\s*[期器氣其]"), "閘道器"),
+    (re.compile(r"外\s*[科可刻](?=\s*模)"), "外殼"),
+    (re.compile(r"負\s*負(?!得)(?=\s*[通主安人責,，])"), "負責"),
+    (re.compile(r"負\s*(?:[負責]\s*)*責"), "負責"),          # 「負負責責」「負責責」→「負責」
+    (re.compile(r"通\s*之(?=\s*所有)"), "通知"),
+    (re.compile(r"替代\s*了(?=\s*[持已在正])"), "替代料"),
+    (re.compile(r"(?<=議題)\s*示"), "是"),
+    (re.compile(r"掉\s*貨"), "調貨"),
+    (re.compile(r"品質\s*[一弣異意]\s*[長常場]"), "品質異常"),
+    (re.compile(r"停車\s*廠"), "停車場"),
+    (re.compile(r"([\d一二三四五六七八九十兩]\s*)指(?=\s*警示)"), r"\1支"),
+    (re.compile(r"正\s*是(?=\s*切換)"), "正式"),
+    (re.compile(r"文\s*生(?=\s*請)"), "文宣"),
+    (re.compile(r"交\s*其(?=\s*延)"), "交期"),
+    (re.compile(r"專\s*源(?=\s*[會在負主跟安，,])"), "專員"),
+    (re.compile(r"有\s*一件(?=\s*[，,]?\s*希望)"), "有意見"),
+]
 
 
 def _fix_misc_terms(text: str) -> str:
@@ -208,9 +233,13 @@ def _fix_misc_terms(text: str) -> str:
 
     def site(m):
         g = m.group(0).strip()
-        return {"現": "線", "城": "程", "同人": "同仁", "個": "各", "店": "電"}.get(re.sub(r"\s", "", g), g)
+        return {"現": "線", "城": "程", "成": "程", "同人": "同仁", "個": "各", "店": "電"}.get(re.sub(r"\s", "", g), g)
     text = _SITE_FIX_RE.sub(site, text)
-    return _SIGN_FIX_RE.sub("簽", text)
+    text = _SIGN_FIX_RE.sub("簽", text)
+    text = re.sub(r"(?<=是)新(?=簽)", "先", text)          # 「決議是新千五十臺」→「先簽」
+    for pat, rp in _MISC2_FIX:
+        text = pat.sub(rp, text)
+    return text
 
 
 def _fix_owner_names(text: str) -> str:
@@ -230,7 +259,7 @@ def _fix_owner_names(text: str) -> str:
 #   「先簽 50 臺的試單」寫成「市單／示單／是單／事單」約 80 次；「新報價」寫成「新爆價／新爆假」86 次；
 #   「全員複訓」寫成「全原附訊／全元付訊／全原復訊…」。
 #   「面世」「面市」「報導」本身是詞，只在上述句型裡改 (後面接「N 位」、前面接「N 場」、前面是日期等)。
-_INTERVIEW_FIX_RE = re.compile(r"(已\s*經?\s*)面\s*[世是市事室]\s*了(?=\s*[\d一二三四五六七八九十兩]+\s*位)"
+_INTERVIEW_FIX_RE = re.compile(r"(已\s*經?\s*)面\s*[世是市事室識]\s*了(?=\s*[\d一二三四五六七八九十兩]+\s*位)"
                                r"|([\d一二三四五六七八九十兩]\s*場\s*)面\s*[是市事室世](?=\s*[,，。有由])")
 _ONBOARD_FIX_RE = re.compile(r"(日\s*(?:之?前)?\s*)完成\s*報\s*[道導]")
 _QUOTA_FIX_RE = re.compile(r"((?:剩|還有|只有)\s*[\d一二三四五六七八九十兩]+\s*個\s*)名\s*(?:兒|鶴)?(?!額)(?=\s*[，,。.請\s]|$)")
@@ -337,7 +366,7 @@ def fix_meeting_terms(text: str) -> str:
     text = _ASSOC_MGR_FIX_RE.sub("協理", _GROUP_LEAD_FIX_RE.sub("組長", text))
     text = _DEPUTY_MGR_CTX_FIX_RE.sub(r"\1副理", _DEPUTY_MGR_FIX_RE.sub("副理", text))
     text = _HOST_INTERVIEW_FIX_RE.sub(r"\1面試", _MANAGER_CTX_FIX_RE.sub(r"\1經理", text))
-    text = _fix_owner_names(_fix_misc_terms(text))
+    text = _fix_owner_names(text)
     text = _FIRMWARE_FIX_RE.sub("韌體", text)
     text = _VERIFY_FIX_RE.sub("驗證", _YIELD_FIX_RE.sub("良率", text))
     text = _SUPPLIER_FIX_RE.sub("供應商", text)
@@ -345,6 +374,7 @@ def fix_meeting_terms(text: str) -> str:
     # 要在英文碎片拿掉之後 (「前回 er 客，」「第428個 er 體是」)，否則第二次修才會改到
     text = _COMPLAINT_FIX_RE.sub("客訴", _REPLY_CUSTOMER_FIX_RE.sub(r"\1回覆客戶", text))
     text = _TOPIC_FIX_RE.sub(r"\1議題", text)
+    text = _fix_owner_names(_fix_misc_terms(text))   # 也在英文碎片拿掉、英文數字改成中文之後 (「two 個直」「請皇 er 專員」)
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
 
