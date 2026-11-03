@@ -344,7 +344,8 @@ def take_stable_chunk(text: str, start: int, max_chars: int = 1000, lag: int = 1
     return end
 
 
-_RECAP_RE = re.compile(r"(最後總結|總結一下|做個總結|做一下總結|總結來說|最後來總結|以下總結)")
+_RECAP_RE = re.compile(r"(最後總結|總結一下|做個總結|做一下總結|總結來說|最後來總結|以下總結"
+                       r"|(?i:to wrap up|to sum up|to summari[sz]e|let me summari[sz]e|let'?s recap|to recap|in summary))")
 
 
 def split_with_recap(text: str, max_chars: int = 1000, tail_ratio: float = 0.3, min_recap: int = 30) -> List[str]:
@@ -370,6 +371,21 @@ _RECAP_FILLER_SUB = re.compile(r"今天(?:就|先)*(?:到|開到)(?:這裡|這�
 _RECAP_INTRO_RE = re.compile(r"(?:我們)?(?:最後)?(?:來)?(?:總結|整理|結論)(?:一下)?")
 
 
+_EN_RECAP_FILLER_RE = re.compile(r"^(?:okay|ok|so|alright|right)?[,\s]*(?:to wrap up|to sum up|to recap|let'?s recap|in summary"
+                                 r"|let me summari[sz]e|to summari[sz]e)?[,.:\s]*|(?:that'?s all for today|thank you,? everyone"
+                                 r"|thanks,? everyone|thank you all|see you next week)[.!]?", re.I)
+
+
+def _recap_notes_en(recap: str, max_lines: int = 6, max_len: int = 160) -> str:
+    """英文的結尾總結：一句一行 (句子本身就是「Topic: we decided…, and John will…」)，去掉開場與道謝。"""
+    out = []
+    for sent in re.split(r"(?<=[.!?;])\s+", recap or ""):
+        t = _EN_RECAP_FILLER_RE.sub("", sent.strip()).strip(" .")
+        if len(t) >= 8:
+            out.append("- " + t[:max_len])
+    return "\n".join(out[:max_lines])
+
+
 def recap_notes(recap: str, max_lines: int = 6, max_len: int = 50) -> str:
     """長會議的結尾總結改用逐字稿原句：依逗號／句號切成子句，去掉客套話；遇到「X方面」就換行 (一行一個議題)，
     同一議題內再依序打包成 <= max_len 字的條列。
@@ -378,7 +394,10 @@ def recap_notes(recap: str, max_lines: int = 6, max_len: int = 50) -> str:
     「X 方面，決議是…，待辦事項是某人在某日前…」，交給 qwen3:1.7b 再改寫、每行又截在 40 字時，負責人與期限常被丟掉；
     改用原句後回顧事實 (逐字稿內) 0.61 → 0.81、事實保留 0.176 → 0.230，且少一次 LLM 呼叫。
     依「方面」分行比單純依長度打包，議題覆蓋 0.815 → 0.831、事實保留 0.223 → 0.230。
+    英文總結 (2026-11-03 起紀要跟著逐字稿語言) 改由 _recap_notes_en() 一句一行。
     """
+    if detect_language(recap) == "en":
+        return _recap_notes_en(recap, max_lines)
     clauses = [c.strip() for c in re.split(r"[，,。；;！!？?\n]", recap or "") if c.strip()]
     if clauses:   # 「最後總結一下任體方面」：去掉黏在第一個子句前面的總結用語
         clauses[0] = re.sub(r"^.*?(?:最後總結一下|總結一下|最後總結|做個總結|做一下總結)", "", clauses[0]).strip() or clauses[0]
@@ -615,10 +634,15 @@ _NAME_CHAR = r"(?:(?![需請加由交給與和的位名個人是一二三四五�
 _OWNER_RE = re.compile(r"(?:負責人(?:是|為)?\s*)?(" + _NAME_CHAR + r"{1,3}(?:經理|副理|協理|主任|專員|工程師|公程師|處長|課長|組長|主管|老師))")
 _TIME_RE = re.compile(r"(\d{1,2}\s*月\s*\d{1,2}\s*日|\d{1,2}[./-]\d{1,2}(?:日)?|\d{1,2}\s*日前|下?週[一二三四五六日]|月底|下週|明天|今天(?![就先到開])|年底)")
 _DECISION_RE = re.compile(r"決定|決議|定案|確定|通過|同意|維持|改為|改成|暫停|取消"
-                          r"|\b(?:decided|decision|agreed|approved|confirmed|keep the|go with|postponed?|cancel(?:l?ed)?|switch(?:ed)? to)\b",
+                          r"|\b(?:decided|decision|agreed|approved|confirmed|keep the|go with|postponed?|cancel(?:l?ed)?|switch(?:ed)? to"
+                          r"|sign a|signed an?|trial order|release (?:the )?fix|released)\b",
                           re.I)
 # 英文紀要的待辦：「John will send the quote by Friday」「Owner: Mary, due Nov 5」
-_EN_OWNER_RE = re.compile(r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+(?:will|to|should|needs to|is to|must)\s+(.+)"
+# 負責人：「John will reply…」，或第三人稱動詞「John replies／Kevin owns／Susan handles…」(map 階段的英文重點常這樣寫)。
+# 「Lotus Tech wants…」「Mary says…」這類不是待辦的動詞排除。
+_EN_STATE_VERBS = r"(?:is|was|has|does|wants|needs|asks|says|thinks|expects|hopes|requests|likes|gets|seems|looks|feels|agrees|knows)"
+_EN_OWNER_RE = re.compile(r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+(?:(?:will|to|should|needs to|is to|must|is responsible for)\s+(.+)"
+                          r"|((?!" + _EN_STATE_VERBS + r"\b)[a-z]+(?<!s)s(?<!ss)\s+.+))"
                           r"|(?i:owner|assigned to)\s*:?\s*([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)")
 _EN_TIME_RE = re.compile(r"\b(?:by|before|on|due|until)\s+((?:next\s+)?(?:mon|tues|wednes|thurs|fri|satur|sun)day"
                          r"|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?"
@@ -631,13 +655,16 @@ def _todo_parts_en(line: str):
     mo = _EN_OWNER_RE.search(line)
     if not (mo and mt):
         return None
-    owner = mo.group(1) or mo.group(3)
-    if owner.split()[0].lower() in ("we", "they", "i", "you", "it", "this", "that", "the", "all", "everyone", "team"):
+    owner = mo.group(1) or mo.group(4)
+    if owner.split()[0].lower() in ("we", "they", "i", "you", "it", "this", "that", "the", "all", "everyone", "team") \
+            or owner.split()[0].lower() in _EN_NOT_NAMES:
         return None
-    action = (mo.group(2) or "").replace(mt.group(0), "")
+    action = (mo.group(2) or mo.group(3) or "").replace(mt.group(0), "")
     action = re.split(r"[,;.]", action)[0].strip()
-    if len(action) < 3:
-        action = re.split(r"[:,;.]", line)[0].strip()
+    if len(action) < 3:      # 「Owner: Mary Chen, due Nov 5, confirm sample capacity」：取沒有負責人與期限的那個子句
+        rest = [c.strip() for c in re.split(r"[:,;.]", line)
+                if c.strip() and owner not in c and mt.group(0) not in c and c.strip().lower() not in ("owner", "assigned to")]
+        action = rest[-1] if rest else re.split(r"[:,;.]", line)[0].strip()
     return action[:40], owner, mt.group(1)
 
 
@@ -698,7 +725,7 @@ def extract_todos(lines: List[str], max_rows: int = 6) -> List[str]:
         if item in seen:
             continue
         seen.add(item)
-        rows.append(f"| {item} | {owner} | {when.replace(' ', '')} |")
+        rows.append(f"| {item} | {owner} | {when.replace(' ', '') if _CJK_RE.search(when) else when} |")   # 英文日期保留空白
         if len(rows) >= max_rows:
             break
     return rows

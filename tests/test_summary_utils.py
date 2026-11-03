@@ -454,3 +454,20 @@ def test_empty_owner_and_due_are_taken_from_the_item():
     # 從事項取出的值也要在逐字稿裡找得到
     assert "| Call Mike | - | Monday |" in ground_todo_table(
         "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| Call Mike by Monday | - | - |", "Someone should call by Monday.")
+
+
+def test_english_closing_recap_is_split_off_and_kept_verbatim():
+    body = "The first topic is training. There is a course on September 2 with 30 seats. " * 12
+    recap = ("Okay, to wrap up. Training: names go to Mary by Thursday. Firmware: we decided to release the fix on "
+             "March 15th, and Kevin owns the testing. Customer order: we agreed on a 30-unit trial order, and John will "
+             "reply to Lotus Tech by Wednesday. That's all for today, thank you everyone.")
+    parts = summary_utils.split_with_recap(body + recap, 3200)
+    assert summary_utils.is_recap_chunk(parts[-1])
+    notes = summary_utils.recap_notes(parts[-1])
+    assert notes.splitlines()[0] == "- Training: names go to Mary by Thursday" and "thank you" not in notes.lower()
+    md = summary_utils.localize_minutes(assemble_long_minutes(["- Training: course on September 2", notes]), "en")
+    assert "| owns the testing | Kevin | March 15th |" in md and "| reply to Lotus Tech | John | Wednesday |" in md
+    assert "we decided to release the fix" in md.split("## Decisions")[1]
+    # 「signed up」不是決議
+    assert not summary_utils._DECISION_RE.search("22 people signed up, 8 seats left")
+

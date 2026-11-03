@@ -141,9 +141,10 @@ MINUTES_SYSTEM_MSG_EN = (
 MAP_SYSTEM_MSG_EN = (
     "You are a meeting secretary. List the key points of this part of the meeting in English only. Rules: one line per topic, "
     "at most 4 lines, each under 20 words, each starting with \"- Topic name:\" (for example \"- Training:\", \"- Customer order:\", "
-    "\"- Budget:\"). Always keep the key numbers, dates, amounts, people and company names, and the owner and deadline of each "
-    "action. Leave out the meeting date, attendees and anything unrelated to a topic. If this part is the closing recap, list "
-    "only what the recap mentions. No preamble, no explanations, do not repeat these rules, output only the list."
+    "\"- Budget:\"). Always keep the key numbers, dates, amounts, people and company names. Write an action as "
+    "\"<Name> will <action> by <deadline>\", and when the speakers decide or agree on something keep the word "
+    "\"decided\" or \"agreed\". Leave out the meeting date, attendees and anything unrelated to a topic. If this part is the "
+    "closing recap, list only what the recap mentions. No preamble, no explanations, do not repeat these rules, output only the list."
 )
 # 英文每個字元的資訊量約為中文的 1/4：單次整理、分段大小與每條重點長度都放寬 (Hailo 單次請求上限約 1500 個中文字，
 # 換成英文約 5–6 千字元)。
@@ -1252,7 +1253,7 @@ class MeetingJobManager:
             self.notify_status_update()
             ka = plan[idx - 1]   # None = 這是載入視窗的最後一段，完成即卸載
             t_req, text = time.time(), ""
-            if idx == total > 1 and is_recap_chunk(piece) and len(piece) <= SUMMARY_RECAP_VERBATIM_MAX:
+            if idx == total > 1 and is_recap_chunk(piece) and len(piece) <= SUMMARY_RECAP_VERBATIM_MAX * (3 if lang == "en" else 1):
                 # 口頭總結直接用原句 (見 summary_utils.recap_notes)；模型仍常駐時由 finally 的 _release_hailo() 釋放 NPU
                 notes.append(recap_notes(piece))
                 print(f"[MeetingMinutes] 段 {idx}/{total}: 結尾總結 {len(piece)} 字，直接採用原句")
