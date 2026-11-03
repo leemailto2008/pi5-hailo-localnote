@@ -263,11 +263,23 @@ _FULLWIDTH_PUNCT = {"，": ", ", "。": ". ", "：": ": ", "；": "; ", "？": "
 _FULLWIDTH_RE = re.compile("[" + "".join(_FULLWIDTH_PUNCT) + "]\\s*")
 
 
+# 中英夾雜的中文會議 (「這個 release 的 schedule 要 delay，QA 的 regression test 還沒 pass」) 英文字母也可能超過中文字 2 倍，
+# 但夾在中文裡的英文幾乎沒有功能詞 (the、is、we、to…)；英文句子裡功能詞約佔四成。與 summary_utils.detect_language 同一規則。
+_EN_FUNCTION_WORDS = frozenset("the a an is are was were be been we you they he she it i to of and in on for with that this "
+                               "these those will would can could should have has had our your their by at from so but not do "
+                               "does did there as or if all its let's lets what which who".split())
+
+
 def _ascii_punct_if_english(text: str) -> str:
     cjk = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
     latin = sum(1 for c in text if c.isascii() and c.isalpha())
     if latin < 20 or latin <= 2 * cjk:
         return text
+    if cjk:
+        words = re.findall(r"[A-Za-z]+(?:'[a-z]+)?", text)
+        share = min(1.0, sum(1 for w in words if w.lower() in _EN_FUNCTION_WORDS) / (0.35 * max(1, len(words))))
+        if latin * share <= 2 * cjk:
+            return text
     return re.sub(r" {2,}", " ", _FULLWIDTH_RE.sub(lambda m: _FULLWIDTH_PUNCT[m.group(0)[0]], text)).rstrip()
 
 

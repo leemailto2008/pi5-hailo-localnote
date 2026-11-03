@@ -200,7 +200,9 @@ def test_speech_seconds_without_faster_whisper(monkeypatch):
      "So this is, the plan: two, three, and one more. In the end it is on track."),          # 英文會議不動
     ("Okay，let's start today's weekly meeting. The second topic is safety，last week there was an accident。",
      "Okay, let's start today's weekly meeting. The second topic is safety, last week there was an accident."),
-    ("新的 ERP 系統，下週上線。", "新的 ERP 系統，下週上線。"),                                   # 中文會議的全形標點不動
+    ("新的 ERP 系統，下週上線。", "新的 ERP 系統，下週上線。"),
+    ("我們這個 release 的 schedule 要 delay，因為 QA 那邊的 regression test 還沒 pass。",
+     "我們這個 release 的 schedule 要 delay，因為 QA 那邊的 regression test 還沒 pass。"),         # 中英夾雜的中文：全形標點不動                                   # 中文會議的全形標點不動
     # 韌體／良率／驗證
     ("第三個議題是電源供應器的任體更新，任體當機，任體方面，決議是", "第三個議題是電源供應器的韌體更新，韌體當機，韌體方面，決議是"),
     ("認體更新，韁體修正版", "韌體更新，韌體修正版"),

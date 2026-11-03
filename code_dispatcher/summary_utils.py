@@ -33,11 +33,31 @@ _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _LATIN_RE = re.compile(r"[A-Za-z]")
 
 
+# 英文句子裡的功能詞 (the、is、we、to…) 約佔單字的 38–40% (11-03 英文 e2e 逐字稿 0.398／0.384)；
+# 夾在中文裡的英文 (「這個 release 的 schedule 要 delay，QA 的 regression test 還沒 pass」) 幾乎都是名詞、動詞。
+# 英文字母數只按「看起來是英文句子」的比例計算，台灣工程會議常見的中英夾雜才不會被當成英文會議。
+_EN_FUNCTION_WORDS = frozenset("the a an is are was were be been we you they he she it i to of and in on for with that this "
+                               "these those will would can could should have has had our your their by at from so but not do "
+                               "does did there as or if all its let's lets what which who".split())
+
+
+def english_share(text: str) -> float:
+    """英文字母裡屬於英文句子的比例 (0–1)：功能詞比例 ÷ 0.35，上限 1。"""
+    words = re.findall(r"[A-Za-z]+(?:'[a-z]+)?", text or "")
+    if not words:
+        return 0.0
+    return min(1.0, sum(1 for w in words if w.lower() in _EN_FUNCTION_WORDS) / (0.35 * len(words)))
+
+
 def detect_language(text: str) -> str:
-    """回傳 "en" 或 "zh"。"""
+    """回傳 "en" 或 "zh"。英文字母 (按英文句子比例折算) 超過中文字 2 倍才算英文 (約等於英文講話時間超過四成五)。"""
     cjk = len(_CJK_RE.findall(text or ""))
     latin = len(_LATIN_RE.findall(text or ""))
-    return "en" if latin >= 20 and latin > 2 * cjk else "zh"
+    if latin < 20:
+        return "zh"
+    if cjk == 0:
+        return "en"
+    return "en" if latin * english_share(text) > 2 * cjk else "zh"
 
 
 # 程式內部一律用中文段落標題處理 (ensure_sections、待辦表對照逐字稿…都以「## 摘要／待辦／決議」為鍵)，

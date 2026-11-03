@@ -423,6 +423,12 @@ def test_recap_drops_a_bare_topic_label():
 def test_english_minutes_keep_their_language():
     assert summary_utils.detect_language("John will send the revised quote by Friday, and Mary confirms capacity.") == "en"
     assert summary_utils.detect_language("新的 ERP 系統下週上線，test 跑完再切換") == "zh"
+    # 中英夾雜的中文會議：英文字母比中文字多，但英文都是名詞／動詞，沒有 the、is、we 這類功能詞
+    mixed = "我們這個 release 的 schedule 要 delay，因為 QA 那邊的 regression test 還沒 pass，下週再 review 一下 coverage。"
+    assert summary_utils.detect_language(mixed) == "zh"
+    # 英文會議裡夾幾個中文字 (人名、地名) 仍是英文
+    assert summary_utils.detect_language("Okay, let's start. Mr. 王 will send the quote to the customer in 新竹 by Friday, "
+                                         "and we agreed to keep the price.") == "en"
     md = ("## Summary\n- Budget: 2M next year\n\n## Action Items\n| Item | Owner | Due |\n|---|---|---|\n"
           "| Send quote | John | Friday |\n\n## Decisions\n- None")
     internal = summary_utils.to_internal_sections(md)
