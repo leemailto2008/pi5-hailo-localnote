@@ -471,3 +471,14 @@ def test_english_closing_recap_is_split_off_and_kept_verbatim():
     # 「signed up」不是決議
     assert not summary_utils._DECISION_RE.search("22 people signed up, 8 seats left")
 
+
+
+def test_short_english_minutes_get_the_recap_actions_and_decisions():
+    tr = ("The first topic is the customer order. Lotus Tech wants 200 units by February 28. " * 6 +
+          "Okay, to wrap up. Customer order: we agreed on a 30-unit trial order at the new price. And John will reply "
+          "to Lotus Tech by Wednesday. That's all for today, thank you everyone.")
+    md = ("## 摘要\n- Customer order: 200 units requested by Lotus Tech\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n"
+          "| 無 | - | - |\n\n## 決議\n- 無")
+    out = summary_utils.localize_minutes(summary_utils.merge_recap_into_minutes(md, tr), "en")
+    assert "| reply to Lotus Tech | John | Wednesday |" in out and "And John" not in out
+    assert "we agreed on a 30-unit trial order" in out.split("## Decisions")[1]

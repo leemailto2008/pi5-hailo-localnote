@@ -132,7 +132,8 @@ MAP_SYSTEM_MSG = (
 MINUTES_SYSTEM_MSG_EN = (
     "You are a meeting secretary. Write concise meeting minutes in English only, in Markdown, with exactly three sections "
     "in this order: ## Summary, ## Action Items, ## Decisions. Rules: Summary has one bullet per topic, at most 5 bullets, "
-    "each under 25 words, keeping the key numbers, dates, amounts and names. Action Items is a table "
+    "each under 25 words, keeping the key numbers, dates, amounts and names; write dates as spoken and never add a year. "
+    "Action Items is a table "
     "\"| Item | Owner | Due |\" with one row per action, at most 4 rows, each item under 10 words and not copied from the "
     "summary; if there are none, write one row \"| None | - | - |\". Decisions has at most 3 bullets, each under 20 words; "
     "if there are none, write \"- None\". If the meeting ends with a recap, follow the recap. No preamble, no explanations, "

@@ -641,7 +641,8 @@ _DECISION_RE = re.compile(r"決定|決議|定案|確定|通過|同意|維持|改
 # 負責人：「John will reply…」，或第三人稱動詞「John replies／Kevin owns／Susan handles…」(map 階段的英文重點常這樣寫)。
 # 「Lotus Tech wants…」「Mary says…」這類不是待辦的動詞排除。
 _EN_STATE_VERBS = r"(?:is|was|has|does|wants|needs|asks|says|thinks|expects|hopes|requests|likes|gets|seems|looks|feels|agrees|knows)"
-_EN_OWNER_RE = re.compile(r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+(?:(?:will|to|should|needs to|is to|must|is responsible for)\s+(.+)"
+_EN_OWNER_RE = re.compile(r"\b(?!(?:And|But|So|Then|Also|Or|Okay|Ok)\b)([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+"
+                          r"(?:(?:will|to|should|needs to|is to|must|is responsible for)\s+(.+)"
                           r"|((?!" + _EN_STATE_VERBS + r"\b)[a-z]+(?<!s)s(?<!ss)\s+.+))"
                           r"|(?i:owner|assigned to)\s*:?\s*([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)")
 _EN_TIME_RE = re.compile(r"\b(?:by|before|on|due|until)\s+((?:next\s+)?(?:mon|tues|wednes|thurs|fri|satur|sun)day"
@@ -809,6 +810,10 @@ def _already_said(core: str, md_norm: str, decisions: List[str]) -> bool:
     c = norm(core)
     if not c or c in md_norm:
         return True
+    if not _CJK_RE.search(core):         # 英文：字母集合沒有意義，改看單字重疊
+        words = lambda x: {w for w in re.findall(r"[a-z0-9]+", x.lower()) if len(w) > 2}
+        cw = words(core)
+        return bool(cw) and any(len(cw & words(x)) >= 0.6 * len(cw) for x in decisions)
     dates = _DATE_TOKEN_RE.findall(c)
     if dates and any(d in norm(x) for d in dates for x in decisions):
         return True
@@ -853,10 +858,14 @@ def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_de
         md_norm = re.sub(r"[\s，,。、：:]", "", md)
         add = []
         for line in lines:
-            if "決議" not in line:
+            if "決議" in line:
+                d = _drop_listed_todo_clause([line], todo_rows)[0]
+                core = _CLAUSE_SPLIT_RE.split(re.split(r"決議\s*(?:是|為|：|:)", d, 1)[-1])[0].strip()
+            elif not _CJK_RE.search(line) and (md_ := _DECISION_RE.search(line)):     # 英文總結：「we agreed on …」
+                d = line
+                core = re.split(r"[,;]", line[md_.start():])[0].strip()
+            else:
                 continue
-            d = _drop_listed_todo_clause([line], todo_rows)[0]
-            core = _CLAUSE_SPLIT_RE.split(re.split(r"決議\s*(?:是|為|：|:)", d, 1)[-1])[0].strip()
             if len(core) >= 4 and not _already_said(core, md_norm, [x[2:] for x in real] + add):
                 add.append(d)
         add = add[:max(0, max_decisions - len(real))]
