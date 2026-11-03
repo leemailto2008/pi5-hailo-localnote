@@ -1332,6 +1332,10 @@ async def translate_text(req: VoiceTranslateRequest) -> Dict[str, Any]:
             return f"[翻譯失敗: {str(e)}]"
 
     translated = await asyncio.to_thread(do_call)
+    if req.direction != "zh2en":
+        # 小模型常寫大陸用語 (11-03：「固件」「軟件」)；OpenCC s2twp 換成台灣用語 (韌體、軟體、影片)
+        from summary_utils import to_taiwan_traditional
+        translated = to_taiwan_traditional(translated)
     return {"status": "success", "translated_text": translated}
 
 
