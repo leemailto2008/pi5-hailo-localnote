@@ -233,8 +233,14 @@ def get_web_ui():
 
 
 MYTEK_BRAND = "MyTek LocalNote 聽記盒"
-MYTEK_LOGO_HTML = '<img class="mytek-logo" src="/static/mytek_logo.png" alt="MyTek">'
-MYTEK_LOGO_CSS = (".mytek-logo{height:40px;width:auto;border-radius:8px;flex:none;display:block}"
+# MyTek Logo 依螢幕解析度挑最合適的一張 (2026-11-03 使用者提供 64／256／512／1024 四種尺寸，原本單一張 160×112 的
+# 去背不乾淨、在高解析度螢幕上會糊)。四張都已裁掉上下透明留白 (static/logo/，約 1.63:1)；頁首顯示高 40 px
+# (手機 32 px)，瀏覽器依 devicePixelRatio 由 srcset 選：一般螢幕用 64、Retina／手機用 256，放大或 4K 用 512／1024。
+MYTEK_LOGO_HTML = ('<img class="mytek-logo" src="/static/logo/mytek_logo_256.png" '
+                   'srcset="/static/logo/mytek_logo_64.png 64w, /static/logo/mytek_logo_256.png 255w, '
+                   '/static/logo/mytek_logo_512.png 508w, /static/logo/mytek_logo_1024.png 1015w" '
+                   'sizes="(max-width:600px) 52px, 64px" width="64" height="40" alt="MyTek" decoding="async">')
+MYTEK_LOGO_CSS = (".mytek-logo{height:40px;width:auto;flex:none;display:block;object-fit:contain}"
                   "@media (max-width:600px){.mytek-logo{height:32px}}")
 
 
