@@ -170,9 +170,7 @@ _HAS_WU_FIX_RE = re.compile(r"有\s*無(?=\s*" + _OWNER_TITLES + r"\s*主)")
 _SURNAME_FIX_RE = re.compile(r"(?<=(.))?([" + "".join(_SURNAME_FIX) + r"])(?=\s*" + _OWNER_TITLES + _OWNER_FOLLOW + ")")
 # 「再增加二位工程師」的「位」寫成「為／維／圍」(95 份逐字稿約 90 次，正確 87)
 _HEADCOUNT_FIX_RE = re.compile(r"([\d一二三四五六七八九十兩幾])\s*[為維圍]\s*(?=工程師|專員|主任|同仁|人員|員工|候選人)")
-# 「工安」(工業安全) 在 95 份逐字稿裡 0 次寫對，全部寫成同音的「公安」(553 次，幾乎都是「議題是公安上週三樓產線…」)。
-# 只在後面接著事故／上週／方面／複訓這類工安用語時改；「公安事件」「公安問題」(公共安全) 不動。
-_SAFETY_FIX_RE = re.compile(r"公\s*安(?=\s*[，,]?\s*(?:上週|上個?月|上次|方面|事故|意外|複訓|訓練|演練|稽核|宣導|巡檢|規範))")
+# 「工安」在 95 份逐字稿裡全部寫成同音的「公安」(553 次)，但「公安」本身是常用詞；使用者 11-02 回覆「維持現狀」，不改。
 # 「供應商」的第一個字常被寫錯或漏掉 (「依應商」「侶應商」「儂應商」「是應商」)；「對應／回應／反應／適應」後面接商不改。
 _SUPPLIER_FIX_RE = re.compile(r"(?<![供反對回適呼響效感因順相答])(?:[依儂侶衣醫宜疑]\s*)?應\s*商(?![品家業機場標量談務人圈店界])")
 
@@ -296,7 +294,7 @@ def fix_meeting_terms(text: str) -> str:
     text = _fix_owner_names(text)
     text = _FIRMWARE_FIX_RE.sub("韌體", text)
     text = _VERIFY_FIX_RE.sub("驗證", _YIELD_FIX_RE.sub("良率", text))
-    text = _SUPPLIER_FIX_RE.sub("供應商", _SAFETY_FIX_RE.sub("工安", text))
+    text = _SUPPLIER_FIX_RE.sub("供應商", text)
     text = _COMPLAINT_FIX_RE.sub("客訴", _REPLY_CUSTOMER_FIX_RE.sub(r"\1回覆客戶", text))
     text = _ascii_punct_if_english(_fix_product_terms(_fix_hiring_and_order_terms(_fix_latin_in_cjk(text))))
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
