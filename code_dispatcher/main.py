@@ -1300,7 +1300,7 @@ async def translate_text(req: VoiceTranslateRequest) -> Dict[str, Any]:
         return {"status": "success", "translated_text": "（尚無內容可翻譯，請先錄音生成會議紀要）"}
 
     # 若傳入的文本包含逐字稿段落，自動剝離，僅翻譯核心紀要（摘要、待辦、決議），節省邊緣運算開銷
-    for marker in ["## 逐字稿", "## 完整逐字稿", "### 逐字稿"]:
+    for marker in ["## 逐字稿", "## 完整逐字稿", "### 逐字稿", "## Transcript"]:
         if marker in clean_text:
             clean_text = clean_text.split(marker)[0].strip()
 
@@ -1317,7 +1317,7 @@ async def translate_text(req: VoiceTranslateRequest) -> Dict[str, Any]:
         )
     else:
         prompt = (
-            "請將以下英文會議紀要翻譯成道地流暢的繁體中文 (台灣)，保持列點格式，僅輸出翻譯結果，不要包含任何多餘說明：\n\n"
+            "請將以下會議紀要翻譯成道地流暢的繁體中文 (台灣)，保持列點格式，人名、公司名與數字照原文，僅輸出翻譯結果，不要包含任何多餘說明：\n\n"
             f"{clean_text}"
         )
 
@@ -1732,8 +1732,13 @@ async def post_demo_regenerate() -> Dict[str, Any]:
 
 @app.post("/api/translate", tags=["Demo UI"])
 async def post_demo_translate(req: DemoTranslateRequest) -> Dict[str, Any]:
-    """Translate text between Traditional Chinese and English for Demo UI."""
-    direction = "zh2en" if req.to.lower() == "en" else "en2zh"
+    """Translate the minutes into Mandarin (to='zh') or English (to='en'); text already in that language comes back as is.
+    紀要跟著逐字稿的語言 (2026-11-03)，所以來源可能是中文也可能是英文。"""
+    from summary_utils import detect_language
+    target = "en" if req.to.lower() == "en" else "zh"
+    if detect_language(req.text or "") == target:
+        return {"text": (req.text or "").strip()}
+    direction = "zh2en" if target == "en" else "en2zh"
     v_req = VoiceTranslateRequest(text=req.text, direction=direction)
     res = await translate_text(v_req)
     return {"text": res.get("translated_text", "")}

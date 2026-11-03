@@ -462,11 +462,11 @@ details[open] summary::after{content:"收起 ▴"}
 
         <div class="card out minor">
           <details>
-            <summary>翻成英文、念給我聽 <span class="chip minor" style="margin-left:10px">加分項</span></summary>
+            <summary>翻譯 Translate <span class="chip minor" style="margin-left:10px">加分項</span></summary>
             <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">
               <div class="row">
-                <button class="btn" id="toEnBtn" disabled>紀要翻成英文</button>
-                <button class="btn" id="toZhBtn" disabled>英文翻成中文</button>
+                <button class="btn" id="toZhBtn" disabled>Translate to Mandarin</button>
+                <button class="btn" id="toEnBtn" disabled>Translate to English</button>
                 <button class="btn" id="ttsBtn" disabled>在耳麥念出來</button>
               </div>
               <div class="en" id="enBox">—</div>
@@ -1958,13 +1958,14 @@ function renderMinutes(r) {
   if (!r.summary && !r.todos) { el.minutes.innerHTML = '<div class="empty">還沒有紀要。</div>'; return; }
   const when = r.started_at ? new Date(r.started_at) : null;
   const meta = [when ? `${when.getMonth() + 1} 月 ${when.getDate()} 日 ${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}` : '', r.duration ? fmt(r.duration).replace(/^(\d+):(\d+)$/, (m, a, b) => `${+a} 分 ${+b} 秒`) : ''].filter(Boolean).join(' · ');
+  const L = minutesLabels(r.lang);
   el.minutes.innerHTML = `
     <div><h3>${esc(r.title || '會議')}</h3><div class="meta">${esc(meta)}</div></div>
-    <div><h4>摘要</h4><ul>${(r.summary || []).map(s => `<li>${esc(s)}</li>`).join('') || '<li>—</li>'}</ul></div>
-    <div><h4>待辦</h4><table><thead><tr><th>事項</th><th>負責人</th><th>時間</th></tr></thead><tbody>
-      ${(r.todos || []).map(t => `<tr><td>${esc(t.item)}</td><td>${esc(t.owner || '待定')}</td><td>${esc(t.due || '待定')}</td></tr>`).join('') || '<tr><td colspan="3">—</td></tr>'}
+    <div><h4>${L.summary}</h4><ul>${(r.summary || []).map(s => `<li>${esc(s)}</li>`).join('') || '<li>—</li>'}</ul></div>
+    <div><h4>${L.todos}</h4><table><thead><tr><th>${L.item}</th><th>${L.owner}</th><th>${L.due}</th></tr></thead><tbody>
+      ${(r.todos || []).map(t => `<tr><td>${esc(t.item)}</td><td>${esc(t.owner || L.tbd)}</td><td>${esc(t.due || L.tbd)}</td></tr>`).join('') || '<tr><td colspan="3">—</td></tr>'}
     </tbody></table></div>
-    <div><h4>決議</h4><ul>${(r.decisions || []).map(s => `<li>${esc(s)}</li>`).join('') || '<li>—</li>'}</ul></div>`;
+    <div><h4>${L.decisions}</h4><ul>${(r.decisions || []).map(s => `<li>${esc(s)}</li>`).join('') || '<li>—</li>'}</ul></div>`;
   if (r.transcript) {
     el.transcriptBox.hidden = false;
     el.transcriptBox.open = true;
@@ -1983,75 +1984,74 @@ el.copyBtn.addEventListener('click', async () => {
 });
 
 /* ---------- 加分項 ---------- */
+// 紀要跟著逐字稿的語言 (result.lang：zh／en)；翻譯的對象一律是紀要本身，已是目標語言時直接顯示、不呼叫 LLM。
+function minutesLabels(lang) {
+  return lang === 'en'
+    ? { summary: 'Summary', todos: 'Action Items', decisions: 'Decisions', item: 'Item', owner: 'Owner', due: 'Due', tbd: 'TBD' }
+    : { summary: '摘要', todos: '待辦', decisions: '決議', item: '事項', owner: '負責人', due: '時間', tbd: '待定' };
+}
+
 function getMinutesSummaryForTranslation() {
   if (!result) return '';
+  const L = minutesLabels(result.lang);
   const lines = [];
   if (result.summary && result.summary.length) {
-    lines.push('【摘要】');
+    lines.push(`【${L.summary}】`);
     result.summary.forEach(s => lines.push(`• ${s}`));
   }
   if (result.todos && result.todos.length) {
-    lines.push('\n【待辦事項】');
-    result.todos.forEach(t => lines.push(`• ${t.item} (${t.owner || '待定'})`));
+    lines.push(`\n【${L.todos}】`);
+    result.todos.forEach(t => lines.push(`• ${t.item} (${t.owner || L.tbd}${t.due && t.due !== '-' ? ', ' + t.due : ''})`));
   }
   if (result.decisions && result.decisions.length && result.decisions[0] !== '—') {
-    lines.push('\n【決議】');
+    lines.push(`\n【${L.decisions}】`);
     result.decisions.forEach(d => lines.push(`• ${d}`));
   }
   if (lines.length > 0) return lines.join('\n');
   if (result.markdown) {
-    const withoutTranscript = result.markdown.split('## 逐字稿')[0].split('## 完整逐字稿')[0];
-    return withoutTranscript.trim();
+    return result.markdown.split('## 逐字稿')[0].split('## 完整逐字稿')[0].split('## Transcript')[0].trim();
   }
   return '';
 }
 
-el.toEnBtn.addEventListener('click', async () => {
-  const textToTranslate = getMinutesSummaryForTranslation();
-  if (!textToTranslate || !textToTranslate.trim()) {
+async function translateMinutesTo(target, btn) {
+  const text = getMinutesSummaryForTranslation();
+  if (!text || !text.trim()) {
     toast('目前尚無會議紀要可供翻譯，請先錄音生成紀要');
     return;
   }
-  el.toEnBtn.disabled = true;
+  const srcLang = (result && result.lang) || 'zh';
+  if (srcLang === target) {          // 紀要本來就是這個語言：直接顯示
+    el.enBox.textContent = text;
+    el.ttsBtn.disabled = false;
+    return;
+  }
+  btn.disabled = true;
   let secs = 0;
-  el.enBox.textContent = '翻譯中（樹莓派邊緣推論約需 10~15 秒，已耗時 0s）…';
+  const label = target === 'en' ? 'Translating to English' : '翻譯成中文中';
+  el.enBox.textContent = `${label}（樹莓派邊緣推論約需 10~15 秒，已耗時 0s）…`;
   const timer = setInterval(() => {
     secs++;
-    el.enBox.textContent = `翻譯中（樹莓派邊緣推論約需 10~15 秒，已耗時 ${secs}s）…`;
+    el.enBox.textContent = `${label}（樹莓派邊緣推論約需 10~15 秒，已耗時 ${secs}s）…`;
   }, 1000);
   try {
-    const r = await api(API.translate, { text: textToTranslate, to: 'en' });
+    const r = await api(API.translate, { text, to: target });
     el.enBox.textContent = r.text || '（無翻譯結果）';
     el.ttsBtn.disabled = false;
   } catch (e) {
     el.enBox.textContent = '翻譯失敗：' + e.message;
   } finally {
     clearInterval(timer);
-    el.toEnBtn.disabled = false;
+    btn.disabled = false;
   }
-});
+}
 
-el.toZhBtn.addEventListener('click', async () => {
-  const src = el.enBox.textContent;
-  if (!src || src === '—' || src.startsWith('翻譯') || !src.trim()) {
-    toast('目前無英文內容可供反向翻譯');
-    return;
-  }
-  el.toZhBtn.disabled = true;
-  el.enBox.textContent = '翻譯中…';
-  try {
-    const r = await api(API.translate, { text: src, to: 'zh' });
-    el.enBox.textContent = r.text || '（無翻譯結果）';
-  } catch (e) {
-    el.enBox.textContent = '翻譯失敗：' + e.message;
-  } finally {
-    el.toZhBtn.disabled = false;
-  }
-});
+el.toZhBtn.addEventListener('click', () => translateMinutesTo('zh', el.toZhBtn));
+el.toEnBtn.addEventListener('click', () => translateMinutesTo('en', el.toEnBtn));
 
 el.ttsBtn.addEventListener('click', async () => {
   const txt = el.enBox.textContent;
-  if (!txt || txt === '—' || txt.startsWith('翻譯') || !txt.trim()) {
+  if (!txt || txt === '—' || txt.startsWith('翻譯') || txt.startsWith('Translating') || !txt.trim()) {
     toast('目前無內容可朗讀');
     return;
   }
