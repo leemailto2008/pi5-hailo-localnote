@@ -213,6 +213,20 @@ def _fix_latin_in_cjk(text: str) -> str:
     return _LATIN_IN_CJK_RE.sub(sub, text)
 
 
+# 英文會議的逐字稿裡，Whisper 偶爾用全形標點斷句（「Okay，let's start」「safety，last week」，11-03 英文 e2e 13 段有 7 處）。
+# 整段以英文為主 (英文字母超過中文字 2 倍) 時，全形逗號、句號、冒號、分號、問號、驚嘆號改成半形加空白。
+_FULLWIDTH_PUNCT = {"，": ", ", "。": ". ", "：": ": ", "；": "; ", "？": "? ", "！": "! ", "、": ", "}
+_FULLWIDTH_RE = re.compile("[" + "".join(_FULLWIDTH_PUNCT) + "]\\s*")
+
+
+def _ascii_punct_if_english(text: str) -> str:
+    cjk = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
+    latin = sum(1 for c in text if c.isascii() and c.isalpha())
+    if latin < 20 or latin <= 2 * cjk:
+        return text
+    return re.sub(r" {2,}", " ", _FULLWIDTH_RE.sub(lambda m: _FULLWIDTH_PUNCT[m.group(0)[0]], text)).rstrip()
+
+
 # 日期寫法統一：Whisper 常把「二月十五日」寫成「2.15日」或「2 月 15 日」(10-31 228 69 份逐字稿：分別 119 與 233 次，
 # 正常的「2月15日」2230 次)。統一成「2月15日」：24 份會改到的逐字稿，事實召回 0.692 → 0.704 (12 份變好、0 份變差)，CER 沒有變差。
 # 只認 1–12 月、1–31 日，且前面不能接數字或小數點 (避免「13.5日」「1.25.3日」之類)。
@@ -235,7 +249,7 @@ def fix_meeting_terms(text: str) -> str:
     text = _HOST_INTERVIEW_FIX_RE.sub(r"\1面試", _MANAGER_CTX_FIX_RE.sub(r"\1經理", text))
     text = _FIRMWARE_FIX_RE.sub("韌體", text)
     text = _VERIFY_FIX_RE.sub("驗證", _YIELD_FIX_RE.sub("良率", text))
-    text = _fix_product_terms(_fix_hiring_and_order_terms(_fix_latin_in_cjk(text)))
+    text = _ascii_punct_if_english(_fix_product_terms(_fix_hiring_and_order_terms(_fix_latin_in_cjk(text))))
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
 
