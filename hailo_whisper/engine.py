@@ -277,13 +277,17 @@ _QUOTA_FIX_RE = re.compile(r"((?:剩|還有|只有)\s*[\d一二三四五六七�
 _TRIAL_ORDER_FIX_RE = re.compile(r"([臺台]\s*的\s*)[市示是事式誕誤]\s*單|([臺台]\s*)[市示事式]\s*單")
 _NEW_QUOTE_FIX_RE = re.compile(r"新\s*爆\s*[價假架]")
 _RETRAIN_FIX_RE = re.compile(r"全\s*[原元員源圓]\s*[附付復複富]\s*[訊訓信迅]")
+# 「…前完成全員複訓，負責人是…」後半常聽壞或聽丟 (95 份：全原附 20、全原夥 16、全原， 14、全元， 13、全元附 13、全原訊 10…)；
+# 只在「完成」後面、接著逗號／句號／負責人／第N個時補成全員複訓 (「完成全部」「完成全原的」不動)
+_RETRAIN_TAIL_FIX_RE = re.compile(r"(?<=完成)\s*全\s*(?:[原元員源圓呿]\s*)?(?:[附付復複富夥夠夕]\s*)?(?:[訊訓信迅]\s*)?"
+                                  r"(?=\s*[，,。.]|\s*負|\s*第|\s*待|$)")
 
 
 def _fix_hiring_and_order_terms(text: str) -> str:
     text = _INTERVIEW_FIX_RE.sub(lambda m: f"{m.group(1)}面試了" if m.group(1) is not None else f"{m.group(2)}面試", text)
     text = _QUOTA_FIX_RE.sub(r"\1名額", _ONBOARD_FIX_RE.sub(r"\1完成報到", text))
     text = _TRIAL_ORDER_FIX_RE.sub(lambda m: f"{m.group(1) if m.group(1) is not None else m.group(2)}試單", text)
-    return _RETRAIN_FIX_RE.sub("全員複訓", _NEW_QUOTE_FIX_RE.sub("新報價", text))
+    return _RETRAIN_TAIL_FIX_RE.sub("全員複訓", _RETRAIN_FIX_RE.sub("全員複訓", _NEW_QUOTE_FIX_RE.sub("新報價", text)))
 
 
 # 展覽／測試／產品名的同音錯字 (11-02 95 份逐字稿)：「攤位費」寫成「攀位費／攀胃費／胃胃費…」約 150 次 (正確 44)；
