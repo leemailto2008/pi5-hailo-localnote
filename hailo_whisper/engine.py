@@ -284,13 +284,17 @@ _EXPO_FIX_RE = re.compile(r"展\s*[覃覚覆覵覾覷覉覥婭]")
 _TEST_FIX_RE = re.compile(r"(?<![預推觀量檢監偵])測\s*式")
 _REGRESSION_FIX_RE = re.compile(r"([\d一二三四五六七八九十兩]\s*輪\s*)回\s*[歸龜規彈歷覆覫,，\-]?\s*(?:測\s*[試式測]*|試)")
 _PSU_FIX_RE = re.compile(r"電\s*源\s*[供工公]?\s*[印依]\s*器")
-_THERMAL_FIX_RE = re.compile(r"(?:[文渾漁問聞]\s*[控空]|溫\s*空)\s*(?=模\s*組)")
+_THERMAL_FIX_RE = re.compile(r"(?:[文渾漁問聞灣減渡癮]\s*[控空]|溫\s*[空通同銅]|文\s*[後寇寶])\s*(?=模\s*組)")
+# 「天線模組」寫成「天性模組」(9 次)；「品質異常」的「異常」寫成「弈長／弊長／彌長／弄長／益長…」約 65 次、只剩一個字的「品質一，／品質異，」約 60 次
+_ANTENNA_FIX_RE = re.compile(r"天\s*性\s*(?=模\s*組)")
+_QUALITY_ISSUE_FIX_RE = re.compile(r"品質\s*(?:[弈弊彌弄益弶弧弣異一]\s*[長常嘗]|[一異弈弣弊](?=\s*[，,]))")
 
 
 def _fix_product_terms(text: str) -> str:
     text = _EXPO_FIX_RE.sub("展覽", _BOOTH_FEE_FIX_RE.sub("攤位費", text))
     text = _REGRESSION_FIX_RE.sub(r"\1回歸測試", text)
     text = _TEST_FIX_RE.sub("測試", text)
+    text = _QUALITY_ISSUE_FIX_RE.sub("品質異常", _ANTENNA_FIX_RE.sub("天線", text))
     return _THERMAL_FIX_RE.sub("溫控", _PSU_FIX_RE.sub("電源供應器", text))
 
 
