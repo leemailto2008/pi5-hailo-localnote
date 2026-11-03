@@ -774,7 +774,9 @@ def ensure_sections(md: str) -> str:
 # 「是」也排除：結尾總結「待辦事項是林主任…」的「項是林主任」不能整串當成負責人 (10-31 10 分鐘 e2e)
 _NAME_CHAR = r"(?:(?![需請加由交給與和的位名個人是一二三四五六七八九十兩])[\u4e00-\u9fff])"
 _OWNER_RE = re.compile(r"(?:負責人(?:是|為)?\s*)?(" + _NAME_CHAR + r"{1,3}(?:經理|副理|協理|主任|專員|工程師|公程師|處長|課長|組長|主管|老師))")
-_TIME_RE = re.compile(r"(\d{1,2}\s*月\s*\d{1,2}\s*日|\d{1,2}[./-]\d{1,2}(?:日)?|\d{1,2}\s*日前|下?週[一二三四五六日]|月底|下週|明天|今天(?![就先到開])|年底)")
+# 「今天」只有當期限用才算 (今天下班前、今天內)；「今天的週會」「今天有幾個議題」「今天這到 (今天就到這裡)」不是期限
+# (11-03 夜間 3 分鐘實錄：「待辦事項是王經理主持面試今天這到」的時間被填成「今天」)。
+_TIME_RE = re.compile(r"(\d{1,2}\s*月\s*\d{1,2}\s*日|\d{1,2}[./-]\d{1,2}(?:日)?|\d{1,2}\s*日前|下?週[一二三四五六日]|月底|下週|明天|今天(?![就先到開這說講的有是])|年底)")
 _DECISION_RE = re.compile(r"決定|決議|定案|確定|通過|同意|維持|改為|改成|暫停|取消"
                           r"|\b(?:decided|decision|agreed|approved|confirmed|keep the|go with|postponed?|cancel(?:l?ed)?|switch(?:ed)? to"
                           r"|sign a|signed an?|trial order|release (?:the )?fix|released)\b",

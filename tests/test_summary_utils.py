@@ -568,3 +568,10 @@ def test_split_translation_sections():
     assert secs[0][1] == "• 培訓課程9月2日\n• 工安複訓" and secs[2][1] == "• 3月15日發布"
     assert summary_utils.split_translation_sections("沒有標題的一段文字") == [(None, "沒有標題的一段文字")]
 
+
+def test_today_is_a_deadline_only_when_used_as_one():
+    got = summary_utils._todo_parts("招募方面，待辦事項是王經理主持面試今天這到")
+    assert got is None or got[2] != "今天"
+    got = summary_utils._todo_parts("待辦事項是王經理今天下班前回覆客戶")
+    assert got and got[1] == "王經理" and got[2] == "今天"
+
