@@ -157,7 +157,24 @@ def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) 
                 continue
         out.append(line.rstrip())
     # 摘要表格在點數限制之後才改成條列：表格常有 6–13 列，先轉再限 5 點會丟掉後面議題的日期與負責人
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(_fix_table_separators(_join_split_tables(_summary_table_to_bullets(out))))).strip()
+    lines = _drop_placeholder_bullets(_fix_table_separators(_join_split_tables(_summary_table_to_bullets(out))))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def _drop_placeholder_bullets(lines: List[str]) -> List[str]:
+    """段落已有內容時，模型多寫的「- 無」(英文紀要是「- None」，已換成內部的「- 無」) 拿掉 (11-03 英文 60 秒以上 e2e 的決議段)。"""
+    blocks: List[List[str]] = [[]]
+    for line in lines:
+        if line.strip().startswith("## "):
+            blocks.append([])
+        blocks[-1].append(line)
+    out: List[str] = []
+    for b in blocks:
+        bullets = [l for l in b if l.strip().startswith("- ")]
+        if any(l.strip() not in ("- 無", "-無") for l in bullets):
+            b = [l for l in b if l.strip() not in ("- 無", "-無")]
+        out.extend(b)
+    return out
 
 
 _CLOSING_FILLER_RE = re.compile(r"[，,。\s]*(?:好\s*[，,]?\s*)?(?:今天(?:就|先)?(?:到|開到)(?:這裡|這邊)|謝謝(?:大家|各位))[^，。\n]*")

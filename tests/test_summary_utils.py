@@ -482,3 +482,11 @@ def test_short_english_minutes_get_the_recap_actions_and_decisions():
     out = summary_utils.localize_minutes(summary_utils.merge_recap_into_minutes(md, tr), "en")
     assert "| reply to Lotus Tech | John | Wednesday |" in out and "And John" not in out
     assert "we agreed on a 30-unit trial order" in out.split("## Decisions")[1]
+
+
+def test_placeholder_bullet_dropped_when_the_section_has_items():
+    md = summary_utils.to_internal_sections("## Summary\n- Budget 800k\n\n## Decisions\n- Firmware fix on March 15\n- None")
+    out = clean_summary_markdown(md)
+    assert "- 無" not in out and "- Firmware fix on March 15" in out
+    assert "## 決議\n- 無" in clean_summary_markdown("## 摘要\n- 預算 80 萬\n\n## 決議\n- 無")      # 只有「無」時保留
+
