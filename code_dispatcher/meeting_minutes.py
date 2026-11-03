@@ -47,7 +47,7 @@ except Exception as _fix_err:   # 開發環境找不到時，只是少了跨切�
     def fix_meeting_terms(text: str) -> str:
         return text
 from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, fill_decisions_from_transcript,
-                           detect_language, ground_todo_table, is_recap_chunk, keep_alive_plan, localize_minutes,
+                           detect_language, drop_unspoken_years, ground_todo_table, is_recap_chunk, keep_alive_plan, localize_minutes,
                            merge_recap_into_minutes, recap_notes, to_internal_sections,
                            map_notes_complete, split_with_recap, summary_limits, take_stable_chunk, tidy_live_transcript)
 
@@ -1091,6 +1091,7 @@ class MeetingJobManager:
                 llm_done_event.set()
                 llm_ticker_task.cancel()
             raw_markdown = ground_todo_table(raw_markdown, transcript)   # 待辦的負責人／時間必須出自逐字稿
+            raw_markdown = drop_unspoken_years(raw_markdown, transcript)  # 模型自己補的年份 (逐字稿沒說) 拿掉
             raw_markdown = fill_decisions_from_transcript(raw_markdown, transcript)   # 決議段空白但逐字稿有明講
             minutes_lang = detect_language(transcript)
             self.status.summary_stream = localize_minutes(raw_markdown, minutes_lang)
@@ -1170,6 +1171,7 @@ class MeetingJobManager:
             try:
                 transcript = self.result.transcript
                 raw_markdown = ground_todo_table(await self._generate_summary_llm(transcript, job_id=job_id), transcript)
+                raw_markdown = drop_unspoken_years(raw_markdown, transcript)
                 raw_markdown = fill_decisions_from_transcript(raw_markdown, transcript)
                 minutes_lang = detect_language(transcript)
                 self.status.summary_stream = localize_minutes(raw_markdown, minutes_lang)

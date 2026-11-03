@@ -215,6 +215,20 @@ def _ground_norm(text: str) -> str:
     return to_taiwan_traditional(text or "").replace(" ", "").replace("　", "").replace("臺", "台").lower()
 
 
+# 模型常自己替日期補上年份 (11-03 英文 e2e：「September 2, 2023」「Feb 28, 2024」，逐字稿只說 September 2)。
+# 日期後面的四位數年份若逐字稿裡沒有出現，就拿掉；中文「2023年9月2日」同理。
+_EN_DATE_YEAR_RE = re.compile(r"\b((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?),?\s+((?:19|20)\d{2})\b", re.I)
+_ZH_DATE_YEAR_RE = re.compile(r"((?:19|20)\d{2})\s*年\s*(?=\d{1,2}\s*月)")
+
+
+def drop_unspoken_years(md: str, transcript: str) -> str:
+    if not md:
+        return md or ""
+    tr = transcript or ""
+    md = _EN_DATE_YEAR_RE.sub(lambda m: m.group(0) if m.group(2) in tr else m.group(1), md)
+    return _ZH_DATE_YEAR_RE.sub(lambda m: m.group(0) if m.group(1) in tr else "", md)
+
+
 _EN_BY_NAME_RE = re.compile(r"\bby\s+([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\b")
 _EN_NOT_NAMES = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "january", "february",
                  "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",

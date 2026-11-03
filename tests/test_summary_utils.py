@@ -490,3 +490,13 @@ def test_placeholder_bullet_dropped_when_the_section_has_items():
     assert "- 無" not in out and "- Firmware fix on March 15" in out
     assert "## 決議\n- 無" in clean_summary_markdown("## 摘要\n- 預算 80 萬\n\n## 決議\n- 無")      # 只有「無」時保留
 
+
+def test_years_the_meeting_never_said_are_dropped():
+    tr = "There is a course on September 2. Lotus Tech wants 200 units by February 28. The 2026 budget is 800k. 明年9月2日開課"
+    md = ("- Training on September 2, 2023, 30 seats\n- Order by Feb 28th, 2024\n- Budget for 2026: 800k\n"
+          "- Launch March 15 2026\n- 2023年9月2日開課，2026年3月1日上線")
+    out = summary_utils.drop_unspoken_years(md, tr)
+    assert "September 2, 30 seats" in out and "Feb 28th\n" in out
+    assert "Budget for 2026" in out and "March 15 2026" in out          # 逐字稿有 2026：保留
+    assert "9月2日開課，2026年3月1日上線" in out and "2023年" not in out
+
