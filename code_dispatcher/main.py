@@ -1734,14 +1734,32 @@ async def post_demo_regenerate() -> Dict[str, Any]:
 async def post_demo_translate(req: DemoTranslateRequest) -> Dict[str, Any]:
     """Translate the minutes into Mandarin (to='zh') or English (to='en'); text already in that language comes back as is.
     紀要跟著逐字稿的語言 (2026-11-03)，所以來源可能是中文也可能是英文。"""
-    from summary_utils import detect_language
+    from summary_utils import detect_language, split_translation_sections
     target = "en" if req.to.lower() == "en" else "zh"
     if detect_language(req.text or "") == target:
         return {"text": (req.text or "").strip()}
     direction = "zh2en" if target == "en" else "en2zh"
-    v_req = VoiceTranslateRequest(text=req.text, direction=direction)
-    res = await translate_text(v_req)
-    return {"text": res.get("translated_text", "")}
+    sections = split_translation_sections(req.text or "")
+    if len(sections) <= 1:
+        res = await translate_text(VoiceTranslateRequest(text=req.text, direction=direction))
+        return {"text": res.get("translated_text", "")}
+    # 分段翻譯：一次翻整份時小模型會漏掉或不翻「【摘要】」這類標題，長紀要也會被 600 字上限截掉 (11-03)
+    # 只有「• 無」的段落不送模型 (11-03：模型把「• 無」寫成三行「No meeting minutes summary provided…」)；
+    # 輸出行數不超過原文行數 (一條待辦曾被擴寫成六條)。
+    empty = {"無", "none", "無。", "-", "—", "n/a"}
+    out: List[str] = []
+    for head, body in sections:
+        if head:
+            out.append(head)
+        src_lines = [l for l in body.splitlines() if l.strip()]
+        if src_lines and all(l.strip().lstrip("•-* ").strip().lower() in empty for l in src_lines):
+            out.append("• None" if target == "en" else "• 無")
+        elif body:
+            res = await translate_text(VoiceTranslateRequest(text=body, direction=direction))
+            got = [l.rstrip() for l in (res.get("translated_text") or "").splitlines() if l.strip()]
+            out.extend(got[:len(src_lines)] or ["（無翻譯結果）"])
+        out.append("")
+    return {"text": "\n".join(out).strip()}
 
 
 @app.post("/api/tts", tags=["Demo UI"])

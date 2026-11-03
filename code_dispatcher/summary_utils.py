@@ -60,6 +60,23 @@ def detect_language(text: str) -> str:
     return "en" if latin * english_share(text) > 2 * cjk else "zh"
 
 
+_TRANSLATE_HEAD_RE = re.compile(r"^\s*【[^】\n]{1,20}】\s*$")
+
+
+def split_translation_sections(text: str) -> List[tuple]:
+    """網頁送來翻譯的紀要「【摘要】\n• …\n\n【待辦】\n• …」→ [(標題或 None, 內容), …]。
+    小模型一次翻整份時常把段落標題漏掉或不翻 (11-03 測試)，所以分段翻、標題由網頁直接給目標語言。"""
+    blocks: List[list] = []
+    for line in (text or "").splitlines():
+        if _TRANSLATE_HEAD_RE.match(line):
+            blocks.append([line.strip(), []])
+        else:
+            if not blocks:
+                blocks.append([None, []])
+            blocks[-1][1].append(line)
+    return [(h, "\n".join(b).strip()) for h, b in blocks if h or "\n".join(b).strip()]
+
+
 # 程式內部一律用中文段落標題處理 (ensure_sections、待辦表對照逐字稿…都以「## 摘要／待辦／決議」為鍵)，
 # 英文紀要在模型輸出後先換成內部標題，處理完再換回英文。
 SECTION_MISSING_NOTE_EN = "(Not generated: the model ran out of output length. Please refer to the transcript.)"

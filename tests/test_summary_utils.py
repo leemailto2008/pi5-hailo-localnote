@@ -560,3 +560,11 @@ def test_table_cells_in_decision_bullets_are_stripped():
     md2 = md.replace("- 確認是否需要重新整理紀錄 | - | - |", "- 預算維持原案 | 王經理 | - |")
     assert "- 預算維持原案（王經理）" in summary_utils.clean_summary_markdown(md2).split("## 決議")[1]
 
+
+def test_split_translation_sections():
+    text = "【Summary】\n• 培訓課程9月2日\n• 工安複訓\n\n【Action Items】\n• 送名單給瑪莉 (週四)\n\n【Decisions】\n• 3月15日發布"
+    secs = summary_utils.split_translation_sections(text)
+    assert [h for h, _ in secs] == ["【Summary】", "【Action Items】", "【Decisions】"]
+    assert secs[0][1] == "• 培訓課程9月2日\n• 工安複訓" and secs[2][1] == "• 3月15日發布"
+    assert summary_utils.split_translation_sections("沒有標題的一段文字") == [(None, "沒有標題的一段文字")]
+
