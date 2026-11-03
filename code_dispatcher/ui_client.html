@@ -2029,13 +2029,13 @@ async function translateMinutesTo(target, btn) {
   btn.disabled = true;
   let secs = 0;
   const label = target === 'en' ? 'Translating to English' : '翻譯成中文中';
-  el.enBox.textContent = `${label}（樹莓派邊緣推論約需 10~15 秒，已耗時 0s）…`;
+  el.enBox.textContent = `${label}（樹莓派邊緣推論約需 30~60 秒，已耗時 0s）…`;
   const timer = setInterval(() => {
     secs++;
-    el.enBox.textContent = `${label}（樹莓派邊緣推論約需 10~15 秒，已耗時 ${secs}s）…`;
+    el.enBox.textContent = `${label}（樹莓派邊緣推論約需 30~60 秒，已耗時 ${secs}s）…`;
   }, 1000);
   try {
-    const r = await api(API.translate, { text, to: target });
+    const r = await api(API.translate, { text, to: target }, 100000);   // 樹莓派上翻譯約 30–60 秒 (後端上限 90 秒)
     el.enBox.textContent = r.text || '（無翻譯結果）';
     el.ttsBtn.disabled = false;
   } catch (e) {
