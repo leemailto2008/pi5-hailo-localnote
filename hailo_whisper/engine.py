@@ -203,7 +203,10 @@ _SIGN_FIX_RE = re.compile(r"(?:(?<=先)|(?<=是新))\s*千(?=\s*[\d一二三四�
 # 外殼→外科／外可 10、負責→負負 10、通知→通之 9、替代料→替代了 9、議題是→議題示 9、調貨→掉貨 8、品質異常→品質一長 14、
 # 停車場→停車廠 7、八支→八指 6、正式→正是 (切換) 6、文宣→文生 (請) 5、交期→交其 (延) 5、專員→專源 5、意見→一件 (希望) 14
 _MISC2_FIX = [
-    (re.compile(r"([\d一二三四五六七八九十兩]\s*個\s*)直(?=\s*[，,]?\s*(?:已經|已|目前))"), r"\1職缺"),
+    (re.compile(r"([\d一二三四五六七八九十兩]\s*個\s*)(?:直|職(?![缺位務員責稱場業]))(?=\s*[，,]?\s*(?:已經|已|目前))"), r"\1職缺"),
+    # 11-03 夜間 120 分鐘：「下週會再安排六常面是有理協力主持」→ 六場面試由李協理主持
+    (re.compile(r"([\d一二三四五六七八九十兩]\s*)[常廠長]\s*(?=面\s*[是市事室世識試])"), r"\1場"),
+    (re.compile(r"協\s*力(?=\s*(?:主持|主吃|負責|安排))"), "協理"),
     (re.compile(r"[為綴]\s*持(?=\s*[新原舊現])"), "維持"),
     (re.compile(r"預\s*[寄及](?=\s*[停展上完出切])"), "預計"),
     (re.compile(r"自\s*安(?=\s*[課訓教])"), "資安"),
@@ -221,12 +224,14 @@ _MISC2_FIX = [
     (re.compile(r"正\s*是(?=\s*切換)"), "正式"),
     (re.compile(r"文\s*生(?=\s*請)"), "文宣"),
     (re.compile(r"交\s*其(?=\s*延)"), "交期"),
-    (re.compile(r"專\s*源(?=\s*[會在負主跟安，,])"), "專員"),
+    (re.compile(r"專\s*源(?=\s*[會在負主跟安週，,])"), "專員"),
     (re.compile(r"有\s*一件(?=\s*[，,]?\s*希望)"), "有意見"),
 ]
 
 
 def _fix_misc_terms(text: str) -> str:
+    for pat, rp in _MISC2_FIX:          # 先做 (「六常面是有理協力主持」要先變成「六場…協理」，後面的規則才認得)
+        text = pat.sub(rp, text)
     text = _AGAIN_FIX_RE.sub("再", text)
     text = _TRIAL_FIX_RE.sub("試", text)
     text = _THIS_MATTER_FIX_RE.sub("事", _HOSTED_BY_FIX_RE.sub("由", text))
@@ -238,8 +243,6 @@ def _fix_misc_terms(text: str) -> str:
     text = _SITE_FIX_RE.sub(site, text)
     text = _SIGN_FIX_RE.sub("簽", text)
     text = re.sub(r"(?<=是)新(?=簽)", "先", text)          # 「決議是新千五十臺」→「先簽」
-    for pat, rp in _MISC2_FIX:
-        text = pat.sub(rp, text)
     return text
 
 
@@ -306,6 +309,8 @@ def _fix_product_terms(text: str) -> str:
 # 前後 (略過空白) 都必須是中文字或全形標點，英文會議 (2026-11-03 起紀要跟著逐字稿語言) 的「is,」「two,」不會被動到。
 # 一次看 1–3 個連在一起的英文字 (「two of 職」)，逐字處理；全部都要保留時整段原樣不動。
 _LATIN_IN_CJK_RE = re.compile(r"(?<=[\u4e00-\u9fff，。、])(\s*)((?:'?[a-z][a-z']{0,7}\s*){1,3}?)(?=[\u4e00-\u9fff，。、])")
+# 數字前面的雜訊字尾 (「目前er3個職缺」)；只認多字母的雜訊，「v2」「e3」這類型號不動
+_LATIN_BEFORE_DIGIT_RE = re.compile(r"(?<=[\u4e00-\u9fff])\s*(?:er|est|ary|ers|ors|ing|um)\s*(?=\d)")
 _EN_NUMBERS = {"one": "一", "two": "二", "three": "三", "four": "四", "five": "五", "six": "六", "seven": "七",
                "eight": "八", "nine": "九", "ten": "十"}
 _EN_NOISE = {"er", "est", "ed", "y", "v", "es", "e", "en", "ors", "'s", "r", "um", "ers", "ly", "ing", "ar", "al", "nd",
@@ -322,7 +327,7 @@ def _fix_latin_in_cjk(text: str) -> str:
         changed = [w for w in out if w not in _EN_NUMBERS.values()]
         joined = "".join(w if w in _EN_NUMBERS.values() else f" {w} " for w in out).strip()
         return joined if not changed else f" {joined} "
-    return _LATIN_IN_CJK_RE.sub(sub, text)
+    return _LATIN_BEFORE_DIGIT_RE.sub("", _LATIN_IN_CJK_RE.sub(sub, text))
 
 
 # 英文會議的逐字稿裡，Whisper 偶爾用全形標點斷句（「Okay，let's start」「safety，last week」，11-03 英文 e2e 13 段有 7 處）。
@@ -380,6 +385,7 @@ def fix_meeting_terms(text: str) -> str:
     text = _COMPLAINT_FIX_RE.sub("客訴", _REPLY_CUSTOMER_FIX_RE.sub(r"\1回覆客戶", text))
     text = _TOPIC_FIX_RE.sub(r"\1議題", text)
     text = _fix_owner_names(_fix_misc_terms(text))   # 也在英文碎片拿掉、英文數字改成中文之後 (「two 個直」「請皇 er 專員」)
+    text = _HOSTED_BY_FIX_RE.sub("由", _fix_hiring_and_order_terms(text))   # 「六場面是有李協理主持」：前面的修正做完才認得
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
 
