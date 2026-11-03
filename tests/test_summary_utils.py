@@ -548,3 +548,15 @@ def test_ownerless_duplicate_todo_row_is_dropped():
     assert out.count("回報星光材料的交期") == 1 and "| 回報星光材料的交期 | 李協理 | 週五 |" in out
     assert "| 送預算表 | - | 10月7日前 |" in out          # 沒有重複的照舊保留
 
+
+def test_table_cells_in_decision_bullets_are_stripped():
+    md = ("## 摘要\n- 討論：天竹同學推薦加入團隊 | - | - |\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n"
+          "| 確認是否需要重新整理紀錄 | - | - |\n\n## 決議\n- 確認是否需要重新整理紀錄 | - | - |")
+    out = summary_utils.clean_summary_markdown(md)
+    assert "- 討論：天竹同學推薦加入團隊\n" in out + "\n"
+    decisions = out.split("## 決議")[1]
+    assert "|" not in decisions and "重新整理紀錄" not in decisions and "- 無" in decisions
+    # 不是待辦表事項的決議：只拿掉表格格子
+    md2 = md.replace("- 確認是否需要重新整理紀錄 | - | - |", "- 預算維持原案 | 王經理 | - |")
+    assert "- 預算維持原案（王經理）" in summary_utils.clean_summary_markdown(md2).split("## 決議")[1]
+

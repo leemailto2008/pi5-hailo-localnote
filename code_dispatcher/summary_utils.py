@@ -177,8 +177,38 @@ def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) 
                 continue
         out.append(line.rstrip())
     # 摘要表格在點數限制之後才改成條列：表格常有 6–13 列，先轉再限 5 點會丟掉後面議題的日期與負責人
-    lines = _drop_placeholder_bullets(_fix_table_separators(_join_split_tables(_summary_table_to_bullets(out))))
+    lines = _drop_placeholder_bullets(_strip_table_cells_from_bullets(
+        _fix_table_separators(_join_split_tables(_summary_table_to_bullets(out)))))
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def _strip_table_cells_from_bullets(lines: List[str]) -> List[str]:
+    """待辦表的列被寫進摘要／決議的條目 (11-03 使用者測試：決議「- 確認是否需要重新整理紀錄 | - | - |」)：
+    條目只留第一格，其餘有內容的格子放進括號 (「加開一站檢查（黃專員，2月15日）」)；和待辦表事項完全相同的決議拿掉
+    (待辦表已有)。段落因此變空時補「- 無」。"""
+    todo_items = {c.strip() for l in lines if l.strip().startswith("|") and not _is_sep(l)
+                  for c in [l.strip().strip("|").split("|")[0]]}
+    out: List[str] = []
+    section, kept = None, None
+    for line in lines:
+        s = line.strip()
+        if s.startswith("## "):
+            if kept == 0:
+                out.append("- 無")
+            section, kept = s[3:].strip(), None
+        if section in ("摘要", "決議") and s.startswith("- ") and "|" in s:
+            cells = [c.strip() for c in s[2:].split("|")]
+            first, extra = cells[0], [c for c in cells[1:] if c and c not in _TODO_SKIP]
+            kept = kept or 0
+            if len(first) < 2 or (section == "決議" and first in todo_items):
+                continue
+            line = f"- {first}（{'，'.join(extra)}）" if extra else f"- {first}"
+        if section in ("摘要", "決議") and s.startswith("- "):
+            kept = (kept or 0) + 1
+        out.append(line)
+    if kept == 0:
+        out.append("- 無")
+    return out
 
 
 def _drop_placeholder_bullets(lines: List[str]) -> List[str]:
