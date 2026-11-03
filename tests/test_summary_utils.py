@@ -418,3 +418,26 @@ def test_todo_without_marker_takes_the_action_after_the_owner():
 def test_recap_drops_a_bare_topic_label():
     out = summary_utils.recap_notes("最後總結一下，招募方面，決議是週五前完成報到，依應商方面,，展覽方面，決議是參加新竹展覽，今天就到這裡")
     assert "依應商方面" not in out and "招募方面" in out and "展覽方面" in out
+
+
+def test_english_minutes_keep_their_language():
+    assert summary_utils.detect_language("John will send the revised quote by Friday, and Mary confirms capacity.") == "en"
+    assert summary_utils.detect_language("新的 ERP 系統下週上線，test 跑完再切換") == "zh"
+    md = ("## Summary\n- Budget: 2M next year\n\n## Action Items\n| Item | Owner | Due |\n|---|---|---|\n"
+          "| Send quote | John | Friday |\n\n## Decisions\n- None")
+    internal = summary_utils.to_internal_sections(md)
+    assert "## 摘要" in internal and "| 事項 | 負責人 | 時間 |" in internal and "- 無" in internal
+    shown = summary_utils.localize_minutes(ensure_sections(clean_summary_markdown(internal)), "en")
+    assert shown.index("## Summary") < shown.index("## Action Items") < shown.index("## Decisions")
+    assert "| Item | Owner | Due |" in shown and "- None" in shown and "摘要" not in shown
+    assert summary_utils.localize_minutes(internal, "zh") == internal
+
+
+def test_english_todos_and_decisions_in_long_minutes():
+    assert summary_utils._todo_parts("Quote: John will send the revised quote by Friday") == ("send the revised quote", "John", "Friday")
+    assert summary_utils._todo_parts("Owner: Mary Chen, due Nov 5, confirm sample capacity")[1:] == ("Mary Chen", "Nov 5")
+    assert summary_utils._todo_parts("We will review it next week") is None
+    md = summary_utils.localize_minutes(assemble_long_minutes(
+        ["- Budget: decided to keep 2M for next year", "- Orders: John will send the quote by Friday"]), "en")
+    assert "| send the quote | John | Friday |" in md and "- Budget: decided to keep 2M for next year" in md.split("## Decisions")[1]
+

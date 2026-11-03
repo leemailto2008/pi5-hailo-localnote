@@ -191,7 +191,9 @@ def _fix_product_terms(text: str) -> str:
 # 或插入沒有意義的字尾 (「持續's 驗證」「至少要做三輪回 its test」「er」「est」)。
 # 只動「前後都是中文或中文標點」的小寫字：數字詞改回中文，下列明顯是雜訊的虛詞與字尾刪掉；
 # 其他英文 (ERP、test、bug、pin…) 都保留，硬體會議常講。40 份會改到的逐字稿：CER 0.3643 → 0.3615，沒有一份變差。
-_LATIN_IN_CJK_RE = re.compile(r"(?<=[\u4e00-\u9fff，。、,\s])\s*('?[a-z][a-z']{0,7})\s*(?=[\u4e00-\u9fff，。、,])")
+# 前後 (略過空白) 都必須是中文字或全形標點，英文會議 (2026-11-03 起紀要跟著逐字稿語言) 的「is,」「two,」不會被動到。
+# 一次看 1–3 個連在一起的英文字 (「two of 職」)，逐字處理；全部都要保留時整段原樣不動。
+_LATIN_IN_CJK_RE = re.compile(r"(?<=[\u4e00-\u9fff，。、])(\s*)((?:'?[a-z][a-z']{0,7}\s*){1,3}?)(?=[\u4e00-\u9fff，。、])")
 _EN_NUMBERS = {"one": "一", "two": "二", "three": "三", "four": "四", "five": "五", "six": "六", "seven": "七",
                "eight": "八", "nine": "九", "ten": "十"}
 _EN_NOISE = {"er", "est", "ed", "y", "v", "es", "e", "en", "ors", "'s", "r", "um", "ers", "ly", "ing", "ar", "al", "nd",
@@ -201,16 +203,14 @@ _EN_NOISE = {"er", "est", "ed", "y", "v", "es", "e", "en", "ors", "'s", "r", "um
 
 def _fix_latin_in_cjk(text: str) -> str:
     def sub(m):
-        w = m.group(1)
-        if w in _EN_NUMBERS:
-            return _EN_NUMBERS[w]
-        return "" if w in _EN_NOISE else m.group(0)
-    for _ in range(4):   # 刪掉一個碎片後，旁邊的字可能才變成「前後都是中文」(「two of 職」)，重複到不再變動
-        fixed = _LATIN_IN_CJK_RE.sub(sub, text)
-        if fixed == text:
-            break
-        text = fixed
-    return text
+        words = m.group(2).split()
+        out = [_EN_NUMBERS.get(w, w) for w in words if w not in _EN_NOISE]
+        if out == words:
+            return m.group(0)
+        changed = [w for w in out if w not in _EN_NUMBERS.values()]
+        joined = "".join(w if w in _EN_NUMBERS.values() else f" {w} " for w in out).strip()
+        return joined if not changed else f" {joined} "
+    return _LATIN_IN_CJK_RE.sub(sub, text)
 
 
 # 日期寫法統一：Whisper 常把「二月十五日」寫成「2.15日」或「2 月 15 日」(10-31 228 69 份逐字稿：分別 119 與 233 次，

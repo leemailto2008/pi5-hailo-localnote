@@ -196,6 +196,8 @@ def test_speech_seconds_without_faster_whisper(monkeypatch):
     ("預測式模型，股票回測，文控中心，文控流程", "預測式模型，股票回測，文控中心，文控流程"),            # 正常用法不動
     ("待辦事項是王精理主持面是，請張金李跟對方確認，交給林經歷，", "待辦事項是王經理主持面試，請張經理跟對方確認，交給林經理，"),
     ("請大家精力集中，他的經歷很豐富，主持面是前要準備", "請大家精力集中，他的經歷很豐富，主持面是前要準備"),   # 正常用法不動
+    ("So this is, the plan: two, three, and one more. In the end it is on track.",
+     "So this is, the plan: two, three, and one more. In the end it is on track."),          # 英文會議不動
     # 韌體／良率／驗證
     ("第三個議題是電源供應器的任體更新，任體當機，任體方面，決議是", "第三個議題是電源供應器的韌體更新，韌體當機，韌體方面，決議是"),
     ("認體更新，韁體修正版", "韌體更新，韌體修正版"),

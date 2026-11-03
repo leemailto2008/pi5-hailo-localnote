@@ -26,6 +26,54 @@ def to_taiwan_traditional(text: str) -> str:
         return text
 
 
+# 紀要用逐字稿本身的語言 (2026-11-03 使用者指定：英文會議就出英文紀要，不翻譯)。
+# 逐字稿裡中文字與英文字母的比例：英文一個字約 4–5 個字母，中文一個詞 1–2 個字；字母數超過中文字數 2 倍才算英文會議。
+# 中文會議夾雜的英文術語 (ERP、test、bug) 遠低於這個比例。
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_LATIN_RE = re.compile(r"[A-Za-z]")
+
+
+def detect_language(text: str) -> str:
+    """回傳 "en" 或 "zh"。"""
+    cjk = len(_CJK_RE.findall(text or ""))
+    latin = len(_LATIN_RE.findall(text or ""))
+    return "en" if latin >= 20 and latin > 2 * cjk else "zh"
+
+
+# 程式內部一律用中文段落標題處理 (ensure_sections、待辦表對照逐字稿…都以「## 摘要／待辦／決議」為鍵)，
+# 英文紀要在模型輸出後先換成內部標題，處理完再換回英文。
+SECTION_MISSING_NOTE_EN = "(Not generated: the model ran out of output length. Please refer to the transcript.)"
+_EN_HEADINGS = {"摘要": "Summary", "待辦": "Action Items", "決議": "Decisions"}
+_EN_HEADING_RE = re.compile(r"^\s*#{1,4}\s*\**\s*(summary|key points|action items?|to-?dos?|tasks|decisions?)\s*\**\s*:?\s*$", re.I | re.M)
+_EN_TODO_HEADER_RE = re.compile(r"^\|\s*(?:item|task|action(?: item)?)\s*\|\s*(?:owner|assignee|responsible)\s*\|\s*(?:due|deadline|time|date|when)\s*\|\s*$", re.I | re.M)
+
+
+def to_internal_sections(md: str) -> str:
+    """英文紀要 → 內部格式：段落標題、待辦表頭、「None」佔位換成中文。內容文字不動。"""
+    if not md:
+        return md or ""
+
+    def head(m):
+        k = m.group(1).lower()
+        name = "摘要" if k in ("summary", "key points") else ("決議" if k.startswith("decision") else "待辦")
+        return f"## {name}"
+    md = _EN_HEADING_RE.sub(head, md)
+    md = _EN_TODO_HEADER_RE.sub("| 事項 | 負責人 | 時間 |", md)
+    md = re.sub(r"^\|\s*(?:none|n/a)\s*\|", "| 無 |", md, flags=re.I | re.M)
+    return re.sub(r"^(\s*[-*•]\s*)(?:none|n/a)\.?\s*$", r"\1無", md, flags=re.I | re.M)
+
+
+def localize_minutes(md: str, lang: str) -> str:
+    """內部格式 → 顯示用：英文紀要把段落標題、待辦表頭、「無」與「未產生」說明換回英文；中文紀要原樣。"""
+    if lang != "en" or not md:
+        return md or ""
+    for zh, en in _EN_HEADINGS.items():
+        md = re.sub(rf"^## {zh}\s*$", f"## {en}", md, flags=re.M)
+    md = md.replace("| 事項 | 負責人 | 時間 |", "| Item | Owner | Due |").replace(SECTION_MISSING_NOTE, SECTION_MISSING_NOTE_EN)
+    md = re.sub(r"^\|\s*無\s*\|", "| None |", md, flags=re.M)
+    return re.sub(r"^(\s*-\s*)無\s*$", r"\1None", md, flags=re.M)
+
+
 # 紀要裡的日期也去掉空白：小模型常把逐字稿的「6月14日」寫成「6月14 日」或「6 月 14 日」(10-31 10 分鐘 e2e)
 _SPACED_DATE_RE = re.compile(r"(?<!\d)(1[0-2]|[1-9])\s*月\s*(3[01]|[12]\d|[1-9])\s*日")
 
@@ -527,7 +575,31 @@ def ensure_sections(md: str) -> str:
 _NAME_CHAR = r"(?:(?![需請加由交給與和的位名個人是一二三四五六七八九十兩])[\u4e00-\u9fff])"
 _OWNER_RE = re.compile(r"(?:負責人(?:是|為)?\s*)?(" + _NAME_CHAR + r"{1,3}(?:經理|副理|協理|主任|專員|工程師|公程師|處長|課長|組長|主管|老師))")
 _TIME_RE = re.compile(r"(\d{1,2}\s*月\s*\d{1,2}\s*日|\d{1,2}[./-]\d{1,2}(?:日)?|\d{1,2}\s*日前|下?週[一二三四五六日]|月底|下週|明天|今天(?![就先到開])|年底)")
-_DECISION_RE = re.compile(r"決定|決議|定案|確定|通過|同意|維持|改為|改成|暫停|取消")
+_DECISION_RE = re.compile(r"決定|決議|定案|確定|通過|同意|維持|改為|改成|暫停|取消"
+                          r"|\b(?:decided|decision|agreed|approved|confirmed|keep the|go with|postponed?|cancel(?:l?ed)?|switch(?:ed)? to)\b",
+                          re.I)
+# 英文紀要的待辦：「John will send the quote by Friday」「Owner: Mary, due Nov 5」
+_EN_OWNER_RE = re.compile(r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+(?:will|to|should|needs to|is to|must)\s+(.+)"
+                          r"|(?i:owner|assigned to)\s*:?\s*([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)")
+_EN_TIME_RE = re.compile(r"\b(?:by|before|on|due|until)\s+((?:next\s+)?(?:mon|tues|wednes|thurs|fri|satur|sun)day"
+                         r"|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?"
+                         r"|\d{1,2}/\d{1,2}|tomorrow|today|next week|(?:the )?end of (?:the )?(?:week|month))\b", re.I)
+
+
+def _todo_parts_en(line: str):
+    """英文條目 → (事項, 負責人, 時間) 或 None：要同時有人名 (大寫開頭) 與期限。"""
+    mt = _EN_TIME_RE.search(line)
+    mo = _EN_OWNER_RE.search(line)
+    if not (mo and mt):
+        return None
+    owner = mo.group(1) or mo.group(3)
+    if owner.split()[0].lower() in ("we", "they", "i", "you", "it", "this", "that", "the", "all", "everyone", "team"):
+        return None
+    action = (mo.group(2) or "").replace(mt.group(0), "")
+    action = re.split(r"[,;.]", action)[0].strip()
+    if len(action) < 3:
+        action = re.split(r"[:,;.]", line)[0].strip()
+    return action[:40], owner, mt.group(1)
 
 
 def _note_lines(notes: str) -> List[str]:
@@ -565,7 +637,7 @@ def _todo_parts(line: str):
                 return item[:20], mo.group(1), mt.group(1)
     mo, mt = _OWNER_RE.search(line), _TIME_RE.search(line)
     if not (mo and mt):
-        return None
+        return _todo_parts_en(line) if detect_language(line) == "en" else None
     first = _CLAUSE_SPLIT_RE.split(line)[0].strip()
     if mo.end() <= len(first):
         # 負責人就在第一個子句裡 (STT 把「待辦事項是」聽成別的字時，整段總結常沒有標點)：事項取負責人後面的動作

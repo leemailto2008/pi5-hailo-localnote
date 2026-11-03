@@ -47,7 +47,8 @@ except Exception as _fix_err:   # 開發環境找不到時，只是少了跨切�
     def fix_meeting_terms(text: str) -> str:
         return text
 from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, fill_decisions_from_transcript,
-                           ground_todo_table, is_recap_chunk, keep_alive_plan, merge_recap_into_minutes, recap_notes,
+                           detect_language, ground_todo_table, is_recap_chunk, keep_alive_plan, localize_minutes,
+                           merge_recap_into_minutes, recap_notes, to_internal_sections,
                            map_notes_complete, split_with_recap, summary_limits, take_stable_chunk, tidy_live_transcript)
 
 # 長會議紀要 (2026-10-27 e2e)：Hailo qwen3:1.7b 單次請求約 1500 字就 context full (HTTP 500)，
@@ -76,26 +77,34 @@ SUMMARY_PREMAP_LAG = int(os.environ.get("PI5_SUMMARY_PREMAP_LAG", "1000"))     #
 SUMMARY_PREMAP_POLL_S = 10.0
 
 
-async def stream_map_notes(prompt: str, keep_alive: Optional[int] = None, hailo_only: bool = False):
+async def stream_map_notes(prompt: str, keep_alive: Optional[int] = None, hailo_only: bool = False, lang: str = "zh"):
     """長會議逐段抽重點：串流生成，compact_notes() 會留下的 4 條都寫完就停 (map_notes_complete)。
     取消串流時 hailo-ollama 會立刻停止生成 (2026-11-01 228 實測)；非串流必須等 num_predict 用完，模型常多寫一兩條被丟掉。
     Hailo 在第一個 token 前失敗 (例如 hailo-ollama 正在重啟) 時，每 5 s 重試、最多 2 次，才改用 CPU 後端。回傳 (文字, backend)。"""
     from contextlib import aclosing
     acc, backend = "", None
-    async with aclosing(aiter_chat_stream(prompt, system=MAP_SYSTEM_MSG, temperature=0.2, num_predict=160,
+    lim = LANG_LIMITS.get(lang, LANG_LIMITS["zh"])
+    async with aclosing(aiter_chat_stream(prompt, system=lim["map_sys"], temperature=0.2, num_predict=160 if lang == "zh" else 220,
                                           timeout=120.0, hailo_keep_alive=keep_alive, hailo_retries=2,
                                           hailo_only=hailo_only)) as stream:
         async for tok, _done, b in stream:
             backend = b
             if tok:
                 acc += tok
-                if map_notes_complete(acc):
+                if map_notes_complete(acc, max_len=lim["note_len"]):
                     break
     return acc.strip(), backend
 
 
-def map_user_prompt(piece: str, idx: int, total: int) -> str:
+def map_user_prompt(piece: str, idx: int, total: int, lang: str = "zh") -> str:
     """最後一段明確告知是會議結尾：會議常以總結收尾，總結裡的決議/待辦/負責人是紀要最重要的內容。"""
+    if lang == "en":
+        if idx == total and total > 1:
+            return (f"Meeting transcript (part {idx}/{total}, the last part):\n{piece}\n\n"
+                    "If it ends with a recap, list the actions and owners from the recap first; otherwise list this part's key points:")
+        if total <= 0:
+            return f"Meeting transcript (part {idx}):\n{piece}\n\nList this part's key points:"
+        return f"Meeting transcript (part {idx}/{total}):\n{piece}\n\nList this part's key points:"
     if idx == total and total > 1:
         return (f"會議逐字稿（第 {idx}/{total} 段，會議最後一段）：\n{piece}\n\n"
                 "如果最後有總結，請優先條列總結提到的事項與負責人；沒有總結就條列本段重點：")
@@ -118,6 +127,33 @@ MAP_SYSTEM_MSG = (
     "若本段是會議結尾的總結，只列總結提到的事項。不要開場白，不要解釋，不要重複規則，只輸出條列。"
 )
 
+# 英文會議用英文紀要 (2026-11-03 使用者指定：紀要跟著逐字稿的語言，不翻譯)。格式與中文版相同，只是段落標題與表頭換成英文；
+# 模型輸出後先用 to_internal_sections() 換回內部的中文標題，後處理完再由 localize_minutes() 換回英文。
+MINUTES_SYSTEM_MSG_EN = (
+    "You are a meeting secretary. Write concise meeting minutes in English only, in Markdown, with exactly three sections "
+    "in this order: ## Summary, ## Action Items, ## Decisions. Rules: Summary has one bullet per topic, at most 5 bullets, "
+    "each under 25 words, keeping the key numbers, dates, amounts and names. Action Items is a table "
+    "\"| Item | Owner | Due |\" with one row per action, at most 4 rows, each item under 10 words and not copied from the "
+    "summary; if there are none, write one row \"| None | - | - |\". Decisions has at most 3 bullets, each under 20 words; "
+    "if there are none, write \"- None\". If the meeting ends with a recap, follow the recap. No preamble, no explanations, "
+    "do not repeat these rules, and stop after the three sections."
+)
+MAP_SYSTEM_MSG_EN = (
+    "You are a meeting secretary. List the key points of this part of the meeting in English only. Rules: one line per topic, "
+    "at most 4 lines, each under 20 words, each starting with \"- Topic name:\" (for example \"- Training:\", \"- Customer order:\", "
+    "\"- Budget:\"). Always keep the key numbers, dates, amounts, people and company names, and the owner and deadline of each "
+    "action. Leave out the meeting date, attendees and anything unrelated to a topic. If this part is the closing recap, list "
+    "only what the recap mentions. No preamble, no explanations, do not repeat these rules, output only the list."
+)
+# 英文每個字元的資訊量約為中文的 1/4：單次整理、分段大小與每條重點長度都放寬 (Hailo 單次請求上限約 1500 個中文字，
+# 換成英文約 5–6 千字元)。
+LANG_LIMITS = {
+    "zh": {"single_max": SUMMARY_SINGLE_MAX_CHARS, "chunk": SUMMARY_CHUNK_CHARS, "long_single": SUMMARY_LONG_SINGLE_CHARS,
+           "note_len": 40, "minutes_sys": MINUTES_SYSTEM_MSG, "map_sys": MAP_SYSTEM_MSG},
+    "en": {"single_max": 4000, "chunk": 3200, "long_single": 2600, "note_len": 120,
+           "minutes_sys": MINUTES_SYSTEM_MSG_EN, "map_sys": MAP_SYSTEM_MSG_EN},
+}
+
 
 
 class MeetingResult(BaseModel):
@@ -130,6 +166,7 @@ class MeetingResult(BaseModel):
     decisions: List[str] = Field(default_factory=list)
     transcript: str = ""
     markdown: str = ""
+    lang: str = "zh"          # 紀要語言 (跟著逐字稿)：zh／en
 
 
 class JobStatus(BaseModel):
@@ -192,6 +229,28 @@ class OfflineDetector:
             except Exception:
                 self._is_offline = True
             await asyncio.sleep(self.check_interval)
+
+
+def localize_parsed(parsed: Dict[str, Any], lang: str) -> Dict[str, Any]:
+    """英文紀要：解析結果裡的「無」佔位改成 None (畫面上顯示的是解析後的條目)。"""
+    if lang != "en":
+        return parsed
+    fix = lambda x: "None" if x in ("無", "-") else x
+    parsed["summary"] = [fix(x) for x in parsed.get("summary", [])]
+    parsed["decisions"] = [fix(x) for x in parsed.get("decisions", [])]
+    for t in parsed.get("todos", []):
+        for k in ("item", "owner", "due"):
+            if t.get(k) == "無":
+                t[k] = "None"
+    return parsed
+
+
+def minutes_document(raw_markdown: str, transcript: str, formatted_dt: str, duration_sec: int, lang: str) -> str:
+    """存檔與「複製紀要」用的完整 Markdown：標題、三段紀要、逐字稿；英文紀要用英文標題。"""
+    body = localize_minutes(raw_markdown.strip(), lang)
+    if lang == "en":
+        return f"# Meeting Minutes · {formatted_dt} · {duration_sec} s\n\n{body}\n\n## Transcript\n{transcript}"
+    return f"# 會議紀要 · {formatted_dt} · {duration_sec} 秒\n\n{body}\n\n## 逐字稿\n{transcript}"
 
 
 def parse_markdown_minutes(raw_text: str) -> Dict[str, Any]:
@@ -1007,7 +1066,7 @@ class MeetingJobManager:
             llm_done_event = asyncio.Event()
             llm_start = time.time()
 
-            is_long_hierarchical = bool(len(transcript.strip()) > SUMMARY_SINGLE_MAX_CHARS)
+            is_long_hierarchical = bool(len(transcript.strip()) > LANG_LIMITS[detect_language(transcript)]["single_max"])
             est_total_llm_sec = max(25.0, float(len(transcript.strip()) / 1400.0) * 16.0)
 
             async def _llm_ticker():
@@ -1031,7 +1090,8 @@ class MeetingJobManager:
                 llm_ticker_task.cancel()
             raw_markdown = ground_todo_table(raw_markdown, transcript)   # 待辦的負責人／時間必須出自逐字稿
             raw_markdown = fill_decisions_from_transcript(raw_markdown, transcript)   # 決議段空白但逐字稿有明講
-            self.status.summary_stream = raw_markdown
+            minutes_lang = detect_language(transcript)
+            self.status.summary_stream = localize_minutes(raw_markdown, minutes_lang)
 
             llm_dur = round(time.time() - llm_start, 2)
             total_lat = round(time.time() - rec_finish_time, 2)
@@ -1044,25 +1104,22 @@ class MeetingJobManager:
             if self._cancellation_token.is_set():
                 return
 
-            parsed = parse_markdown_minutes(raw_markdown)
+            parsed = localize_parsed(parse_markdown_minutes(raw_markdown), minutes_lang)
 
             formatted_dt = start_dt.strftime("%m-%d %H:%M")
-            final_markdown = (
-                f"# 會議紀要 · {formatted_dt} · {duration_sec} 秒\n\n"
-                f"{raw_markdown.strip()}\n\n"
-                f"## 逐字稿\n{transcript}"
-            )
+            final_markdown = minutes_document(raw_markdown, transcript, formatted_dt, duration_sec, minutes_lang)
 
             self.result = MeetingResult(
                 job=job_id,
-                title="會議紀要",
+                title="會議紀要" if minutes_lang == "zh" else "Meeting Minutes",
                 started_at=start_dt.isoformat(),
                 duration=duration_sec,
                 summary=parsed["summary"],
                 todos=parsed["todos"],
                 decisions=parsed["decisions"],
                 transcript=transcript,
-                markdown=final_markdown
+                markdown=final_markdown,
+                lang=minutes_lang
             )
 
             # --- PHASE 4: Done ---
@@ -1112,21 +1169,20 @@ class MeetingJobManager:
                 transcript = self.result.transcript
                 raw_markdown = ground_todo_table(await self._generate_summary_llm(transcript, job_id=job_id), transcript)
                 raw_markdown = fill_decisions_from_transcript(raw_markdown, transcript)
-                self.status.summary_stream = raw_markdown
-                parsed = parse_markdown_minutes(raw_markdown)
+                minutes_lang = detect_language(transcript)
+                self.status.summary_stream = localize_minutes(raw_markdown, minutes_lang)
+                parsed = localize_parsed(parse_markdown_minutes(raw_markdown), minutes_lang)
 
                 start_dt = datetime.fromisoformat(self.result.started_at) if self.result.started_at else datetime.now()
                 formatted_dt = start_dt.strftime("%m-%d %H:%M")
-                final_markdown = (
-                    f"# 會議紀要 · {formatted_dt} · {self.result.duration} 秒\n\n"
-                    f"{raw_markdown.strip()}\n\n"
-                    f"## 逐字稿\n{transcript}"
-                )
+                final_markdown = minutes_document(raw_markdown, transcript, formatted_dt, self.result.duration, minutes_lang)
 
                 self.result.summary = parsed["summary"]
                 self.result.todos = parsed["todos"]
                 self.result.decisions = parsed["decisions"]
                 self.result.markdown = final_markdown
+                self.result.lang = minutes_lang
+                self.result.title = "會議紀要" if minutes_lang == "zh" else "Meeting Minutes"
 
                 self.status.state = "done"
                 self.status.progress = 100
@@ -1180,9 +1236,11 @@ class MeetingJobManager:
             print(f"[MeetingMinutes] 沿用錄音中預先整理的 {len(pre)} 段 ({len(prefix)} 字)，剩 {len(rest)} 字")
         elif pre:
             print("[MeetingMinutes] 逐字稿前段與預先整理時不同，不沿用，全部重新整理")
-        chunks = split_with_recap(rest, SUMMARY_CHUNK_CHARS) if rest else []   # 結尾總結自成一段
+        lang = detect_language(transcript)
+        lim = LANG_LIMITS[lang]
+        chunks = split_with_recap(rest, lim["chunk"]) if rest else []   # 結尾總結自成一段
         total = len(notes) + len(chunks)
-        print(f"[MeetingMinutes] 📚 長逐字稿 {len(transcript)} 字 → {total} 段 (每段 <= {SUMMARY_CHUNK_CHARS} 字)，逐段整理")
+        print(f"[MeetingMinutes] 📚 長逐字稿 {len(transcript)} 字 ({lang}) → {total} 段 (每段 <= {lim['chunk']} 字)，逐段整理")
         self.status.metrics["summary_chunks"] = total
         self.status.metrics["summary_premap_used"] = len(notes)
         plan = keep_alive_plan(total, SUMMARY_MAP_SEC_PER_CHUNK, SUMMARY_MAP_KEEP_ALIVE_MAX)
@@ -1198,40 +1256,42 @@ class MeetingJobManager:
                 # 口頭總結直接用原句 (見 summary_utils.recap_notes)；模型仍常駐時由 finally 的 _release_hailo() 釋放 NPU
                 notes.append(recap_notes(piece))
                 print(f"[MeetingMinutes] 段 {idx}/{total}: 結尾總結 {len(piece)} 字，直接採用原句")
-                self.status.summary_stream = assemble_long_minutes(notes, **summary_limits(total))
+                self.status.summary_stream = localize_minutes(assemble_long_minutes(notes, **summary_limits(total)), lang)
                 continue
             try:
                 self._hailo_pinned = True
-                text, backend = await stream_map_notes(map_user_prompt(piece, idx, total), keep_alive=ka)
+                text, backend = await stream_map_notes(map_user_prompt(piece, idx, total, lang), keep_alive=ka, lang=lang)
                 if backend is not None:
                     self.status.metrics["llm_backend"] = backend.label
                 if ka is None and backend is not None and backend.is_hailo:
                     self._hailo_pinned = False   # 帶預設 keep_alive=0，完成即釋放 NPU
             except LLMError as e:
                 print(f"[MeetingMinutes] 第 {idx}/{total} 段整理失敗: {e}")
-            text = compact_notes(text or "")
+            text = compact_notes(text or "", max_len=lim["note_len"])
             if not text:   # LLM 失敗：保留原文開頭，避免這段在紀要中消失
-                text = compact_notes("- " + piece[:120], max_lines=1, max_len=60)
+                text = compact_notes("- " + piece[:lim["note_len"] * 3], max_lines=1, max_len=lim["note_len"] + 20)
             notes.append(text)
             print(f"[MeetingMinutes] 段 {idx}/{total}: {len(piece)} → {len(text)} 字 ({time.time() - t_req:.1f}s)")
             if ka is None and idx < total:
                 await asyncio.sleep(3.0)   # 視窗切換：等 hailo-ollama 卸載完成再送下一段 (避免撞上卸載)
             # 逐段把目前組出的紀要推給前端，使用者不必等全部完成
-            partial = assemble_long_minutes(notes, **summary_limits(total))
+            partial = localize_minutes(assemble_long_minutes(notes, **summary_limits(total)), lang)
             self.status.summary_stream = partial
             if job_id:
                 await ws_manager.broadcast("summary_stream", {"job_id": job_id, "token": "", "accumulated": partial})
 
         self.status.metrics["summary_map_s"] = round(time.time() - t_map, 1)
         full_text = assemble_long_minutes(notes, **summary_limits(total))
-        self.status.summary_stream = full_text
+        self.status.summary_stream = localize_minutes(full_text, lang)
         print(f"[MeetingMinutes] 長會議紀要完成：{total} 段，{time.time() - t_map:.1f}s")
         return full_text
 
     async def _generate_summary_llm(self, transcript: str, job_id: Optional[str] = None) -> str:
         """Call Ollama LLM to synthesize meeting minutes with real-time SSE token streaming."""
         clean_transcript = transcript.strip()
-        if len(clean_transcript) > SUMMARY_SINGLE_MAX_CHARS:
+        lang = detect_language(clean_transcript)
+        lim = LANG_LIMITS[lang]
+        if len(clean_transcript) > lim["single_max"]:
             return await self._generate_hierarchical_summary_llm(clean_transcript, job_id=job_id)
 
         import json
@@ -1240,8 +1300,9 @@ class MeetingJobManager:
         # 2026-10-22 e2e 提示詞 A/B (Hailo qwen3:1.7b，同一份含辨識錯誤的逐字稿)：
         # 舊版把「（核心重點 1…）」等佔位說明寫在輸出範本內，小模型會照抄且 num_predict=220 讓待辦/決議被截斷 (事實命中 6/9)；
         # 改為規則放 system、範本不含佔位文字、摘要依議題分點並要求保留數字/日期/金額/人名 → 8/9。
-        system_msg = MINUTES_SYSTEM_MSG
-        prompt = f"逐字稿：\n{transcript}\n\n請輸出會議紀要："
+        system_msg = lim["minutes_sys"]
+        prompt = (f"逐字稿：\n{transcript}\n\n請輸出會議紀要：" if lang == "zh"
+                  else f"Transcript:\n{transcript}\n\nWrite the meeting minutes:")
 
         accumulated = []
         used_backend_label = "n/a"
@@ -1250,7 +1311,7 @@ class MeetingJobManager:
             # 回顧事實與議題覆蓋持平，平均多 16 s (只有本來會被截斷的輸出才會變長)。
             # 逐字稿超過 SUMMARY_LONG_SINGLE_CHARS 字 (約 4–5 分鐘) 時上限再放寬到 600 (2026-11-02 228 A/B，5 份 5 分鐘逐字稿各 2 次)：
             # 480 時 10 次有 3 次「待辦未產生」，600 時 1 次；平均多 5 s、最多 131 s；回顧 0.80／0.70、議題 0.90／0.90 都在雜訊內。
-            npred = 600 if len(clean_transcript) > SUMMARY_LONG_SINGLE_CHARS else 480
+            npred = 600 if len(clean_transcript) > lim["long_single"] else 480
             async for token, _done, backend in aiter_chat_stream(prompt, system=system_msg, temperature=0.2, num_predict=npred, timeout=180.0,
                                                                  hailo_retries=2):
                 used_backend_label = backend.label
@@ -1270,18 +1331,19 @@ class MeetingJobManager:
                             "accumulated": curr_text
                         })
 
-            full_text = clean_summary_markdown("".join(accumulated))
+            full_text = clean_summary_markdown(to_internal_sections("".join(accumulated)))   # 英文標題先換成內部的中文標題
             if full_text:
                 full_text = ensure_sections(full_text)   # 被 num_predict 截斷時明確標示缺段，不捏造
                 full_text = merge_recap_into_minutes(full_text, clean_transcript)   # 補上結尾口頭總結漏掉的待辦與決議 (逐字稿原句)
-                self.status.summary_stream = full_text
+                shown = localize_minutes(full_text, lang)                          # 回傳內部格式，畫面上顯示該語言
+                self.status.summary_stream = shown
                 self.status.metrics["llm_tokens"] = len(accumulated)
                 self.status.metrics["llm_backend"] = used_backend_label
                 if job_id:
                     await ws_manager.broadcast("summary_stream", {
                         "job_id": job_id,
                         "token": "",
-                        "accumulated": full_text
+                        "accumulated": shown
                     })
                 print(f"[MeetingMinutes] Summary generated by {used_backend_label} ({len(accumulated)} tokens)")
                 return full_text
@@ -1289,7 +1351,8 @@ class MeetingJobManager:
             print(f"[MeetingMinutes] Streaming LLM error ({used_backend_label}): {e}")
 
         if accumulated:
-            return merge_recap_into_minutes(ensure_sections(clean_summary_markdown("".join(accumulated))), clean_transcript)
+            return merge_recap_into_minutes(ensure_sections(clean_summary_markdown(to_internal_sections("".join(accumulated)))),
+                                            clean_transcript)
         return "## 摘要\n- 會議內容已完整保留於逐字稿\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 確認逐字稿細節 | 全體 | 待定 |\n\n## 決議\n- 錄音與逐字稿存檔完成"
 
     async def transcribe_region(self, job_id: Optional[str], start_sec: float, end_sec: float) -> Dict[str, Any]:
