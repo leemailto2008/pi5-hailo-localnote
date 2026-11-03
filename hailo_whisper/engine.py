@@ -141,9 +141,50 @@ _HOST_INTERVIEW_FIX_RE = re.compile(r"(主\s*[持吃])\s*面\s*[是市事室世]
 #   「任體」只在後面接韌體相關詞時才改 (避開「擔任體育…」)；「量率」要後面接著數字 (「目前量率是 90%」)，
 #   並排除「流量率、產量率、含量率…」；「驗症」排除「檢驗症狀」。
 _FIRMWARE_FIX_RE = re.compile(r"(?:任|認|韁|韍|韼|訥|訂|韻|韶|韓|響)\s*體(?=\s*(?:更新|當機|方面|修正|升級|版本))")
-_YIELD_FIX_RE = re.compile(r"(?:(?<![流產含能質重容數電用銷音存變增總測])量|糧|涼)\s*[率律]"
+_YIELD_FIX_RE = re.compile(r"(?:(?<![流產含能質重容數電用銷音存變增總測])量|糧|涼|粒)\s*[率律]"
                            r"(?=\s*(?:是|為|從|大約|約|只有|達到|已經|目前)?\s*(?:百分之|\d))")
 _VERIFY_FIX_RE = re.compile(r"驗\s*(?:譁|症)(?!狀|候)")
+
+
+# 負責人的姓氏同音錯字 (11-03 228 95 份逐字稿，職稱前面那個字)：
+#   「劉」42 次正確，「留」215；「李」68，「理」93；「林」160，「零」83、「領」78、「鄰」17；「許」295，「取」56、「緒」17、「緻」8、「續」5；
+#   「蔡」16，「菜」36；「楊」50，「洋」28、「陽」8；「黃」206，「皇」20；「吳」5，「無」19。
+#   「請」也常被寫成「情」(「情取經理跟對方確認」「情立協理」「情緒經理」)。
+#   這些字都不是常見姓氏；只在「字 + 職稱」後面接負責人句型 (負責／主持／會在／跟／安排／調貨／逗號…) 時改，
+#   並排除與前一個字成詞的情況 (保留、處理、帶領、錄取、繼續、蔬菜、海洋、太陽、有無…)。
+_OWNER_TITLES = r"(?:協理|經理|副理|課長|組長|工程師|專員|主任)"
+_OWNER_FOLLOW = r"(?=\s*(?:負|主|會|在|跟|安排|調|掉|下個|下的|回|送|[，,。]|第|$))"
+_SURNAME_FIX = {"留": "劉", "理": "李", "立": "李", "零": "林", "領": "林", "鄰": "林", "取": "許", "緒": "許", "緻": "許",
+                "續": "許", "菜": "蔡", "洋": "楊", "陽": "楊", "皇": "黃", "無": "吳"}
+_SURNAME_WORD_PREV = {"留": "保停逗挽預居遺殘收拘滯存截自扣去彌", "理": "處管經協副助代總襄治整清辦修護審料受心物道合說真倫地原推條調學打",
+                      "立": "成設建獨確樹訂創起站對自中公私國市孤直", "零": "0123456789一二三四五六七八九十〇零點", "領": "帶率引統本占佔認招申首要將綱",
+                      "鄰": "近比四毗睦", "取": "錄爭聽採選領獲吸索提擷竊奪換抽攝榨盜騙攫汲考求讀存", "緒": "頭端思心就", "緻": "精細雅別景標興",
+                      "續": "繼持陸連後手延接存永", "菜": "蔬點買做炒青白飯配泡野韓台川生", "洋": "海西東遠重崇出留汪大太南北",
+                      "陽": "太夕朝歐艷斜陰向重驕", "皇": "教女天堂秦沙法冠", "無": "並毫有絕全從別虛空尚既若亦都也就"}
+_OWNER_PLEASE_FIX_RE = re.compile(r"(?<![事感愛友親熱心交劇溫激表同性病民國詳實真神風豪柔疫行內陳求盛深痴色悲苦鄉])情"
+                                  r"(?=\s*(?:[\u4e00-\u9fff]\s*)?" + _OWNER_TITLES + _OWNER_FOLLOW + ")")
+# 兩個成詞的例外，95 份逐字稿裡全部都是負責人：「預算表清理協理在6月14日前」(請李協理，17 次)、
+# 「安排四場面試，有無副理主持」(有吳副理，20 次)。
+_PLEASE_LI_FIX_RE = re.compile(r"清\s*理(?=\s*" + _OWNER_TITLES + _OWNER_FOLLOW + ")")
+_HAS_WU_FIX_RE = re.compile(r"有\s*無(?=\s*" + _OWNER_TITLES + r"\s*主)")
+_SURNAME_FIX_RE = re.compile(r"(?<=(.))?([" + "".join(_SURNAME_FIX) + r"])(?=\s*" + _OWNER_TITLES + _OWNER_FOLLOW + ")")
+# 「再增加二位工程師」的「位」寫成「為／維／圍」(95 份逐字稿約 90 次，正確 87)
+_HEADCOUNT_FIX_RE = re.compile(r"([\d一二三四五六七八九十兩幾])\s*[為維圍]\s*(?=工程師|專員|主任|同仁|人員|員工|候選人)")
+# 「工安」(工業安全) 在 95 份逐字稿裡 0 次寫對，全部寫成同音的「公安」(553 次，幾乎都是「議題是公安上週三樓產線…」)。
+# 只在後面接著事故／上週／方面／複訓這類工安用語時改；「公安事件」「公安問題」(公共安全) 不動。
+_SAFETY_FIX_RE = re.compile(r"公\s*安(?=\s*[，,]?\s*(?:上週|上個?月|上次|方面|事故|意外|複訓|訓練|演練|稽核|宣導|巡檢|規範))")
+# 「供應商」的第一個字常被寫錯或漏掉 (「依應商」「侶應商」「儂應商」「是應商」)；「對應／回應／反應／適應」後面接商不改。
+_SUPPLIER_FIX_RE = re.compile(r"(?<![供反對回適呼響效感因順相答])(?:[依儂侶衣醫宜疑]\s*)?應\s*商(?![品家業機場標量談務人圈店界])")
+
+
+def _fix_owner_names(text: str) -> str:
+    text = _OWNER_PLEASE_FIX_RE.sub("請", _HAS_WU_FIX_RE.sub("有吳", _PLEASE_LI_FIX_RE.sub("請李", text)))
+
+    def sub(m):
+        prev, ch = m.group(1), m.group(2)
+        return ch if prev and prev in _SURNAME_WORD_PREV.get(ch, "") else _SURNAME_FIX[ch]
+    text = _SURNAME_FIX_RE.sub(sub, text)
+    return _HEADCOUNT_FIX_RE.sub(r"\1位", text)
 
 
 # 招募／訂單句型的同音錯字 (11-02 228 95 份逐字稿)：
@@ -247,8 +288,10 @@ def fix_meeting_terms(text: str) -> str:
     text = _ASSOC_MGR_FIX_RE.sub("協理", _GROUP_LEAD_FIX_RE.sub("組長", text))
     text = _DEPUTY_MGR_CTX_FIX_RE.sub(r"\1副理", _DEPUTY_MGR_FIX_RE.sub("副理", text))
     text = _HOST_INTERVIEW_FIX_RE.sub(r"\1面試", _MANAGER_CTX_FIX_RE.sub(r"\1經理", text))
+    text = _fix_owner_names(text)
     text = _FIRMWARE_FIX_RE.sub("韌體", text)
     text = _VERIFY_FIX_RE.sub("驗證", _YIELD_FIX_RE.sub("良率", text))
+    text = _SUPPLIER_FIX_RE.sub("供應商", _SAFETY_FIX_RE.sub("工安", text))
     text = _ascii_punct_if_english(_fix_product_terms(_fix_hiring_and_order_terms(_fix_latin_in_cjk(text))))
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
