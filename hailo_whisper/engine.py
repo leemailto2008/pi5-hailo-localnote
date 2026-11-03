@@ -153,7 +153,7 @@ _VERIFY_FIX_RE = re.compile(r"驗\s*(?:譁|症)(?!狀|候)")
 #   這些字都不是常見姓氏；只在「字 + 職稱」後面接負責人句型 (負責／主持／會在／跟／安排／調貨／逗號…) 時改，
 #   並排除與前一個字成詞的情況 (保留、處理、帶領、錄取、繼續、蔬菜、海洋、太陽、有無…)。
 _OWNER_TITLES = r"(?:協理|經理|副理|課長|組長|工程師|專員|主任)"
-_OWNER_FOLLOW = r"(?=\s*(?:負|主|會|在|跟|安排|調|掉|下個|下的|回|送|[，,。]|第|$))"
+_OWNER_FOLLOW = r"(?=\s*(?:負|主|會|在|跟|安排|調|掉|下個|下的|回|送|週|下週|明天|月底|[，,。]|第|$))"
 _SURNAME_FIX = {"留": "劉", "理": "李", "立": "李", "零": "林", "領": "林", "鄰": "林", "取": "許", "緒": "許", "緻": "許",
                 "續": "許", "菜": "蔡", "洋": "楊", "陽": "楊", "皇": "黃", "無": "吳"}
 _SURNAME_WORD_PREV = {"留": "保停逗挽預居遺殘收拘滯存截自扣去彌", "理": "處管經協副助代總襄治整清辦修護審料受心物道合說真倫地原推條調學打",
@@ -168,6 +168,11 @@ _OWNER_PLEASE_FIX_RE = re.compile(r"(?<![事感愛友親熱心交劇溫激表同
 _PLEASE_LI_FIX_RE = re.compile(r"清\s*理(?=\s*" + _OWNER_TITLES + _OWNER_FOLLOW + ")")
 _HAS_WU_FIX_RE = re.compile(r"有\s*無(?=\s*" + _OWNER_TITLES + r"\s*主)")
 _SURNAME_FIX_RE = re.compile(r"(?<=(.))?([" + "".join(_SURNAME_FIX) + r"])(?=\s*" + _OWNER_TITLES + _OWNER_FOLLOW + ")")
+# 「課長」只剩「客」：「待辦事項是劉客 送預算表」「名單交給留客，」「請留客跟對方確認」(95 份約 40 次)。
+# 「留客」(留住客人) 本身是詞，只在指派句型 (交給／請／由／是／有 + 姓 + 客 + 負責人句型的後文) 裡改；顧客、游客、常客等不是姓氏開頭。
+_CHIEF_SURNAMES = "劉留柳王李張陳林黃吳蔡楊許鄭謝郭洪曾邱廖賴周徐蘇葉莊呂江何蕭羅潘簡朱鍾彭詹胡施沈余盧梁趙顏翁魏孫戴范宋鄧杜傅侯曹薛卓阮馬董唐藍蔣紀姚連馮程湯田康姜汪鄒黎涂龔韓袁童陸夏邵錢倪溫譚駱熊秦崔尹孔辛陶段葛孟殷賀賈莫"
+_CHIEF_STUB_FIX_RE = re.compile(r"((?:交給|請|由|是|有)\s*)([" + _CHIEF_SURNAMES + r"])\s*客\s*[帳廠棘漲脹仗障-]?(?![長掌戶人服廳家運機房棧串座製套觀氣訴])"
+                                + _OWNER_FOLLOW)
 # 「再增加二位工程師」的「位」寫成「為／維／圍」(95 份逐字稿約 90 次，正確 87)
 _HEADCOUNT_FIX_RE = re.compile(r"([\d一二三四五六七八九十兩幾])\s*[為維圍]\s*(?=工程師|專員|主任|同仁|人員|員工|候選人)")
 # 「工安」在 95 份逐字稿裡全部寫成同音的「公安」(553 次)，但「公安」本身是常用詞；使用者 11-02 回覆「維持現狀」，不改。
@@ -186,6 +191,7 @@ def _fix_owner_names(text: str) -> str:
     def sub(m):
         prev, ch = m.group(1), m.group(2)
         return ch if prev and prev in _SURNAME_WORD_PREV.get(ch, "") else _SURNAME_FIX[ch]
+    text = _CHIEF_STUB_FIX_RE.sub(lambda m: f"{m.group(1)}{'劉' if m.group(2) == '留' else m.group(2)}課長", text)
     text = _SURNAME_FIX_RE.sub(sub, text)
     return _HEADCOUNT_FIX_RE.sub(r"\1位", text)
 
@@ -307,8 +313,9 @@ def fix_meeting_terms(text: str) -> str:
     text = _FIRMWARE_FIX_RE.sub("韌體", text)
     text = _VERIFY_FIX_RE.sub("驗證", _YIELD_FIX_RE.sub("良率", text))
     text = _SUPPLIER_FIX_RE.sub("供應商", text)
-    text = _COMPLAINT_FIX_RE.sub("客訴", _REPLY_CUSTOMER_FIX_RE.sub(r"\1回覆客戶", text))
     text = _ascii_punct_if_english(_fix_product_terms(_fix_hiring_and_order_terms(_fix_latin_in_cjk(text))))
+    # 要在英文碎片拿掉之後 (「前回 er 客，」)，否則第二次修才會改到
+    text = _COMPLAINT_FIX_RE.sub("客訴", _REPLY_CUSTOMER_FIX_RE.sub(r"\1回覆客戶", text))
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
 
