@@ -184,7 +184,33 @@ _SUPPLIER_FIX_RE = re.compile(r"(?<![供反對回適呼響效感因順相答])(?
 # 「週五前回覆客戶」95 份逐字稿只有 7 次寫對，另有約 250 次寫成「回不客戶／回副客／回付客戶／回客，」；
 # 「溫控模組的客訴有九件」的「客訴」1 次寫對、149 次寫成「客宿／客速」。只在期限 (…前) 後面、或客訴後接件數時改。
 _REPLY_CUSTOMER_FIX_RE = re.compile(r"(前\s*)(?:恢\s*)?回\s*[副不夠復付服福腹覆]?\s*客\s*戶?(?=\s*[，,。第好]|$)")
-_COMPLAINT_FIX_RE = re.compile(r"客\s*[宿速素塑溯](?=\s*(?:有|是|共|件|方面|案|數|問題|處理|主要|增加|減少|[\d一二三四五六七八九十兩]+\s*[件起筆個案]))")
+_COMPLAINT_FIX_RE = re.compile(r"[客刻克]\s*[宿速素塑溯](?=\s*(?:有|是|共|件|方面|案|數|問題|處理|主要|增加|減少|[\d一二三四五六七八九十兩]+\s*[件起筆個案]))")
+
+# 其他高頻同音錯字 (11-03 對照 95 份逐字稿與講稿逐字比對，次數為 15 分鐘以內的會議)：
+#   再→在 147 (「沒有問題在全面更新」「下週會在安排」「等試用結果在談」)、試→是／市 111 (「等是用結果」「裝置上市跑3天」)、
+#   由→有 45 (「三場面試有許經理主持」)、務→物 43 (「財物部」)、品→平 34 (「平保部」)、客訴→刻速 21、
+#   線→現 16 (「產現」)、程→城 21 (「課城」)、仁→人 19 (「五位同人」)、各→個 18 (「請個部門」)、簽→千 18 (「先千八十臺」)、
+#   電→店 (「智慧店表」)。都只在固定的前後文裡改：「正在安排」「會在4月5日前」「上市」「有人主持」「財物」本身不動。
+_AGAIN_FIX_RE = re.compile(r"(?:(?<=問題)|(?<=結果)|(?<=會)|(?<=之後)|(?<=然後))\s*在(?=\s*(?:全面|談|安排|確認|討論|追蹤|開會|上線))")
+_TRIAL_FIX_RE = re.compile(r"(?<=等)\s*[是市事式](?=\s*用\s*結果)|(?<=[臺台]裝置上)\s*[市是事]\s*(?=跑)|(?<=[臺台]設備上)\s*[市是事]\s*(?=跑)")
+_HOSTED_BY_FIX_RE = re.compile(r"有(?=\s*[\u4e00-\u9fff]\s*(?:協理|經理|副理|課長|組長|工程師|專員|主任)\s*主\s*[持吃])")
+_THIS_MATTER_FIX_RE = re.compile(r"(?<=這件)\s*是\s*(?=由)")
+_DEPT_FIX_RE = re.compile(r"財\s*物\s*部|平\s*[保寶]\s*[部圖布步]")
+_SITE_FIX_RE = re.compile(r"(?<=[產生])\s*現(?=\s*[已發加，,有的])|(?<=課)\s*城|(?<=位)\s*同\s*人|(?<=請)\s*個\s*(?=部門)|(?<=智慧)\s*店\s*(?=表)")
+_SIGN_FIX_RE = re.compile(r"(?<=先)\s*千(?=\s*[\d一二三四五六七八九十兩百]+\s*[臺台])")
+
+
+def _fix_misc_terms(text: str) -> str:
+    text = _AGAIN_FIX_RE.sub("再", text)
+    text = _TRIAL_FIX_RE.sub("試", text)
+    text = _THIS_MATTER_FIX_RE.sub("事", _HOSTED_BY_FIX_RE.sub("由", text))
+    text = _DEPT_FIX_RE.sub(lambda m: "財務部" if m.group(0).startswith("財") else "品保部", text)
+
+    def site(m):
+        g = m.group(0).strip()
+        return {"現": "線", "城": "程", "同人": "同仁", "個": "各", "店": "電"}.get(re.sub(r"\s", "", g), g)
+    text = _SITE_FIX_RE.sub(site, text)
+    return _SIGN_FIX_RE.sub("簽", text)
 
 
 def _fix_owner_names(text: str) -> str:
@@ -311,13 +337,14 @@ def fix_meeting_terms(text: str) -> str:
     text = _ASSOC_MGR_FIX_RE.sub("協理", _GROUP_LEAD_FIX_RE.sub("組長", text))
     text = _DEPUTY_MGR_CTX_FIX_RE.sub(r"\1副理", _DEPUTY_MGR_FIX_RE.sub("副理", text))
     text = _HOST_INTERVIEW_FIX_RE.sub(r"\1面試", _MANAGER_CTX_FIX_RE.sub(r"\1經理", text))
-    text = _fix_owner_names(text)
+    text = _fix_owner_names(_fix_misc_terms(text))
     text = _FIRMWARE_FIX_RE.sub("韌體", text)
     text = _VERIFY_FIX_RE.sub("驗證", _YIELD_FIX_RE.sub("良率", text))
     text = _SUPPLIER_FIX_RE.sub("供應商", text)
     text = _ascii_punct_if_english(_fix_product_terms(_fix_hiring_and_order_terms(_fix_latin_in_cjk(text))))
-    # 要在英文碎片拿掉之後 (「前回 er 客，」)，否則第二次修才會改到
+    # 要在英文碎片拿掉之後 (「前回 er 客，」「第428個 er 體是」)，否則第二次修才會改到
     text = _COMPLAINT_FIX_RE.sub("客訴", _REPLY_CUSTOMER_FIX_RE.sub(r"\1回覆客戶", text))
+    text = _TOPIC_FIX_RE.sub(r"\1議題", text)
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
 
