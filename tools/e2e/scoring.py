@@ -9,8 +9,9 @@ except Exception:  # CI 環境可能沒有 OpenCC
     _CC = None
 
 PLACEHOLDERS = ("（核心重點", "若無具體待辦", "只寫真正定案", "不要重複規則", "每點 40 字以內", "依議題分點",
-                "模型輸出長度不足")   # ensure_sections() 的截斷標記也算失敗
+                "模型輸出長度不足", "the model ran out of output length")   # ensure_sections() 的截斷標記也算失敗
 SECTIONS = ("## 摘要", "## 待辦", "## 決議")
+SECTIONS_EN = ("## Summary", "## Action Items", "## Decisions")   # 英文會議的紀要 (2026-11-03 起跟著逐字稿語言)
 
 
 def to_tw(text: str) -> str:
@@ -28,7 +29,7 @@ def norm(text: str) -> str:
 
 
 def _fact_norm(text: str) -> str:
-    t = to_tw(text or "")
+    t = to_tw(text or "").lower()            # 英文事實不分大小寫；中文不受影響
     return t.replace(" ", "").replace("　", "").replace("臺", "台").replace("％", "%").replace("，", ",")
 
 
@@ -74,7 +75,7 @@ def summary_checks(summary: str, fixture: dict, transcript: str = None) -> dict:
     """transcript 有給時，另算 recap_recall_rel：只以逐字稿中確實出現的總結事實為分母 (ASR 聽錯的字 LLM 不可能寫對)。"""
     s = summary or ""
     kws = fixture.get("topic_keywords") or []
-    kw_hit = [k for k in kws if k in s]
+    kw_hit = [k for k in kws if k.lower() in s.lower()]
     denom = min(len(kws), 5) or 1
     lines = [l.strip() for l in s.splitlines() if l.strip() and not l.strip().startswith(("## ", "|---", "| ---"))]
     rh = fact_hits(s, fixture.get("recap_facts") or {})
@@ -85,7 +86,7 @@ def summary_checks(summary: str, fixture: dict, transcript: str = None) -> dict:
                "recap_recall_rel": round(sum(rh[k] for k in possible) / len(possible), 4) if possible else None}
     return {**rel,
         "summary_chars": len(s),
-        "sections_ok": all(x in s for x in SECTIONS),
+        "sections_ok": all(x in s for x in SECTIONS) or all(x in s for x in SECTIONS_EN),
         "placeholder_echo": any(p in s for p in PLACEHOLDERS),
         "duplicate_lines": len(lines) - len(set(lines)),
         "recap_recall": recall(rh),

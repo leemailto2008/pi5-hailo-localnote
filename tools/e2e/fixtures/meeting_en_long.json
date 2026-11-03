@@ -1,0 +1,420 @@
+{
+ "schema": 1,
+ "title": "English test meeting (en_long)",
+ "minutes": 5.6,
+ "lang": "en",
+ "facts": {
+  "T1訓練-日期": [
+   "September 2",
+   "Sept 2",
+   "Sep 2"
+  ],
+  "T1訓練-名額": [
+   "30 seats",
+   "30"
+  ],
+  "T1訓練-已報名": [
+   "22"
+  ],
+  "T1訓練-剩餘": [
+   "8 seats",
+   "eight seats",
+   "8"
+  ],
+  "T1訓練-負責人": [
+   "Mary"
+  ],
+  "T2工安-警示燈": [
+   "eight warning",
+   "8 warning"
+  ],
+  "T2工安-期限": [
+   "August 15"
+  ],
+  "T2工安-負責人": [
+   "David"
+  ],
+  "T3韌體-上線": [
+   "March 15"
+  ],
+  "T3韌體-輪數": [
+   "ten rounds",
+   "10 rounds"
+  ],
+  "T3韌體-台數": [
+   "100 units"
+  ],
+  "T3韌體-負責人": [
+   "Kevin"
+  ],
+  "T4訂單-客戶": [
+   "Lotus"
+  ],
+  "T4訂單-數量": [
+   "200"
+  ],
+  "T4訂單-日期": [
+   "February 28"
+  ],
+  "T4訂單-折扣": [
+   "6 percent",
+   "6%"
+  ],
+  "T4訂單-試單": [
+   "30-unit",
+   "30 unit",
+   "30 units"
+  ],
+  "T4訂單-負責人": [
+   "John"
+  ],
+  "T4訂單-回覆": [
+   "Wednesday"
+  ],
+  "T5預算-金額": [
+   "800"
+  ],
+  "T5預算-負責人": [
+   "Susan"
+  ],
+  "T5預算-期限": [
+   "July 1"
+  ],
+  "T6招募-面試": [
+   "twelve",
+   "12"
+  ],
+  "T6招募-負責人": [
+   "Linda"
+  ],
+  "T6招募-到職": [
+   "October 12"
+  ],
+  "T7供應商-名稱": [
+   "Bright Optics"
+  ],
+  "T7供應商-良率": [
+   "92"
+  ],
+  "T7供應商-負責人": [
+   "Tom"
+  ],
+  "T8倉儲-日期": [
+   "April 28"
+  ],
+  "T8倉儲-負責人": [
+   "Grace"
+  ]
+ },
+ "recap_facts": {
+  "R訓練-負責人": [
+   "Mary"
+  ],
+  "R韌體-日期": [
+   "March 15"
+  ],
+  "R韌體-負責人": [
+   "Kevin"
+  ],
+  "R訂單-客戶": [
+   "Lotus"
+  ],
+  "R訂單-負責人": [
+   "John"
+  ],
+  "R訂單-期限": [
+   "Wednesday"
+  ]
+ },
+ "topic_keywords": [
+  "training",
+  "safety",
+  "firmware",
+  "order",
+  "budget",
+  "hiring",
+  "supplier",
+  "warehouse"
+ ],
+ "n_topics": 8,
+ "lines": [
+  [
+   "A",
+   "Okay, let's start today's weekly meeting."
+  ],
+  [
+   "A",
+   "We have a few topics to cover."
+  ],
+  [
+   "B",
+   "The first topic is training."
+  ],
+  [
+   "B",
+   "There is a presentation skills course on September 2nd with 30 seats."
+  ],
+  [
+   "B",
+   "22 people have signed up so far, so there are 8 seats left."
+  ],
+  [
+   "B",
+   "Please send your names to Mary by Thursday."
+  ],
+  [
+   "C",
+   "The second topic is safety."
+  ],
+  [
+   "C",
+   "Last week there was a small accident on the third-floor production line."
+  ],
+  [
+   "C",
+   "Nobody was hurt."
+  ],
+  [
+   "C",
+   "We have installed eight warning lights, and everyone must finish the safety refresher by August 15th."
+  ],
+  [
+   "C",
+   "David is responsible for that."
+  ],
+  [
+   "A",
+   "The third topic is the firmware update for the power supply."
+  ],
+  [
+   "A",
+   "The reported problem is Bluetooth disconnection."
+  ],
+  [
+   "A",
+   "The fixed version is planned for March 15th."
+  ],
+  [
+   "A",
+   "Kevin will arrange the testing, at least ten rounds of regression tests, and we will run it on 100 units for three days before the full rollout."
+  ],
+  [
+   "B",
+   "The fourth topic is the customer order."
+  ],
+  [
+   "B",
+   "Lotus Tech wants 200 sample units of the power supply by February 28th."
+  ],
+  [
+   "B",
+   "They think the price is too high and asked for a 6 percent discount."
+  ],
+  [
+   "B",
+   "I suggest we sign a trial order of 30 units first and keep the new quote."
+  ],
+  [
+   "B",
+   "Everyone agreed."
+  ],
+  [
+   "B",
+   "John will reply to the customer by Wednesday."
+  ],
+  [
+   "C",
+   "The next topic is the budget."
+  ],
+  [
+   "C",
+   "Next year's production budget is 800 thousand dollars, of which hardware takes 500 thousand."
+  ],
+  [
+   "C",
+   "We also need three more engineers."
+  ],
+  [
+   "C",
+   "Please send the budget sheet to finance by July 1st; Susan will handle it."
+  ],
+  [
+   "A",
+   "The next topic is hiring."
+  ],
+  [
+   "A",
+   "The sales team has three openings and we have interviewed twelve candidates."
+  ],
+  [
+   "A",
+   "We will hold three more interviews next week, led by Linda, and we hope new hires start by October 12th."
+  ],
+  [
+   "B",
+   "The next topic is the supplier."
+  ],
+  [
+   "B",
+   "Bright Optics delayed the battery delivery to February 7th, which is fourteen days late."
+  ],
+  [
+   "B",
+   "The alternate part is being verified and its yield is 92 percent."
+  ],
+  [
+   "B",
+   "Tom will confirm with the supplier and report back on Friday."
+  ],
+  [
+   "C",
+   "The next topic is the warehouse system."
+  ],
+  [
+   "C",
+   "Data migration is 90 percent done and the cutover is set for April 28th at night with four hours of downtime."
+  ],
+  [
+   "C",
+   "Grace will notify all users."
+  ],
+  [
+   "A",
+   "The next topic is the budget."
+  ],
+  [
+   "A",
+   "Next year's production budget is 800 thousand dollars, of which hardware takes 500 thousand."
+  ],
+  [
+   "A",
+   "We also need three more engineers."
+  ],
+  [
+   "A",
+   "Please send the budget sheet to finance by July 1st; Susan will handle it."
+  ],
+  [
+   "B",
+   "The next topic is hiring."
+  ],
+  [
+   "B",
+   "The sales team has three openings and we have interviewed twelve candidates."
+  ],
+  [
+   "B",
+   "We will hold three more interviews next week, led by Linda, and we hope new hires start by October 12th."
+  ],
+  [
+   "C",
+   "The next topic is the supplier."
+  ],
+  [
+   "C",
+   "Bright Optics delayed the battery delivery to February 7th, which is fourteen days late."
+  ],
+  [
+   "C",
+   "The alternate part is being verified and its yield is 92 percent."
+  ],
+  [
+   "C",
+   "Tom will confirm with the supplier and report back on Friday."
+  ],
+  [
+   "A",
+   "The next topic is the warehouse system."
+  ],
+  [
+   "A",
+   "Data migration is 90 percent done and the cutover is set for April 28th at night with four hours of downtime."
+  ],
+  [
+   "A",
+   "Grace will notify all users."
+  ],
+  [
+   "B",
+   "The next topic is the budget."
+  ],
+  [
+   "B",
+   "Next year's production budget is 800 thousand dollars, of which hardware takes 500 thousand."
+  ],
+  [
+   "B",
+   "We also need three more engineers."
+  ],
+  [
+   "B",
+   "Please send the budget sheet to finance by July 1st; Susan will handle it."
+  ],
+  [
+   "C",
+   "The next topic is hiring."
+  ],
+  [
+   "C",
+   "The sales team has three openings and we have interviewed twelve candidates."
+  ],
+  [
+   "C",
+   "We will hold three more interviews next week, led by Linda, and we hope new hires start by October 12th."
+  ],
+  [
+   "A",
+   "The next topic is the supplier."
+  ],
+  [
+   "A",
+   "Bright Optics delayed the battery delivery to February 7th, which is fourteen days late."
+  ],
+  [
+   "A",
+   "The alternate part is being verified and its yield is 92 percent."
+  ],
+  [
+   "A",
+   "Tom will confirm with the supplier and report back on Friday."
+  ],
+  [
+   "B",
+   "The next topic is the warehouse system."
+  ],
+  [
+   "B",
+   "Data migration is 90 percent done and the cutover is set for April 28th at night with four hours of downtime."
+  ],
+  [
+   "B",
+   "Grace will notify all users."
+  ],
+  [
+   "C",
+   "Okay, to wrap up."
+  ],
+  [
+   "C",
+   "Training: names go to Mary by Thursday."
+  ],
+  [
+   "C",
+   "Firmware: we decided to release the fix on March 15th after ten rounds of regression tests, and Kevin owns the testing."
+  ],
+  [
+   "C",
+   "Customer order: we agreed on a 30-unit trial order at the new price, and John will reply to Lotus Tech by Wednesday."
+  ],
+  [
+   "C",
+   "That's all for today, thank you everyone."
+  ]
+ ],
+ "audio": {
+  "file": "meeting_en_long.wav",
+  "duration_s": 338.84,
+  "sr": 16000,
+  "tts": "edge-tts"
+ }
+}
