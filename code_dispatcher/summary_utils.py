@@ -338,7 +338,20 @@ def ground_todo_table(md: str, transcript: str) -> str:
                     cols[i] = "、".join(kept) if kept and len(parts) > 1 else "-"
                 line = "| " + " | ".join(cols) + " |"
         out.append(line)
-    return "\n".join(out)
+    return _drop_ownerless_duplicate_rows("\n".join(out))
+
+
+def _drop_ownerless_duplicate_rows(md: str) -> str:
+    """同一事項 (去空白後相同) 已有一列寫了負責人時，負責人是「-」的那列拿掉。
+    例：模型寫「| 回報星光材料的交期 | 理協理 | 週五 |」，結尾總結補上「李協理」那列，對照逐字稿後前一列的負責人變成「-」。"""
+    rows = [l.strip() for l in md.splitlines() if l.strip().startswith("|") and not _is_sep(l)]
+    cells = [[c.strip() for c in r.strip("|").split("|")] for r in rows]
+    owned = {re.sub(r"\s", "", c[0]) for c in cells if len(c) >= 3 and c[0] != "事項" and c[1] not in _TODO_SKIP}
+    drop = {r for r, c in zip(rows, cells) if len(c) >= 3 and c[0] != "事項" and c[1] in _TODO_SKIP
+            and re.sub(r"\s", "", c[0]) in owned}
+    if not drop:
+        return md
+    return "\n".join(l for l in md.splitlines() if l.strip() not in drop)
 
 def _is_sep(line: str) -> bool:
     return line.strip().startswith("|") and set(line.strip()) <= set("|-: ")
@@ -818,11 +831,16 @@ def _drop_listed_todo_clause(decisions: List[str], todo_rows: List[str]) -> List
     """結尾總結的決議條目常是「X方面，決議是…，待辦事項是某人某日前…」。待辦那半句已經寫進待辦表
     (認得出負責人與時間) 時，決議只留前半句，不在兩段重複；待辦表沒收到的照舊整句保留，負責人不會不見。"""
     listed = {r.split("|")[1].strip() for r in todo_rows if r.count("|") >= 4}
+    table = [(r.split("|")[1].strip(), r.split("|")[2].strip()) for r in todo_rows if r.count("|") >= 4]
     out = []
     for line in decisions:
         parts = _TODO_MARK_RE.split(line, 1)
         got = _todo_parts(line) if len(parts) == 2 else None
-        if not got or got[0] not in listed:
+        if len(parts) == 2 and not (got and got[0] in listed) and _clause_in_table(_CLAUSE_SPLIT_RE.split(parts[1], 1)[0], table):
+            got = ("", "", "")       # 待辦子句沒有期限 (「待辦事項是劉課長送預算表」)，但同一負責人、同一件事已在待辦表
+        elif got and got[0] not in listed:
+            got = None
+        if not got:
             out.append(line)
             continue
         # 只拿掉待辦那一個子句；後面若還接著別的議題 (STT 漏了「方面」時常黏成一行) 照樣保留
@@ -832,6 +850,23 @@ def _drop_listed_todo_clause(decisions: List[str], todo_rows: List[str]) -> List
         trimmed = f"{head}，{rest}" if head and rest else (head or rest)
         out.append(trimmed if len(head) >= 4 else line)
     return out
+
+
+def _clause_in_table(seg: str, table: List[tuple]) -> bool:
+    """「劉課長送預算表」是否已在待辦表：負責人相同，且去掉負責人後的動作出現在該列事項裡 (或用字重疊六成以上)。"""
+    mo = _OWNER_RE.search(seg or "")
+    if not mo:
+        return False
+    action = re.sub(r"[\s，,。]", "", seg.replace(mo.group(0), "", 1))
+    if len(action) < 2:
+        return False
+    for item, owner in table:
+        if mo.group(1) not in owner and mo.group(1) not in item:
+            continue
+        it = re.sub(r"\s", "", item)
+        if action in it or len(set(action) & set(it)) >= 0.6 * len(set(action)):
+            return True
+    return False
 
 
 def _topic_key(line: str) -> str:

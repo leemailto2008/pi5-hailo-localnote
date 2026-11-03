@@ -529,3 +529,22 @@ def test_english_todo_owner_filled_when_the_transcript_names_them_as_owner():
     assert "| Send training names to Mary | - | Thursday |" in out        # 收件人不是負責人
     assert "| Reply to Lotus Tech | John | Wednesday |" in out
 
+
+def test_recap_todo_clause_without_deadline_is_dropped_when_already_in_the_table():
+    # 90ddccb 3 分鐘 e2e：「預算方面，決議是…200萬元，待辦事項是劉課長送預算表」，待辦子句沒有期限，原本整句照抄進決議
+    transcript = ("第四個議題是預算，明年平保部的預算是200萬元，預算表請劉課長在10月7日前送到財務部。" * 3 +
+                  "好，最後總結，預算方面，決議是平保部明年預算200萬元，待辦事項是劉課長送預算表，今天就到這裡，謝謝大家")
+    md = ("## 摘要\n- 預算200萬元\n\n"
+          "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 劉課長送預算表 | 劉課長 | 10月7日前 |\n\n"
+          "## 決議\n- 預算表10月7日前送至財務部")
+    decisions = summary_utils.merge_recap_into_minutes(md, transcript).split("## 決議")[1]
+    assert "平保部明年預算200萬元" in decisions and "待辦事項" not in decisions
+
+
+def test_ownerless_duplicate_todo_row_is_dropped():
+    md = ("## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 回報星光材料的交期 | 理協理 | 週五 |\n"
+          "| 回報星光材料的交期 | 李協理 | 週五 |\n| 送預算表 | - | 10月7日前 |\n\n## 決議\n- 無")
+    out = summary_utils.ground_todo_table(md, "請李協理週五回報星光材料的交期，預算表10月7日前送出")
+    assert out.count("回報星光材料的交期") == 1 and "| 回報星光材料的交期 | 李協理 | 週五 |" in out
+    assert "| 送預算表 | - | 10月7日前 |" in out          # 沒有重複的照舊保留
+
