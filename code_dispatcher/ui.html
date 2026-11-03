@@ -2091,9 +2091,11 @@ function minutesLabels(lang) {
     : { summary: '摘要', todos: '待辦', decisions: '決議', item: '事項', owner: '負責人', due: '時間', tbd: '待定' };
 }
 
-function getMinutesSummaryForTranslation() {
+// 段落標題直接用目標語言 (小模型常不翻「【摘要】」)；負責人、期限是「-」時不寫 (原本翻成「(-)」)。
+function getMinutesSummaryForTranslation(target) {
   if (!result) return '';
-  const L = minutesLabels(result.lang);
+  const L = minutesLabels(target || result.lang);
+  const blank = v => !v || v === '-' || v === '—';
   const lines = [];
   if (result.summary && result.summary.length) {
     lines.push(`【${L.summary}】`);
@@ -2101,7 +2103,10 @@ function getMinutesSummaryForTranslation() {
   }
   if (result.todos && result.todos.length) {
     lines.push(`\n【${L.todos}】`);
-    result.todos.forEach(t => lines.push(`• ${t.item} (${t.owner || L.tbd}${t.due && t.due !== '-' ? ', ' + t.due : ''})`));
+    result.todos.forEach(t => {
+      const meta = [blank(t.owner) ? '' : t.owner, blank(t.due) ? '' : t.due].filter(Boolean).join(', ');
+      lines.push(`• ${t.item}${meta ? ` (${meta})` : ''}`);
+    });
   }
   if (result.decisions && result.decisions.length && result.decisions[0] !== '—') {
     lines.push(`\n【${L.decisions}】`);
@@ -2115,11 +2120,12 @@ function getMinutesSummaryForTranslation() {
 }
 
 async function translateMinutesTo(target, btn) {
-  const text = getMinutesSummaryForTranslation();
+  const text = getMinutesSummaryForTranslation(target);
   if (!text || !text.trim()) {
     toast('目前尚無會議紀要可供翻譯，請先錄音生成紀要');
     return;
   }
+  el.enBox.hidden = false;           // 開始新錄音時 clearPreviousOutputs() 會把結果框藏起來 (10-15 起)，之前翻譯結果因此看不到
   const srcLang = (result && result.lang) || 'zh';
   if (srcLang === target) {          // 紀要本來就是這個語言：直接顯示
     el.enBox.textContent = text;
