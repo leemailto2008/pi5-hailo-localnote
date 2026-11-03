@@ -57,8 +57,9 @@ def smooth_path(ogg_path: str) -> str:
     return f"{root}.smooth{ext or '.ogg'}"
 
 
-def make_smooth_ogg(src: str, dst: str = "", sr: int = 16000, bitrate: str = "32k") -> Tuple[bool, int]:
-    """原始錄音 → 修平順的回放檔。回傳 (成功與否, 修了幾處)；失敗時不留半成品。"""
+def make_smooth_ogg(src: str, dst: str = "", sr: int = 16000, bitrate: str = "64k") -> Tuple[bool, int]:
+    """原始錄音 → 修平順的回放檔。回傳 (成功與否, 修了幾處)；失敗時不留半成品。
+    位元率與錄音母帶相同 (voice_pipeline 的 encoder 是 libopus 64k)，比較兩者時只差在修平，不差在編碼品質。"""
     dst = dst or smooth_path(src)
     tmp = dst + ".part"
     try:
