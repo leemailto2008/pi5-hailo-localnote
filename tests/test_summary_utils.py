@@ -591,3 +591,9 @@ def test_recap_splits_a_topic_glued_to_the_previous_todo():
     assert summary_utils._todo_parts(lines[0])[1:] == ("黃專員", "週三")
     assert summary_utils._split_topic_start("教育訓練方面，決議是開課") == ["教育訓練方面，決議是開課"]
 
+
+def test_stt_residue_is_not_part_of_the_owner_name():
+    # 11-03 夜間 10 分鐘實錄：「待辦事項是李協理安排」聽成「待會兒時向市李協理安排」
+    assert summary_utils._OWNER_RE.search("待會兒時向市李協理安排").group(1) == "李協理"
+    assert summary_utils._OWNER_RE.search("交給王小明經理").group(1) == "王小明經理"
+
