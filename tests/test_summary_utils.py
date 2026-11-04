@@ -746,3 +746,8 @@ def test_assemble_long_minutes_prefers_recap_and_body_todos():
 def test_decision_label_prefix_removed():
     out = clean_summary_markdown("## 摘要\n- 招募面試\n\n## 決議\n- 決議：8月26日前完成報到\n- 決定是先簽60臺")
     assert "- 8月26日前完成報到" in out and "- 決定是先簽60臺" in out
+
+
+def test_hand_over_item_starts_after_please():
+    rows = summary_utils.transcript_todo_rows("目前已經報名8人，還剩8個名額請各部門在週一前把名單交給許經理，第十個議題是上線")
+    assert rows == ["| 各部門把名單交給許經理 | 許經理 | 週一前 |"]

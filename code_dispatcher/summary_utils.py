@@ -1273,6 +1273,7 @@ def _body_action(text: str) -> str:
     if m:
         text = re.sub(r"(?:在|於)?\s*\0\s*(?:之前|以前|前)?", "", text[:m.start()] + "\0" + text[m.end():])
     text = re.sub(r"^(?:負責|主持)(?=希望|並|然後|在|於)", "", re.sub(r"\s+", "", text))
+    text = re.sub(r"^(?:負)+(?=請|前|交)", "", text)        # 「負責」聽壞成「負負請交初稿」
     return re.sub(r"[.。，,、]+$", "", _BODY_LEAD_RE.sub("", text))
 
 
@@ -1320,7 +1321,7 @@ def _transcript_todos(transcript: str, max_rows: int = 12) -> List[tuple]:
             continue
         if "把" in before and re.search(r"交[給由]\s*$", c[:mo.start(1) if mo.group(1) else mo.start()]):
             # 「請各部門在週一前把名單交給李協理」：李協理是收件的窗口，事項寫成整句才不會像是他要交名單
-            item = _body_action(before) + "交給" + owner
+            item = _body_action(re.split(r"請|[.。]", before)[-1]) + "交給" + owner   # 「還剩8個名額請各部門把名單…」只留請後面
         key = (re.sub(r"\s", "", item), owner)
         if key in seen:
             continue
