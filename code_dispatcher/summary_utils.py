@@ -1100,7 +1100,14 @@ def assemble_long_minutes(chunk_notes: List[str], max_summary: int = 8, max_deci
                     used.add(_topic_key(lines[rank]))
             rank += 1
     picked.sort()
-    todos = _long_todo_rows(per_all, body_todos, max_todos) if body_todos else extract_todos(all_lines, max_rows=max_todos)
+    todos = None
+    if body_todos:
+        try:
+            todos = _long_todo_rows(per_all, body_todos, max_todos)
+        except Exception:       # noqa: BLE001 — 正文交辦只是加分，出錯時退回各段筆記
+            todos = None
+    if todos is None:
+        todos, body_todos = extract_todos(all_lines, max_rows=max_todos), None
     cells = lambda l: [x.strip() for x in l.strip().strip("|").split("|")]
     decisions = _drop_listed_todo_clause(decisions, todos,
                                          known=(lambda t: _todo_known(t, [cells(r) for r in todos])) if body_todos else None)

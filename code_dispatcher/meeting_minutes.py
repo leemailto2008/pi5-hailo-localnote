@@ -96,6 +96,16 @@ async def stream_map_notes(prompt: str, keep_alive: Optional[int] = None, hailo_
     return acc.strip(), backend
 
 
+def _safe_post(fn, md: str, *args, **kwargs) -> str:
+    """紀要後處理 (補待辦、對照逐字稿…) 出錯時沿用前一步的結果，不讓整份紀要變成「處理失敗」
+    (11-04 夜間 3 分鐘實錄：merge_recap_into_minutes 的 IndexError 讓已經寫好的紀要整份丟掉)。"""
+    try:
+        return fn(md, *args, **kwargs)
+    except Exception as e:      # noqa: BLE001 — 後處理只是加分，不能拖垮主流程
+        print(f"[MeetingMinutes] 後處理 {getattr(fn, '__name__', fn)} 失敗，沿用前一步: {type(e).__name__}: {e}")
+        return md
+
+
 def map_user_prompt(piece: str, idx: int, total: int, lang: str = "zh") -> str:
     """最後一段明確告知是會議結尾：會議常以總結收尾，總結裡的決議/待辦/負責人是紀要最重要的內容。"""
     if lang == "en":
@@ -1090,9 +1100,9 @@ class MeetingJobManager:
             finally:
                 llm_done_event.set()
                 llm_ticker_task.cancel()
-            raw_markdown = ground_todo_table(raw_markdown, transcript)   # 待辦的負責人／時間必須出自逐字稿
-            raw_markdown = drop_unspoken_years(raw_markdown, transcript)  # 模型自己補的年份 (逐字稿沒說) 拿掉
-            raw_markdown = fill_decisions_from_transcript(raw_markdown, transcript)   # 決議段空白但逐字稿有明講
+            raw_markdown = _safe_post(ground_todo_table, raw_markdown, transcript)   # 待辦的負責人／時間必須出自逐字稿
+            raw_markdown = _safe_post(drop_unspoken_years, raw_markdown, transcript)  # 模型自己補的年份 (逐字稿沒說) 拿掉
+            raw_markdown = _safe_post(fill_decisions_from_transcript, raw_markdown, transcript)   # 決議段空白但逐字稿有明講
             minutes_lang = detect_language(transcript)
             self.status.summary_stream = localize_minutes(raw_markdown, minutes_lang)
 
@@ -1170,9 +1180,9 @@ class MeetingJobManager:
         async def _regen_worker():
             try:
                 transcript = self.result.transcript
-                raw_markdown = ground_todo_table(await self._generate_summary_llm(transcript, job_id=job_id), transcript)
-                raw_markdown = drop_unspoken_years(raw_markdown, transcript)
-                raw_markdown = fill_decisions_from_transcript(raw_markdown, transcript)
+                raw_markdown = _safe_post(ground_todo_table, await self._generate_summary_llm(transcript, job_id=job_id), transcript)
+                raw_markdown = _safe_post(drop_unspoken_years, raw_markdown, transcript)
+                raw_markdown = _safe_post(fill_decisions_from_transcript, raw_markdown, transcript)
                 minutes_lang = detect_language(transcript)
                 self.status.summary_stream = localize_minutes(raw_markdown, minutes_lang)
                 parsed = localize_parsed(parse_markdown_minutes(raw_markdown), minutes_lang)
@@ -1243,7 +1253,11 @@ class MeetingJobManager:
         lang = detect_language(transcript)
         lim = LANG_LIMITS[lang]
         # 正文裡明講的交辦 (請X在…前…)：長會議待辦表優先用它，各段筆記抽出的列常是議題摘要 (見 summary_utils._long_todo_rows)
-        body_todos = transcript_todo_rows(transcript, max_rows=200)
+        try:
+            body_todos = transcript_todo_rows(transcript, max_rows=200)
+        except Exception as e:      # noqa: BLE001
+            print(f"[MeetingMinutes] 正文交辦擷取失敗，長會議待辦表改用各段筆記: {e}")
+            body_todos = []
         chunks = split_with_recap(rest, lim["chunk"]) if rest else []   # 結尾總結自成一段
         total = len(notes) + len(chunks)
         print(f"[MeetingMinutes] 📚 長逐字稿 {len(transcript)} 字 ({lang}) → {total} 段 (每段 <= {lim['chunk']} 字)，逐段整理")
@@ -1340,8 +1354,8 @@ class MeetingJobManager:
             full_text = clean_summary_markdown(to_internal_sections("".join(accumulated)))   # 英文標題先換成內部的中文標題
             if full_text:
                 full_text = ensure_sections(full_text)   # 被 num_predict 截斷時明確標示缺段，不捏造
-                full_text = merge_recap_into_minutes(full_text, clean_transcript)   # 補上結尾口頭總結漏掉的待辦與決議 (逐字稿原句)
-                full_text = merge_body_todos(full_text, clean_transcript)   # 正文裡明講的交辦 (請X在…前…) 也補進待辦表
+                full_text = _safe_post(merge_recap_into_minutes, full_text, clean_transcript)   # 補上結尾口頭總結漏掉的待辦與決議 (逐字稿原句)
+                full_text = _safe_post(merge_body_todos, full_text, clean_transcript)   # 正文裡明講的交辦 (請X在…前…) 也補進待辦表
                 shown = localize_minutes(full_text, lang)                          # 回傳內部格式，畫面上顯示該語言
                 self.status.summary_stream = shown
                 self.status.metrics["llm_tokens"] = len(accumulated)
