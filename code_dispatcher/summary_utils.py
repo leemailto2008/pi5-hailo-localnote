@@ -1554,6 +1554,103 @@ def _longest_common_run(a: str, b: str) -> int:
     return difflib.SequenceMatcher(None, a, b, autojunk=False).find_longest_match(0, len(a), 0, len(b)).size
 
 
+
+# 單次紀要 (短會議) 漏掉的議題：qwen3:1.7b 依議題順序寫摘要，名額 (輸出長度) 用完就停，後面的議題整個不見。
+# 11-05 離線 3／5 分鐘 e2e 紀要各 33 份 (劇本 7／13 個議題)：3 分鐘第 6 個議題 (韌體) 29 份完全沒寫到；
+# 5 分鐘第 8、10 個議題 (庫存、上線) 33／32 份沒寫到。逐字稿裡「第N個議題是…」的段落在紀要裡找不到時，用該段開頭的原句補一條摘要。
+_TOPIC_MARK_RE = re.compile(r"第\s*[\d一二三四五六七八九十]{1,3}\s*個?\s*[議意]題\s*[是為：:，,]?\s*")
+_TOPIC_FACT_RE = re.compile(r"\d{1,2}月\d{1,2}日|\d+(?:\.\d+)?(?:%|萬元?|億|臺|人|件|位|天|小時|輪|場|款|支|個)")
+_ZH_DIGIT = {"一": 1, "二": 2, "兩": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_ZH_NUM_RE = re.compile(r"(?<![一二三四五六七八九十兩百千萬])([一二三四五六七八九兩]?十[一二三四五六七八九]?|[一二三四五六七八九兩])"
+                        r"(?=(?:月|日|號|%|萬|臺|人|件|位|天|小時|輪|場|款|支|個))")
+
+
+def _zh_small_num(t: str) -> int:
+    if "十" not in t:
+        return _ZH_DIGIT[t]
+    a, b = t.split("十", 1)
+    return (_ZH_DIGIT[a] if a else 1) * 10 + (_ZH_DIGIT[b] if b else 0)
+
+
+def _fact_text(text: str) -> str:
+    """比對用：去掉空白與標點、臺／台統一、「十二月三日／百分之九十／十五位」改成阿拉伯數字。"""
+    t = re.sub(r"[\s，,。、：:；;|\-]", "", text or "").replace("台", "臺").replace("％", "%")
+    t = re.sub(r"百分之([一二三四五六七八九]?十[一二三四五六七八九]?|[一二三四五六七八九]|\d+)",
+               lambda m: f"{m.group(1) if m.group(1).isdigit() else _zh_small_num(m.group(1))}%", t)
+    return _ZH_NUM_RE.sub(lambda m: str(_zh_small_num(m.group(1))), t)
+
+
+def _topic_segments(body: str) -> List[str]:
+    marks = list(_TOPIC_MARK_RE.finditer(body))
+    segs = [body[m.end():(marks[i + 1].start() if i + 1 < len(marks) else len(body))].strip(" ，,。") for i, m in enumerate(marks)]
+    return [x for x in segs if len(x) >= 8]
+
+
+def _topic_said(seg: str, md_facts: str, bullets: List[str], window: int = 90) -> bool:
+    """這個議題紀要裡已經寫到了嗎：開頭 30 字與某條摘要／決議有 5 字以上相同，或段落開頭 window 字內的日期出現在紀要，
+    或兩個以上的數量 (85%、12萬元、3天…) 出現在紀要。只看開頭：STT 漏掉下一個議題的編號時，後面會黏著別的議題。"""
+    t = _fact_text(seg)
+    if any(_longest_common_run(t[:30], _fact_text(b)) >= 5 for b in bullets):
+        return True
+    facts = {m.group(0) for m in _TOPIC_FACT_RE.finditer(t[:window])}
+    if any("月" in f and f in md_facts for f in facts):
+        return True
+    return sum(f in md_facts for f in facts) >= 2
+
+
+def _topic_bullet(seg: str, min_len: int = 28, max_len: int = 46) -> str:
+    out = ""
+    for c in _CLAUSE_SPLIT_RE.split(re.sub(r"\s+", " ", seg)):
+        c = c.strip()
+        if not c:
+            continue
+        nxt = f"{out}，{c}" if out else c
+        if out and len(nxt) > max_len:
+            break
+        if len(nxt) > max_len:      # 第一個子句就太長 (STT 沒斷句)：截斷，但不留半個數字或日期 (「修正版預計 6」)
+            nxt = re.sub(r"[\s\d.]*(?:\d\s*月\s*\d*)?$", "", nxt[:max_len]).rstrip(" ，,") or nxt[:max_len]
+        out = nxt
+        if len(out) >= min_len:
+            break
+    return out
+
+
+def fill_missing_topics(md: str, transcript: str, max_bullets: int = 10) -> str:
+    """單次紀要的摘要補上漏掉的議題 (見 _TOPIC_MARK_RE 上的說明)。只認中文逐字稿裡「第N個議題」的段落 (結尾總結不算)，
+    已經寫到的議題 (_topic_said) 不補；補的條目是該段開頭的原句 (約 28–46 字)，接在摘要最後，摘要最多 max_bullets 條。
+    11-05 離線重放 (3 分鐘 33 份／5 分鐘 33 份)：議題事實出現在紀要 197/231 → 227/231、293/429 → 394/429；
+    摘要平均 4.8 → 6.2／8.5 條，回顧事實與重複條目不變；1 分鐘 41 份不變。"""
+    sm = _minutes_section(md or "", "摘要")
+    if not sm or not transcript or not _CJK_RE.search(transcript):
+        return md
+    parts = split_with_recap(transcript)
+    body = transcript[:len(transcript) - len(parts[-1])] if len(parts) > 1 and is_recap_chunk(parts[-1]) else transcript
+    segs = _topic_segments(body)
+    if len(segs) < 2:
+        return md
+    text = sm.group(2).rstrip()
+    lines = text.splitlines()
+    real = [l.strip()[2:].strip() for l in lines if l.strip().startswith("- ") and l.strip()[2:].strip() not in ("無", SECTION_MISSING_NOTE)]
+    dm = _minutes_section(md, "決議")
+    decisions = [l.strip()[2:] for l in (dm.group(2).splitlines() if dm else []) if l.strip().startswith("- ")]
+    md_facts = _fact_text(md)
+    add: List[str] = []
+    for seg in segs:
+        if len(real) + len(add) >= max_bullets:
+            break
+        if _topic_said(seg, md_facts, real + add + decisions):
+            continue
+        b = _topic_bullet(seg)
+        if len(b) >= 8:
+            add.append(b)
+            md_facts += _fact_text(b)
+    if not add:
+        return md
+    if not real:        # 摘要只有「- 無」或缺段說明：換掉
+        lines = [l for l in lines if not l.strip().startswith("- ")]
+    body_lines = lines + [f"- {b}" for b in add]
+    return md[:sm.start(2)] + "\n".join(body_lines) + sm.group(2)[len(text):] + md[sm.end(2):]
+
 def merge_body_todos(md: str, transcript: str, max_rows: int = 10) -> str:
     """單次紀要 (短會議)：待辦表補上逐字稿正文裡明講、表上還沒有的交辦 (_transcript_todos)。
     - 同一負責人已有一列，且期限相同或事項有兩個以上相同的字：視為已列。

@@ -47,7 +47,7 @@ except Exception as _fix_err:   # 開發環境找不到時，只是少了跨切�
     def fix_meeting_terms(text: str) -> str:
         return text
 from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, fill_decisions_from_transcript,
-                           cut_glued_topic_numbers, detect_language, drop_listed_todos_from_summary, drop_unspoken_years,
+                           cut_glued_topic_numbers, detect_language, drop_listed_todos_from_summary, drop_unspoken_years, fill_missing_topics,
                            ground_todo_table, is_recap_chunk, keep_alive_plan, localize_minutes,
                            merge_body_todos, merge_recap_into_minutes, recap_notes, to_internal_sections, transcript_todo_rows,
                            map_notes_complete, split_with_recap, summary_limits, take_stable_chunk, tidy_live_transcript)
@@ -1361,6 +1361,7 @@ class MeetingJobManager:
                 full_text = ensure_sections(full_text)   # 被 num_predict 截斷時明確標示缺段，不捏造
                 full_text = _safe_post(merge_recap_into_minutes, full_text, clean_transcript)   # 補上結尾口頭總結漏掉的待辦與決議 (逐字稿原句)
                 full_text = _safe_post(merge_body_todos, full_text, clean_transcript)   # 正文裡明講的交辦 (請X在…前…) 也補進待辦表
+                full_text = _safe_post(fill_missing_topics, full_text, clean_transcript)   # 摘要漏掉的後段議題用逐字稿原句補一條
                 shown = localize_minutes(full_text, lang)                          # 回傳內部格式，畫面上顯示該語言
                 self.status.summary_stream = shown
                 self.status.metrics["llm_tokens"] = len(accumulated)

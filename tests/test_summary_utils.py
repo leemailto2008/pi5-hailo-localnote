@@ -882,3 +882,19 @@ def test_cut_glued_topic_number_at_bullet_end():
 def test_body_todo_takes_mixed_numeral_deadline():
     assert summary_utils.transcript_todo_rows("下週會再安排三場面試由許經理主持，希望在7月十六日前完成報到") == \
         ["| 安排三場面試 | 許經理 | 7月十六日前 |"]
+
+
+def test_fill_missing_topics_adds_late_topic_from_transcript():
+    tr = ("第一個議題是供應商，新光材料的電源晶片交期延到10月10日，比原本晚了七天。"
+          "第二個議題是新版ERP系統上線，資料轉換已經完成85%，正式切換訂在2月3日晚上，預計停機三小時。"
+          "第三個議題是工業閘道器的韌體更新，目前回報的問題是藍牙斷線，修正版預計六月二十五日上線，測試的部分請黃專員安排。"
+          "好，最後總結一下，供應商方面，決議是替代料持續驗證，今天就到這裡，謝謝大家")
+    md = ("## 摘要\n- 供應商新光材料電源晶片交期延至10月10日\n- 新版ERP系統資料轉換完成85%，2月3日晚切換\n\n"
+          "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 無 | - | - |\n\n## 決議\n- 無\n")
+    out = summary_utils.fill_missing_topics(md, tr)
+    assert "- 工業閘道器的韌體更新，目前回報的問題是藍牙斷線" in out and out.count("新光材料") == 1 and out.count("ERP") == 1
+    assert "最後總結" not in out and "\n\n## 待辦" in out
+    assert summary_utils.fill_missing_topics(out, tr) == out
+    assert summary_utils.fill_missing_topics(md, "第一個議題是供應商，交期延到10月10日") == md      # 只有一個議題不補
+    said = md.replace("- 新版ERP", "- 韌體：藍牙斷線，6月25日上線\n- 新版ERP")
+    assert summary_utils.fill_missing_topics(said, tr) == said     # 「六月二十五日」與「6月25日」算同一個日期
