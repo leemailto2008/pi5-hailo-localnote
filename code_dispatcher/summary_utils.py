@@ -518,21 +518,32 @@ def ground_todo_table(md: str, transcript: str) -> str:
     return _drop_same_task_rows(_drop_ownerless_duplicate_rows(_drop_empty_item_rows("\n".join(out))))
 
 
+# 事項只有議題名稱或段落名稱、不是動作 (11-05 3 分鐘 e2e：「| 招募方面 | 王經理 | - |」「| 決議 | - | - |」)
+_LABEL_ONLY_ITEM_RE = re.compile(r"^(?:決議|待辦(?:事項)?|摘要|總結|[\u4e00-\u9fff]{0,6}方面)$")
+
+
 def _drop_empty_item_rows(md: str) -> str:
-    """事項欄是空的列拿掉，多出來的空白格去掉 (11-04 夜間 3 分鐘實錄：「|  | 王經理 | - |  |」)。"""
-    out, section = [], None
+    """事項欄是空的、或只有「X方面／決議」這類標籤沒有期限的列拿掉，多出來的空白格去掉
+    (11-04 夜間 3 分鐘實錄：「|  | 王經理 | - |  |」)。整張表都拿光時留一列「無」。"""
+    out, section, dropped, kept, last_row = [], None, 0, 0, None
     for line in md.splitlines():
         s = line.strip()
         if s.startswith("## "):
             section = s[3:].strip()
         if section == "待辦" and s.startswith("|") and not _is_sep(s):
             cells = [c.strip() for c in s.strip("|").split("|")]
-            if not cells[0]:
+            if not cells[0] or (len(cells) >= 3 and _LABEL_ONLY_ITEM_RE.match(cells[0]) and cells[2] in _TODO_SKIP):
+                dropped += 1
                 continue
+            kept += cells[0] not in _TODO_HEADER_ECHO
             while len(cells) > 3 and not cells[-1]:
                 cells.pop()
             line = "| " + " | ".join(cells) + " |"
+        if section == "待辦" and s.startswith("|"):
+            last_row = len(out)
         out.append(line)
+    if dropped and not kept and last_row is not None:
+        out.insert(last_row + 1, "| 無 | - | - |")
     return "\n".join(out)
 
 

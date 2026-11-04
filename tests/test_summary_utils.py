@@ -967,3 +967,12 @@ def test_en_recap_run_on_sentence_split_at_topics():
                                          topics=["customer order"]).endswith("customer order with a longer explanation than sixty characters here")
     long = summary_utils._recap_notes_en("We decided " + "very " * 40 + "carefully.", max_len=50)
     assert long.startswith("- We decided very") and long.endswith(" very") and len(long) <= 52
+
+
+def test_label_only_todo_rows_dropped_and_placeholder_kept():
+    md = "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 決議 | - | - |\n| 招募方面 | 王經理 | - |\n\n## 決議\n- x\n"
+    out = summary_utils._drop_empty_item_rows(md)
+    assert "| 無 | - | - |" in out and "招募方面" not in out and "| 決議 |" not in out
+    md2 = md.replace("| 決議 | - | - |\n", "| 招募方面 | 王經理 | 12月3日前 |\n| 主持面試 | 王經理 | 週五 |\n")
+    out2 = summary_utils._drop_empty_item_rows(md2)
+    assert "| 招募方面 | 王經理 | 12月3日前 |" in out2 and "| 主持面試 | 王經理 | 週五 |" in out2 and "| 無 |" not in out2
