@@ -674,3 +674,13 @@ def test_transcript_todo_rows_hand_over_keeps_whole_clause():
     tr = "名額20人，請各部門在週一前把名單交給李協理，第十個議題是上線，這件事交給吳副理，週三前回覆客戶"
     assert summary_utils.transcript_todo_rows(tr) == ["| 各部門把名單交給李協理 | 李協理 | 週一前 |",
                                                      "| 回覆客戶 | 吳副理 | 週三前 |"]
+
+
+def test_clean_summary_drops_prompt_label_echo():
+    md = ("## 摘要\n- 供應商星光材料電源晶片交期延至10月10日，關鍵數字：10月10日，金額：無，人名：曦代料\n"
+          "- 新版ERP系統正式切換定於2月3日，預計時間：2月3日，負責人：李協理\n"
+          "- 訂單先簽60臺試單，人名：王經理\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 無 | - | - |\n\n## 決議\n- 無")
+    out = clean_summary_markdown(md)
+    assert "- 供應商星光材料電源晶片交期延至10月10日\n" in out
+    assert "- 新版ERP系統正式切換定於2月3日，負責人：李協理\n" in out
+    assert "- 訂單先簽60臺試單，人名：王經理\n" in out      # 是「姓＋職稱」且前面沒寫過：不動
