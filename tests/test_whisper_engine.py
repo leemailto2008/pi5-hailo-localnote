@@ -408,3 +408,9 @@ def test_fix_recap_marker_variants():
     raw = "總結一下訓練方面,聰一是簡報技巧，佩辦事向十個部門週四前把名單交給吳副理，展覽方面，軍意是參加新竹展覽，待辦事頁是吳副理週一前交初稿"
     out = eng.fix_meeting_terms(raw)
     assert out.count("決議是") == 2 and out.count("待辦事項") == 2
+
+
+def test_engineer_heard_as_chen_or_shen():
+    from hailo_whisper.engine import fix_meeting_terms
+    assert fix_meeting_terms("這件事由張工臣師負責，週五前回覆客戶") == "這件事由張工程師負責，週五前回覆客戶"
+    assert "楊工程師安排" in fix_meeting_terms("請楊工沈師安排至少五輪回歸測試")

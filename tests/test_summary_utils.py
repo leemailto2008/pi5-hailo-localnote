@@ -877,3 +877,8 @@ def test_cut_glued_topic_number_at_bullet_end():
     assert "- 客戶訂單：臺南訂單提前，請劉課長調貨\n" in out and "- 第28議題品質異常：客訴六件\n" in out
     assert "- 第3個議題\n" in out and "| 第3個議題 |" in out and out.endswith("- 黃專員通知使用者\n")
     assert summary_utils.cut_glued_topic_numbers(out) == out
+
+
+def test_body_todo_takes_mixed_numeral_deadline():
+    assert summary_utils.transcript_todo_rows("下週會再安排三場面試由許經理主持，希望在7月十六日前完成報到") == \
+        ["| 安排三場面試 | 許經理 | 7月十六日前 |"]
