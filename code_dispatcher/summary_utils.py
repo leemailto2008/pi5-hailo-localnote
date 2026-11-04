@@ -1329,8 +1329,31 @@ def _already_said(core: str, md_norm: str, decisions: List[str]) -> bool:
 _TODO_COMMON_CHARS = set("的前日月週周在是和與及會要將把再並完成")
 
 
+_EN_TOPIC_RE = re.compile(r"\b(?:first|second|third|fourth|fifth|sixth|seventh|eighth|next|last|final)\s+topic\s+is\s+(?:the\s+)?"
+                          r"([a-z][a-z \-]{2,30}?)\s*(?=[.,;]|\s+(?:for|of|on|from)\b)", re.I)
+
+
+def _recap_timeless_todo_en(line: str, topics=()):
+    """英文總結「and Kevin owns the testing, customer order」：有人名＋動作、沒有期限 → (事項, 負責人, "-")。
+    11-05 228 en_short：模型漏了 Kevin 那列 (回顧事實 0.83)，總結原句裡有、但沒期限所以 extract_todos 不收。
+    topics：正文的議題名稱 (「The fourth topic is the customer order」)；STT 沒斷句時黏在動作後面的下一個議題從那裡切掉。"""
+    if _EN_TIME_RE.search(line):
+        return None
+    mo = _EN_OWNER_RE.search(line)
+    owner = mo.group(1) if mo else None
+    if not owner or owner.split()[0].lower() in ("we", "they", "i", "you", "it", "this", "that", "the", "all", "everyone", "team") \
+            or owner.split()[0].lower() in _EN_NOT_NAMES:
+        return None
+    action = re.split(r"[,;.]", mo.group(2) or mo.group(3) or "")[0].strip()
+    for t in topics:
+        action = re.split(r"\s+" + re.escape(t) + r"\b", action, 1, flags=re.I)[0].strip()
+    return (action[:40], owner, "-") if len(action) >= 3 else None
+
+
 def _recap_timeless_todo(line: str):
     """「待辦事項是李協理，周會報告」：有負責人、沒有期限的總結待辦 → (事項, 負責人, "-")；其他回傳 None。"""
+    if not _CJK_RE.search(line or ""):
+        return _recap_timeless_todo_en(line or "")
     parts = _TODO_MARK_RE.split(line, 1)
     if len(parts) != 2:
         return None
@@ -1378,7 +1401,9 @@ def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_de
         return md
     m = _minutes_section(md, "待辦")
     rows = extract_todos(lines, max_rows=max_rows)
-    rows += [f"| {t[0]} | {t[1]} | {t[2]} |" for t in map(_recap_timeless_todo, lines) if t][:max(0, max_rows - len(rows))]
+    topics = [m.group(1).strip() for m in _EN_TOPIC_RE.finditer(" ".join(parts[:-1]))] if not _CJK_RE.search(parts[-1]) else []
+    timeless = [_recap_timeless_todo_en(l, topics) if topics else _recap_timeless_todo(l) for l in lines]
+    rows += [f"| {t[0]} | {t[1]} | {t[2]} |" for t in timeless if t][:max(0, max_rows - len(rows))]
     cells = lambda l: [x.strip() for x in l.strip().strip("|").split("|")]
     if m and rows:
         body = m.group(2).rstrip("\n").splitlines()

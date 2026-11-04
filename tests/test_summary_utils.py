@@ -927,3 +927,20 @@ def test_same_owner_same_task_rows_collapse():
 def test_body_item_cut_at_topic_number_without_di():
     assert summary_utils.transcript_todo_rows("等試用結果再談，這件事由黃專員負責,週一前回覆客戶七個議題是招募，業務部目") == \
         ["| 回覆客戶 | 黃專員 | 週一前 |"]
+
+
+def test_en_recap_owner_without_deadline_gets_a_row():
+    tr = ("The first topic is training. There is a presentation skills course on September 2nd with 30 seats. "
+          "22 people have signed up so far, so there are 8 seats left. The second topic is safety. Nobody was hurt. "
+          "We have installed eight warning lights, and everyone must finish the safety refresher by August 15th. "
+          "The third topic is the firmware update for the power supply. The fixed version is planned for March 15th. "
+          "The reported problem is Bluetooth disconnection, and we will run it on 100 units for three days. "
+          "Lotus Tech wants 200 sample units of the power supply by February 28th and asked for a 6 percent discount. "
+          "The fourth topic is the customer order. Everyone agreed, John will reply to the customer by Wednesday. "
+          "OK, to wrap up training. Names go to Mary by Thursday. firmware. We decided to release the fix on March 15th. "
+          "and Kevin owns the testing customer order. We agreed on a 30-unit trial order, And John will reply to Lotus Tech by Wednesday. "
+          "That's all for today. Thank you everyone!")
+    md = ("## 摘要\n- Firmware fix on March 15\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n"
+          "| reply to Lotus Tech | John | Wednesday |\n\n## 決議\n- 無\n")
+    out = summary_utils.merge_recap_into_minutes(md, tr)
+    assert "| owns the testing | Kevin | - |" in out and out.count("| John |") == 1
