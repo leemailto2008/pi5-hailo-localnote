@@ -48,7 +48,7 @@ except Exception as _fix_err:   # 開發環境找不到時，只是少了跨切�
         return text
 from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, fill_decisions_from_transcript,
                            detect_language, drop_unspoken_years, ground_todo_table, is_recap_chunk, keep_alive_plan, localize_minutes,
-                           merge_recap_into_minutes, recap_notes, to_internal_sections,
+                           merge_body_todos, merge_recap_into_minutes, recap_notes, to_internal_sections,
                            map_notes_complete, split_with_recap, summary_limits, take_stable_chunk, tidy_live_transcript)
 
 # 長會議紀要 (2026-10-27 e2e)：Hailo qwen3:1.7b 單次請求約 1500 字就 context full (HTTP 500)，
@@ -1339,6 +1339,7 @@ class MeetingJobManager:
             if full_text:
                 full_text = ensure_sections(full_text)   # 被 num_predict 截斷時明確標示缺段，不捏造
                 full_text = merge_recap_into_minutes(full_text, clean_transcript)   # 補上結尾口頭總結漏掉的待辦與決議 (逐字稿原句)
+                full_text = merge_body_todos(full_text, clean_transcript)   # 正文裡明講的交辦 (請X在…前…) 也補進待辦表
                 shown = localize_minutes(full_text, lang)                          # 回傳內部格式，畫面上顯示該語言
                 self.status.summary_stream = shown
                 self.status.metrics["llm_tokens"] = len(accumulated)

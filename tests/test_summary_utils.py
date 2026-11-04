@@ -631,3 +631,46 @@ def test_empty_todo_section_gets_a_table_so_the_recap_todos_can_be_added():
     assert "| 王經理 |" in out.split("## 待辦")[1].split("## 決議")[0]
     assert ensure_sections("## 摘要\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 無 | - | - |\n\n## 決議").count("- 無") == 2
 
+
+
+def test_transcript_todo_rows_reads_explicit_assignments():
+    tr = ("第一個議題是供應商，新光材料的電源晶片交期延到10月10日，請李協理跟對方確認，週五回報，"
+          "第三個議題是工安，上週三樓產線發生一起小事故，已經加裝四支警示燈，並在6月14日前完成全員複訓，負責人是張工程師，"
+          "預算表請劉課長在10月7日前送到財務部，同意，這件事由王經理負責，週五前回覆客戶，"
+          "好，最後總結一下，預算方面，待辦事項是劉課長10月7日前送預算表，今天就到這裡，謝謝大家")
+    assert summary_utils.transcript_todo_rows(tr) == [
+        "| 跟對方確認 | 李協理 | 週五 |",
+        "| 完成全員複訓 | 張工程師 | 6月14日前 |",
+        "| 送到財務部 | 劉課長 | 10月7日前 |",
+        "| 回覆客戶 | 王經理 | 週五前 |",
+    ]
+
+
+def test_transcript_todo_rows_skips_past_dates_and_english():
+    assert summary_utils.transcript_todo_rows("上週三樓產線發生事故，由王經理說明經過，大家都同意") == []
+    assert summary_utils.transcript_todo_rows("Kevin will send the report by Friday, Susan owns the testing.") == []
+
+
+def test_merge_body_todos_adds_missing_rows_and_fills_owner():
+    md = ("## 摘要\n- 預算 200 萬元\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n"
+          "| 送交預算表 | 劉客 | 10月7日前 |\n| 回覆客戶 | 王經理 | 週五前 |\n\n## 決議\n- 先簽 60 臺試單\n")
+    tr = ("預算表請劉課長在10月7日前送到財務部，這件事由王經理負責，週五前回覆客戶，"
+          "已經加裝四支警示燈，並在6月14日前完成全員複訓，負責人是張工程師")
+    out = summary_utils.merge_body_todos(md, tr)
+    table = out.split("## 待辦")[1].split("## 決議")[0]
+    assert "| 送交預算表 | 劉課長 | 10月7日前 |" in table        # 模型的負責人對不上逐字稿 → 用交辦那句的人
+    assert table.count("王經理") == 1                          # 已經有的不重複
+    assert "| 完成全員複訓 | 張工程師 | 6月14日前 |" in table
+    assert out.endswith("## 決議\n- 先簽 60 臺試單\n")
+
+
+def test_merge_body_todos_replaces_placeholder_row():
+    md = "## 摘要\n- x\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 無 | - | - |\n\n## 決議\n- 無\n"
+    out = summary_utils.merge_body_todos(md, "請黃專員在2月15日前提出改善報告")
+    assert "| 無 |" not in out and "| 提出改善報告 | 黃專員 | 2月15日前 |" in out
+
+
+def test_transcript_todo_rows_hand_over_keeps_whole_clause():
+    tr = "名額20人，請各部門在週一前把名單交給李協理，第十個議題是上線，這件事交給吳副理，週三前回覆客戶"
+    assert summary_utils.transcript_todo_rows(tr) == ["| 各部門把名單交給李協理 | 李協理 | 週一前 |",
+                                                     "| 回覆客戶 | 吳副理 | 週三前 |"]

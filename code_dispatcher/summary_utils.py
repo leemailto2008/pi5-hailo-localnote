@@ -1,5 +1,6 @@
 # code_dispatcher/summary_utils.py
 """會議紀要 (LLM 輸出) 後處理，純函式，供 meeting_minutes 使用並可離線單元測試。"""
+import difflib
 import re
 from typing import Dict, List, Optional
 
@@ -1131,6 +1132,147 @@ def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_de
             body = "\n".join(real + [f"- {x}" for x in add])
             md = md[:m.start(2)] + body + ("\n\n" + rest.lstrip("\n") if rest.strip() else "\n")
     return md.rstrip() + "\n" if md.endswith("\n") else md.rstrip()
+
+
+# 逐字稿正文 (結尾總結之前) 裡明講的交辦 → 待辦表列。qwen3:1.7b 單次紀要的待辦表常只寫 1–2 列：
+# 11-04 離線 37 份 1–15 分鐘 e2e 逐字稿，劇本有負責人的議題 3 分鐘 7 個、5 分鐘 13 個，紀要待辦表平均只有 1.4–1.5 列。
+# 只認有明確交辦用語的負責人 (「請X」「由X」「交給X」「負責人是X」、子句開頭的「X負責／會／要」) 且同一子句或相鄰子句有期限
+# (「上週三」這類過去的不算)；事項取負責人後面的動作，只有「負責／主持」時改取相鄰子句或前半句。
+# 劇本核對：115 列中 104 列的負責人與期限都對得上同一個議題，其餘 11 列是 STT 聽錯的名字或日期 (刀課長、週一→週日)。
+_BODY_OWNER = _NAME_CHAR + r"{1,3}?(?:經理|副理|協理|主任|專員|工程師|處長|課長|組長|主管)"
+_BODY_CUE_RE = re.compile(r"(?:請|由|交給|交由)\s*(" + _BODY_OWNER + r")|負責人\s*(?:是|為)?\s*(" + _BODY_OWNER + r")"
+                          r"|^(?:這件事|並|再)?\s*(" + _BODY_OWNER + r")\s*(?=負責|會|要|將|主持|安排|在)")
+_BODY_TOPIC_CUT_RE = re.compile(r"第\s*\S{1,3}\s*個?\s*[議意]題")     # STT 沒斷句時，下一個議題的開頭不算進這句
+_BODY_BARE_RE = re.compile(r"^(?:負責|主持|處理|安排|跟進|追蹤)?$")
+_BODY_LEAD_RE = re.compile(r"^(?:這件事|並且?|再|然後|在|於|要|會|將|請|由|負責|之前|以前|前|希望|把|先)+")
+
+
+def _body_due(clause: str):
+    for m in _TIME_RE.finditer(clause):
+        if clause[max(0, m.start() - 1):m.start()] not in ("上", "昨"):     # 「上週三樓產線發生…」不是期限
+            return m
+    return None
+
+
+def _body_action(text: str) -> str:
+    """去掉期限 (連同「在…前」)、開頭的虛詞與結尾標點，只留動作。"""
+    m = _body_due(text)
+    if m:
+        text = re.sub(r"(?:在|於)?\s*\0\s*(?:之前|以前|前)?", "", text[:m.start()] + "\0" + text[m.end():])
+    text = re.sub(r"^(?:負責|主持)(?=希望|並|然後|在|於)", "", re.sub(r"\s+", "", text))
+    return re.sub(r"[.。，,、]+$", "", _BODY_LEAD_RE.sub("", text))
+
+
+def transcript_todo_rows(transcript: str, max_rows: int = 8) -> List[str]:
+    """逐字稿正文中「有交辦用語的負責人＋期限」→「| 事項 | 負責人 | 時間 |」列 (中文逐字稿；結尾總結另由 merge_recap_into_minutes 處理)。"""
+    return [f"| {item} | {owner} | {when} |" for item, owner, when, _ in _transcript_todos(transcript, max_rows)]
+
+
+def _transcript_todos(transcript: str, max_rows: int = 8) -> List[tuple]:
+    """(事項, 負責人, 時間, 出處子句) 的清單；出處用來比對模型寫的同一件事。"""
+    text = (transcript or "").strip()
+    if not text or detect_language(text) == "en":
+        return []
+    parts = split_with_recap(text)
+    if len(parts) >= 2 and is_recap_chunk(parts[-1]):
+        cut = text.rfind(parts[-1][:30])
+        text = text[:cut] if cut > 0 else text
+    clauses = [c.strip() for x in _CLAUSE_SPLIT_RE.split(text) for c in _BODY_TOPIC_CUT_RE.split(x) if c and c.strip()]
+    rows, seen = [], set()
+    for i, c in enumerate(clauses):
+        mo = _BODY_CUE_RE.search(c)
+        if not mo:
+            continue
+        owner = next(g for g in mo.groups() if g)
+        before, after = c[:mo.start()], c[mo.end():]
+        nxt = clauses[i + 1] if i + 1 < len(clauses) else ""
+        prv = clauses[i - 1] if i > 0 else ""
+        mt, item, src = _body_due(c), "", c
+        if mt is None and nxt and _body_due(nxt) and not _BODY_CUE_RE.search(nxt) and len(nxt) <= 12:
+            # 「這件事由王經理負責，週五前回覆客戶」「請李協理跟對方確認，週五回報」
+            mt, a, src = _body_due(nxt), _body_action(after), nxt
+            item = a if not _BODY_BARE_RE.match(a) else _body_action(nxt)
+        elif mt is None and mo.group(2) and prv and _body_due(prv):
+            # 「…並在6月14日前完成全員複訓，負責人是張工程師」
+            mt, src = _body_due(prv), prv
+            segs = [x for x in re.split(r"並|然後", prv) if _body_due(x)] or [prv]
+            item = _body_action(segs[-1])
+        elif mt is not None:
+            a = _body_action(after) if mt.start() >= mo.end() else _body_action(re.sub(r"\s+", "", after))
+            if _BODY_BARE_RE.match(a) and before:   # 「下週會再安排四場面試由王經理主持」
+                segs = [x for x in re.split(r"並|然後", before) if x.strip()] or [before]
+                a = _body_action(segs[-1])[-12:]
+            item = a
+        if mt is None or len(item) < 2:
+            continue
+        if "把" in before and re.search(r"交[給由]\s*$", c[:mo.start(1) if mo.group(1) else mo.start()]):
+            # 「請各部門在週一前把名單交給李協理」：李協理是收件的窗口，事項寫成整句才不會像是他要交名單
+            item = _body_action(before) + "交給" + owner
+        key = (re.sub(r"\s", "", item), owner)
+        if key in seen:
+            continue
+        seen.add(key)
+        when = mt.group(1).replace(" ", "")
+        if re.match(r"\s*(?:之前|以前|前)", src[mt.end():]) and not when.endswith("前"):
+            when += "前"          # 與模型寫的「10月7日前」「週五前」一致
+        rows.append((item[:20], owner, when, f"{prv}{c}{nxt}"))
+        if len(rows) >= max_rows:
+            break
+    return rows
+
+
+def _longest_common_run(a: str, b: str) -> int:
+    if not a or not b:
+        return 0
+    return difflib.SequenceMatcher(None, a, b, autojunk=False).find_longest_match(0, len(a), 0, len(b)).size
+
+
+def merge_body_todos(md: str, transcript: str, max_rows: int = 8) -> str:
+    """單次紀要 (短會議)：待辦表補上逐字稿正文裡明講、表上還沒有的交辦 (_transcript_todos)。
+    - 同一負責人已有一列，且期限相同或事項有兩個以上相同的字：視為已列。
+    - 模型寫的列負責人對不上逐字稿 (「-」)，且事項裡有連續三個字出現在交辦那句：補上負責人 (與期限)，不另加一列。
+      (只看同一天期限或零散的相同字會補錯：「出差報告」與「許經理會在5月25日前提出改善報告」只有「報告」相同。)
+      例：「| 送交預算表 | - | 10月7日前 |」+「預算表請劉課長在10月7日前送到財務部」→「| 送交預算表 | 劉課長 | 10月7日前 |」。
+    - 表上的「無」佔位列換掉。"""
+    if not md or not transcript:
+        return md
+    orig, md = md, ground_todo_table(md, transcript)        # 先知道模型寫的負責人哪些對不上逐字稿
+    m = _minutes_section(md, "待辦")
+    if not m:
+        return orig
+    body = m.group(2).rstrip("\n").splitlines()
+    table = [l for l in body if l.strip().startswith("|") and not _is_sep(l.strip())]
+    if not table:
+        return orig
+    cells = lambda l: [x.strip() for x in l.strip().strip("|").split("|")]
+    norm = lambda x: re.sub(r"[\s，,。、：:前]", "", x)
+    placeholder = [l for l in table[1:] if cells(l)[0] in ("無", SECTION_MISSING_NOTE)]
+    real = [l for l in table[1:] if l not in placeholder and len(cells(l)) >= 3]
+    rows = [cells(l) for l in real]
+    table_text = norm(" ".join(" ".join(c) for c in rows))
+    add, filled = [], {}
+    for item, owner, when, ctx in _transcript_todos(transcript, max_rows=max_rows):
+        if norm(item) in table_text:
+            continue
+        known = rows + [[a, b, c] for a, b, c, _ in add]
+        if any(c[1] not in _TODO_SKIP and (owner in c[1] or c[1] in owner)
+               and (norm(c[2]) == norm(when) or len(set(norm(item)) & set(norm(c[0]))) >= 2) for c in known):
+            continue
+        k = next((k for k, c in enumerate(rows) if c[1] in _TODO_SKIP and k not in filled
+                  and _longest_common_run(norm(c[0]), norm(ctx)) >= 3), None)
+        if k is not None:
+            c = rows[k]
+            filled[k] = [c[0], owner, c[2] if c[2] not in _TODO_SKIP else when] + c[3:]
+            continue
+        add.append((item, owner, when, ctx))
+    add = add[:max(0, max_rows - len(real))]
+    if not add and not filled:
+        return orig
+    swap = {real[k]: "| " + " | ".join(v) + " |" for k, v in filled.items()}
+    new_body = [swap.get(l, l) for l in body if l not in placeholder] + [f"| {a} | {b} | {c} |" for a, b, c, _ in add]
+    rest = md[m.end():]
+    out = md[:m.start(2)] + "\n".join(new_body) + ("\n\n" + rest.lstrip("\n") if rest.strip() else "\n")
+    return out.rstrip() + "\n" if orig.endswith("\n") else out.rstrip()
 
 
 def keep_alive_plan(n_chunks: int, sec_per_chunk: int = 75, cap: int = 1800, margin: int = 120) -> List[Optional[int]]:
