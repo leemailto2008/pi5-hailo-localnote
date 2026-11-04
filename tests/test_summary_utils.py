@@ -705,3 +705,8 @@ def test_drop_listed_todo_clause_removes_owner_only_clause_with_its_action():
     rows = ["| 事項 | 負責人 | 時間 |", "|---|---|---|", "| 訂單掉貨 | 劉課長 | 1月5日 |"]
     out = summary_utils._drop_listed_todo_clause(["存方面，決議是下一批3000臺1月5日到，待辦事項是劉課長，訂單掉貨"], rows)
     assert out == ["存方面，決議是下一批3000臺1月5日到"]
+
+
+def test_past_weekday_is_not_a_deadline():
+    assert summary_utils.extract_todos(["公安：上週三事故，許經理負責"]) == []
+    assert summary_utils.extract_todos(["許經理週三前回報"]) == ["| 許經理週三前回報 | 許經理 | 週三 |"]
