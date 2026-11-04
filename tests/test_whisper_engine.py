@@ -352,3 +352,12 @@ def test_fix_pronoun_surname(raw, fixed):
 def test_fix_draft_and_specialist(raw, fixed):
     assert eng.fix_meeting_terms(raw) == fixed
     assert eng.fix_meeting_terms(fixed) == fixed
+
+
+@pytest.mark.parametrize("raw, fixed", [
+    ("第十三個議題是出差安排李卒理下個月要去新加坡", "第十三個議題是出差安排，李協理下個月要去新加坡"),
+    ("韌體方面,大半事項是理斜理安排回歸測試", "韌體方面,待辦事項是李協理安排回歸測試"),
+    ("理鞋理會在週三前回報", "李協理會在週三前回報"),
+])
+def test_fix_li_xieli_variants(raw, fixed):
+    assert eng.fix_meeting_terms(raw) == fixed
