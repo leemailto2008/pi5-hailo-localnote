@@ -828,3 +828,13 @@ def test_body_deadline_from_following_clause_and_fill_dateless_row():
     md = ("## 摘要\n- x\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 王經理主持面試 | 王經理 | - |\n\n## 決議\n- 無\n")
     out = summary_utils.merge_body_todos(md, tr)
     assert "| 王經理主持面試 | 王經理 | 3月7日前 |" in out and out.count("王經理 |") == 1
+
+
+def test_dateless_row_gets_date_from_assignment_sharing_three_chars():
+    md = "## 摘要\n- x\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 送預算表 | 劉課長 | - |\n\n## 決議\n- 無\n"
+    tr = "人力的部分要再增加二位工程師，預算表請劉課長在10月7日前送到財務部，同意這件事由王經理負責週五前回覆客戶"
+    out = summary_utils.merge_body_todos(md, tr)
+    assert "| 送預算表 | 劉課長 | 10月7日前 |" in out and "送到財務部" not in out
+    md2 = "## 摘要\n- x\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 王經理主持面試 | 王經理 | - |\n\n## 決議\n- 無\n"
+    out2 = summary_utils.merge_body_todos(md2, "同意這件事由王經理負責週五前回覆客戶")
+    assert "| 王經理主持面試 | 王經理 | - |" in out2 and "| 回覆客戶 | 王經理 | 週五前 |" in out2   # 只因為名字相同不算同一件事

@@ -1513,19 +1513,23 @@ def merge_body_todos(md: str, transcript: str, max_rows: int = 10) -> str:
         if norm(item) in table_text:
             continue
         known = rows + [[a, b, c] for a, b, c, _ in add]
+        ctx_n = norm(ctx).replace(norm(owner), "")         # 比對交辦那句時不算負責人的名字本身
+        run = lambda x: _longest_common_run(norm(x).replace(norm(owner), ""), ctx_n)
+        k = next((k for k, c in enumerate(rows) if c[1] in _TODO_SKIP and k not in filled
+                  and _longest_common_run(norm(c[0]), norm(ctx)) >= 3), None)    # 負責人欄空著：名字聽壞的「王精理主持面」也算
+        if k is not None:
+            c = rows[k]
+            filled[k] = [c[0], owner, c[2] if c[2] not in _TODO_SKIP else when] + c[3:]
+            continue
         same = [c for c in known if c[1] not in _TODO_SKIP and (owner in c[1] or c[1] in owner)
-                and (norm(c[2]) == norm(when) or len(set(norm(item)) & set(norm(c[0]))) >= 2)]
+                and (norm(c[2]) == norm(when) or len(set(norm(item)) & set(norm(c[0]))) >= 2
+                     # 「| 送預算表 | 劉課長 | - |」與「預算表請劉課長在10月7日前送到財務部」：沒寫期限的列與交辦那句有三個字相連
+                     or (c[2] in _TODO_SKIP and run(c[0]) >= 3))]
         if same:
             # 同一件事、模型那列沒寫期限 (「| 王經理主持面試 | 王經理 | - |」)：補上交辦那句的期限
             k = next((k for k, c in enumerate(rows) if c in same and c[2] in _TODO_SKIP and k not in filled), None)
             if k is not None:
                 filled[k] = rows[k][:2] + [when] + rows[k][3:]
-            continue
-        k = next((k for k, c in enumerate(rows) if c[1] in _TODO_SKIP and k not in filled
-                  and _longest_common_run(norm(c[0]), norm(ctx)) >= 3), None)
-        if k is not None:
-            c = rows[k]
-            filled[k] = [c[0], owner, c[2] if c[2] not in _TODO_SKIP else when] + c[3:]
             continue
         add.append((item, owner, when, ctx))
     add = add[:max(0, max_rows - len(real))]
