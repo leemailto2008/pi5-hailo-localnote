@@ -341,3 +341,14 @@ def test_fix_owner_glue(raw, fixed):
 ])
 def test_fix_pronoun_surname(raw, fixed):
     assert eng.fix_meeting_terms(raw) == fixed
+
+
+@pytest.mark.parametrize("raw, fixed", [
+    ("文宣請黃尊於負責,週三請交出告，第七個議題", "文宣請黃專員負責,週三前交初稿，第七個議題"),
+    ("文宣請許經理負責,週五前交出稿，第六", "文宣請許經理負責,週五前交初稿，第六"),
+    ("文宣請皇尊與負責,週一前交出告", "文宣請黃專員負責,週一前交初稿"),
+    ("他昨天交出稿件了", "他昨天交出稿件了"),
+])
+def test_fix_draft_and_specialist(raw, fixed):
+    assert eng.fix_meeting_terms(raw) == fixed
+    assert eng.fix_meeting_terms(fixed) == fixed
