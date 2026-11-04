@@ -374,11 +374,31 @@ def _ascii_punct_if_english(text: str) -> str:
 # ≤15 分鐘的 7 份會改到：事實召回 0.689 → 0.692 (3 份變好、0 份變差)，CER 沒有變差。
 _DOT_DATE_RE = re.compile(r"(?<![\d.])(1[0-2]|0?[1-9])\s*\.\s*(3[01]|[12]\d|0?[1-9])\s*\.?\s*日")
 _SPACED_DATE_RE = re.compile(r"(?<!\d)(1[0-2]|[1-9])\s*月\s*(3[01]|[12]\d|[1-9])\s*日")
+# 11-04 再補 (95 份逐字稿)：中文數字日期「十二月三日」的「月」常被聽成別的字或不見：
+# 「12日3日」22 份、「10-7日」25 處、「4 於 26 日」10 處、「11 夜15日」；連說兩次的「1 於 1 於 24 日」「12-12-23日」。
+# 「月」後面的「日」也常漏掉：「延到10月10，比原本」「6月21的周會」「5月10上線」約 30 處；「4月4月前」「11月7月上限」；
+# 「日前」聽成「之前」：「2月15之前提出」6 處。只認 1–12 月、1–31 日；後面接數量詞 (萬、元、台、次…) 的不動。
+_MONTH_MISHEARD_DATE_RE = re.compile(
+    r"(?<![\d.%月\-])(1[0-2]|[1-9])\s*[日於夜\-]\s*(?:\1\s*[日於夜\-]\s*)?(3[01]|[12]\d|[1-9])\s*日")
+_REPEATED_DAY_RE = re.compile(r"(?<![\d.])(1[0-2]|[1-9])\s*月\s*(3[01]|[12]\d|[1-9])\s*[\-日]\s*\2\s*日")
+_DAY_AS_MONTH_RE = re.compile(r"(?<![\d.])(1[0-2]|[1-9])\s*月\s*(3[01]|[12]\d|[1-9])\s*月(?=\s*(?:前|之前|上|開|到))")
+_DAY_BEFORE_RE = re.compile(r"(?<![\d.])(1[0-2]|[1-9])\s*月\s*(3[01]|[12]\d|[1-9])\s*之前")
+_MISSING_DAY_RE = re.compile(
+    r"(?<![\d.])(1[0-2]|[1-9])\s*月\s*(3[01]|[12]\d|[1-9])(?:st|nd|rd|th)?(?:\s*[，,]\s*日)?"
+    r"(?!\s*[\d日號号萬千百元%臺台個位人天點週周年次場支件批輪張份.:：月])")
+
+
+def _fix_misheard_dates(text: str) -> str:
+    text = _MONTH_MISHEARD_DATE_RE.sub(r"\1月\2日", text)
+    text = _REPEATED_DAY_RE.sub(r"\1月\2日", _DAY_AS_MONTH_RE.sub(r"\1月\2日", text))
+    text = _DAY_BEFORE_RE.sub(r"\1月\2日前", text)
+    return _MISSING_DAY_RE.sub(r"\1月\2日", text)
 
 
 def fix_meeting_terms(text: str) -> str:
     if not text:
         return text or ""
+    text = _fix_misheard_dates(text)   # 先做一次：「12-10日前完成報道」要先變成「12月10日前」才認得報到
     text = _TODO_FIX_RE.sub("待辦事項", _DECISION_FIX_RE.sub("決議", text))
     text = _DECISION_CTX_FIX_RE.sub(r"\1決議", text)
     text = _RECRUIT_FIX_RE.sub("招募", _QUALITY_FIX_RE.sub("品質", text))
@@ -398,7 +418,7 @@ def fix_meeting_terms(text: str) -> str:
     text = _fix_owner_names(_fix_misc_terms(text))   # 也在英文碎片拿掉、英文數字改成中文之後 (「two 個直」「請皇 er 專員」)
     text = _HOSTED_BY_FIX_RE.sub("由", _fix_hiring_and_order_terms(text))   # 「六場面是有李協理主持」：前面的修正做完才認得
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
-    return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", text)
+    return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", _fix_misheard_dates(text))
 
 
 try:
