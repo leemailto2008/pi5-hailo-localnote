@@ -793,3 +793,13 @@ def test_chinese_numeral_dates_are_deadlines():
         ["| 送到財務部 | 李協理 | 七月一日前 |"]
     assert summary_utils.extract_todos(["存方面，決議是下一批十一月五日到，待辦事項是劉課長調整訂單"]) == \
         ["| 調整訂單 | 劉課長 | 十一月五日 |"]
+
+
+def test_header_echo_rows_and_topic_label_items():
+    md = ("## 摘要\n- x\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 事項 | 李協理 | 週五回報 |\n"
+          "| 事項 | 劉課長 | 10月7日前送預算 |\n| 事項 | 王經理 | - |\n\n## 決議\n- 招募方面，決議是12月3日前完成報到，今天做到這裡")
+    out = clean_summary_markdown(md)
+    assert "| 回報 | 李協理 | 週五 |" in out and "| 送預算 | 劉課長 | 10月7日前 |" in out
+    assert "| 事項 | 王經理 |" not in out and "今天做到這裡" not in out
+    assert summary_utils._todo_parts("招募方面，決議是12月3日前完成報到，待辦事項王經理主持面試") is not None
+    assert summary_utils._todo_parts("招募方面，決議是12月3日前完成報到，王經理主持面試") == ("主持面試", "王經理", "12月3日")

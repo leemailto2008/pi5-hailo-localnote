@@ -164,6 +164,7 @@ def _summary_table_to_bullets(lines: List[str]) -> List[str]:
 # 「…交期延至10月10日，關鍵數字：10月10日，金額：無，人名：曦代料」(11-04 3 分鐘 e2e；最近 26 份紀要 1 份、舊的 104 份 3 份)。
 # 值是「無」、前面已經寫過、或「人名」後面不是「姓＋職稱」時整段拿掉；「負責人：X」是正常寫法，不動。
 _LABEL_ECHO_RE = re.compile(r"\s*[，,；;]\s*(關鍵數字|數字|金額|人名|日期|預計時間|時間|公司名?)\s*[：:]\s*([^，,；;。]*)")
+_TODO_HEADER_ECHO = {"事項", "待辦", "待辦事項", "Item", "item"}
 _DECISION_LABEL_RE = re.compile(r"^[-*•]\s*(?:決議|決定|結論)\s*[：:]\s*(?=\S)")
 _EMPTY_VALUES = {"", "-", "無", "不明", "未提及", "未知", "無提及", "待定", "未定", "n/a", "N/A"}
 
@@ -182,6 +183,7 @@ def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) 
     """LLM 紀要後處理：轉台灣繁體、移除重複行 (小模型偶發重複迴圈直到 num_predict 用盡)，並限制摘要/決議點數。"""
     limits = max_items or {"摘要": 5, "決議": 3}
     out, seen, section, count = [], set(), None, 0
+    seen_header: Dict[str, bool] = {}
     for line in tidy_dates(to_taiwan_traditional(md or "")).replace("\ufffd", "").splitlines():   # 模型偶爾吐出半個字元 (「�品保部」)
         s = line.strip()
         if s.startswith("|") and set(s) <= set("| "):   # 整列空白的表格列 (小模型偶爾連印 20 多列「| | | |」)
@@ -204,6 +206,17 @@ def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) 
                 continue
         if is_row and section == "待辦" and not s.strip("|").split("|")[0].strip():
             continue        # 事項欄空白的列 (「|  | 許經理 | 11月28日 |」)：先拿掉，結尾總結／正文交辦會補上完整的列
+        if is_row and section == "待辦" and s.strip("|").split("|")[0].strip() in _TODO_HEADER_ECHO and seen_header.get("待辦"):
+            # 模型把表頭「事項」當內容 (11-04 夜間 3 分鐘實錄：「| 事項 | 李協理 | 週五回報 |」)：時間欄裡的動作拿來當事項
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            mt = _TIME_RE.search(cells[2]) if len(cells) >= 3 else None
+            rest = (cells[2][:mt.start()] + cells[2][mt.end():]).strip(" 前") if mt else ""
+            if not mt or len(rest) < 2:
+                continue
+            when = mt.group(1) + ("前" if cells[2][mt.end():].startswith("前") else "")
+            s = line = f"| {rest.lstrip('前')} | {cells[1]} | {when} |"
+        if is_row and section == "待辦":
+            seen_header["待辦"] = True
         if is_row and _CLOSING_FILLER_RE.search(s):      # 「| 王經理主持面試，今天就到這裡 | 王經理 | - |」(541cd0c 3 分鐘 e2e)
             cells = s.strip().strip("|").split("|")
             cells[0] = " " + (_CLOSING_FILLER_RE.sub("", cells[0]).strip(" ，,、") or cells[0].strip()) + " "
@@ -274,7 +287,7 @@ def _drop_placeholder_bullets(lines: List[str]) -> List[str]:
 
 
 # 11-04 ad981d9 5 分鐘 e2e 的決議出現「- 今日就到這裡」：模型把「今天」寫成「今日」；也有「- 今日會議結束，謝謝」
-_CLOSING_FILLER_RE = re.compile(r"[，,。\s]*(?:好\s*[，,]?\s*)?(?:今[天日](?:就|先)?(?:到|開到)(?:這裡|這邊)|今[天日](?:的)?會議(?:到此)?結束"
+_CLOSING_FILLER_RE = re.compile(r"[，,。\s]*(?:好\s*[，,]?\s*)?(?:今[天日](?:就|先|做)?(?:到|開到)(?:這裡|這邊)|今[天日](?:的)?會議(?:到此)?結束"
                                 r"|謝謝(?:大家|各位)|謝謝(?=[\s!！。.]*$))[^，。\n]*")
 
 
@@ -966,6 +979,13 @@ def _todo_parts(line: str):
         rest = _ACTION_LEAD_RE.sub("", rest.strip()).strip()
         if len(rest) >= 4:
             return rest[:20], mo.group(1), mt.group(1)
+    if re.fullmatch(r".{0,6}方面", first):
+        # 「招募方面，決議是12月3日前完成報到，拜半事像是王經理主持面試」：事項取負責人那一句的動作，不取議題名
+        owner_clause = next((c for c in _CLAUSE_SPLIT_RE.split(line) if mo.group(0) in c), "")
+        act = owner_clause[owner_clause.find(mo.group(0)) + len(mo.group(0)):].replace(mt.group(0), "", 1)
+        act = _ACTION_LEAD_RE.sub("", act.strip()).strip()
+        if len(act) >= 2:
+            return act[:20], mo.group(1), mt.group(1)
     return (first[:20] or line[:20]), mo.group(1), mt.group(1)
 
 

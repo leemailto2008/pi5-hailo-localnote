@@ -361,3 +361,8 @@ def test_fix_draft_and_specialist(raw, fixed):
 ])
 def test_fix_li_xieli_variants(raw, fixed):
     assert eng.fix_meeting_terms(raw) == fixed
+
+
+def test_baiban_todo_marker():
+    assert eng.fix_meeting_terms("招募方面，決議是12月3日前完成報到，拜半事像是王經理主持面試") == \
+        "招募方面，決議是12月3日前完成報到，待辦事項是王經理主持面試"
