@@ -820,3 +820,11 @@ def test_en_owner_typo_and_weekday_abbreviation():
     assert "| Firmware testing | Kevin | March 15 |" in out and "| Confirm testing | Kevin | - |" in out
     assert "| Trial order of 30 units | John | Wednesday |" in out
     assert "| Budget sheet | Susan | - |" in out          # 逐字稿沒有 Friday：不寫全名，對照後清掉
+
+
+def test_body_deadline_from_following_clause_and_fill_dateless_row():
+    tr = "業務部已經面試了12位候選人下週會再安排六場面試由王經理主持，希望在3月7日前完成報到，第八個議題是庫存"
+    assert summary_utils.transcript_todo_rows(tr) == ["| 安排六場面試 | 王經理 | 3月7日前 |"]
+    md = ("## 摘要\n- x\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 王經理主持面試 | 王經理 | - |\n\n## 決議\n- 無\n")
+    out = summary_utils.merge_body_todos(md, tr)
+    assert "| 王經理主持面試 | 王經理 | 3月7日前 |" in out and out.count("王經理 |") == 1

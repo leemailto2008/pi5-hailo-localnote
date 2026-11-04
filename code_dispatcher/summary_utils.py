@@ -1451,9 +1451,15 @@ def _transcript_todos(transcript: str, max_rows: int = 12) -> List[tuple]:
         elif mt is not None:
             a = _body_action(after) if mt.start() >= mo.end() else _body_action(re.sub(r"\s+", "", after))
             if _BODY_BARE_RE.match(a) and before:   # 「下週會再安排四場面試由王經理主持」
-                segs = [x for x in re.split(r"並|然後", before) if x.strip()] or [before]
+                m0 = _body_due(before)       # 「面試了12位候選人下週會再安排六場面試」：從時間後面取，前一句的尾巴不要
+                lead = before[m0.end():] if m0 is not None and len(before[m0.end():].strip()) >= 2 else before
+                segs = [x for x in re.split(r"並|然後", lead) if x.strip()] or [lead]
                 a = _body_action(segs[-1])[-12:]
             item = a
+            nd = _body_due(nxt) if nxt and len(nxt) <= 16 and not _BODY_CUE_RE.search(nxt) else None
+            if nd is not None and not re.match(r"\s*(?:之前|以前|前)", src[mt.end():]) \
+                    and re.match(r"\s*(?:之前|以前|前)", nxt[nd.end():]):
+                mt, src = nd, nxt      # 「下週會再安排四場面試由王經理主持，希望在12月3日前完成報到」：期限取後一句帶「前」的
         item = _BODY_JUNK_RE.split(item, 1)[0]     # 「回覆客戶PLOG1T-E是工業…」：下一個議題聽壞、沒斷句
         if mt is None or len(item) < 2:
             continue
@@ -1507,8 +1513,13 @@ def merge_body_todos(md: str, transcript: str, max_rows: int = 10) -> str:
         if norm(item) in table_text:
             continue
         known = rows + [[a, b, c] for a, b, c, _ in add]
-        if any(c[1] not in _TODO_SKIP and (owner in c[1] or c[1] in owner)
-               and (norm(c[2]) == norm(when) or len(set(norm(item)) & set(norm(c[0]))) >= 2) for c in known):
+        same = [c for c in known if c[1] not in _TODO_SKIP and (owner in c[1] or c[1] in owner)
+                and (norm(c[2]) == norm(when) or len(set(norm(item)) & set(norm(c[0]))) >= 2)]
+        if same:
+            # 同一件事、模型那列沒寫期限 (「| 王經理主持面試 | 王經理 | - |」)：補上交辦那句的期限
+            k = next((k for k, c in enumerate(rows) if c in same and c[2] in _TODO_SKIP and k not in filled), None)
+            if k is not None:
+                filled[k] = rows[k][:2] + [when] + rows[k][3:]
             continue
         k = next((k for k, c in enumerate(rows) if c[1] in _TODO_SKIP and k not in filled
                   and _longest_common_run(norm(c[0]), norm(ctx)) >= 3), None)
