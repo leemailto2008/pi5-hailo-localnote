@@ -922,3 +922,8 @@ def test_same_owner_same_task_rows_collapse():
     assert "| 劉課長送預算表 | 劉課長 | 10月7日前 |" in out and "| 主持面試 | 劉課長 | 8月26日 |" in out
     assert "| 主持面試 | 王經理 | 12月3日前 |" in out and "| 回覆客戶 | 王經理 | 週五前 |" in out
     assert summary_utils._drop_same_task_rows(out) == out
+
+
+def test_body_item_cut_at_topic_number_without_di():
+    assert summary_utils.transcript_todo_rows("等試用結果再談，這件事由黃專員負責,週一前回覆客戶七個議題是招募，業務部目") == \
+        ["| 回覆客戶 | 黃專員 | 週一前 |"]
