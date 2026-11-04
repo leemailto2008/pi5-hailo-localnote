@@ -437,3 +437,13 @@ def test_shangxian_launch_and_xingcheng_trip():
     assert fix_meeting_terms("行城四天，預算抓12萬元") == "行程四天，預算抓12萬元"
     for keep in ("預算上限是200萬", "每日上限", "銀行存3天"):
         assert fix_meeting_terms(keep) == keep
+
+
+def test_more_common_digital_e2e_misspellings():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert f("下一批500臺預讀2月7日到") == "下一批500臺預計2月7日到"
+    assert f("大約可以撕四周") == "大約可以撐四周" and f("已經爆明15人") == "已經報名15人"
+    assert f("主要是接觸不凌") == "主要是接觸不良" and f("替代料已經在驗痣,目前良率") == "替代料已經在驗證,目前良率"
+    assert f("第四立一題是品質") == "第四個議題是品質" and f("第一一題是招募") == "第一個議題是招募"
+    for keep in ("第一題是什麼", "可以穿過四週", "爆明天的料"):
+        assert f(keep) == keep
