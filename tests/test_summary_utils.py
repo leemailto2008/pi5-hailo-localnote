@@ -811,3 +811,12 @@ def test_en_due_filled_from_owner_sentence():
     out = ground_todo_table(md, tr)
     assert "| Reply to Lotus Tech | John | Wednesday |" in out
     assert "| Sign 30-unit trial order | John | - |" in out          # 動詞對不上：不補
+
+
+def test_en_owner_typo_and_weekday_abbreviation():
+    md = ("## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| Firmware testing | Kedin | March 15 |\n"
+          "| Trial order of 30 units | John | Wed |\n| Confirm testing | Kevn | - |\n| Budget sheet | Susan | Fri |")
+    out = ground_todo_table(md, "Kevin owns the testing. John will reply to Lotus Tech by Wednesday. We release on March 15. Susan sends it.")
+    assert "| Firmware testing | Kevin | March 15 |" in out and "| Confirm testing | Kevin | - |" in out
+    assert "| Trial order of 30 units | John | Wednesday |" in out
+    assert "| Budget sheet | Susan | - |" in out          # 逐字稿沒有 Friday：不寫全名，對照後清掉

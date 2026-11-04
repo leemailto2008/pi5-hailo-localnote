@@ -406,6 +406,57 @@ def _fill_en_owner_from_transcript(md: str, transcript: str) -> str:
     return "\n".join(out)
 
 
+_EN_WEEKDAY_ABBR = {"mon": "Monday", "tue": "Tuesday", "tues": "Tuesday", "wed": "Wednesday", "thu": "Thursday",
+                    "thur": "Thursday", "thurs": "Thursday", "fri": "Friday", "sat": "Saturday", "sun": "Sunday"}
+
+
+def _edit1(a: str, b: str) -> bool:
+    """a、b 相差至多一個字元 (替換、插入或刪除)。"""
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) > len(b):
+        a, b = b, a
+    i = j = diff = 0
+    while i < len(a) and j < len(b):
+        if a[i] != b[j]:
+            diff += 1
+            if diff > 1:
+                return False
+            if len(a) == len(b):
+                i += 1
+            j += 1
+        else:
+            i += 1
+            j += 1
+    return diff + (len(b) - j) <= 1
+
+
+def _snap_en_todo_cells(md: str, transcript: str) -> str:
+    """英文待辦表：模型把人名拼錯 (11-04 en e2e「Kevn」「Kedin」，逐字稿是 Kevin) 時換成逐字稿裡只差一個字母、
+    開頭相同的那個名字；期限寫成縮寫 (「Wed」) 而逐字稿有全名時寫全名。"""
+    names = set(re.findall(r"\b[A-Z][a-z]{2,}\b", transcript or ""))
+    low = (transcript or "").lower()
+    out, section = [], None
+    for line in md.splitlines():
+        s = line.strip()
+        if s.startswith("## "):
+            section = s[3:].strip()
+        if section == "待辦" and s.startswith("|") and not _is_sep(s):
+            cols = [c.strip() for c in s.strip("|").split("|")]
+            if len(cols) >= 3 and not _CJK_RE.search(cols[0] + cols[1] + cols[2]):
+                words = cols[1].split()
+                if words and re.fullmatch(r"[A-Z][a-z]{2,}", words[0]) and words[0] not in names:
+                    near = {n for n in names if n[0] == words[0][0] and _edit1(n, words[0])}
+                    if len(near) == 1:
+                        cols[1] = " ".join([near.pop()] + words[1:])
+                full = _EN_WEEKDAY_ABBR.get(cols[2].lower().rstrip("."))
+                if full and full.lower() in low:
+                    cols[2] = full
+                line = "| " + " | ".join(cols) + " |"
+        out.append(line)
+    return "\n".join(out)
+
+
 def _fill_en_due_from_transcript(md: str, transcript: str) -> str:
     """英文待辦表有負責人、期限卻空著，而逐字稿裡「這個人 + 這件事的動詞 + by <時間>」只有一句時補上期限
     (11-04 英文 e2e：「| Reply to Lotus Tech | John | - |」，逐字稿「John will reply to the customer by Wednesday」；
@@ -438,7 +489,8 @@ def ground_todo_table(md: str, transcript: str) -> str:
     空的負責人／時間欄先從事項欄補 (_fill_todo_cells)，補上的也一樣要在逐字稿裡找得到。"""
     if not md or not transcript or "## 待辦" not in md:
         return md
-    md = _fill_en_due_from_transcript(_fill_en_owner_from_transcript(_fill_todo_cells(md), transcript), transcript)
+    md = _fill_en_due_from_transcript(_fill_en_owner_from_transcript(_snap_en_todo_cells(_fill_todo_cells(md), transcript), transcript),
+                                      transcript)
     tr = _ground_norm(transcript)
     out, section = [], None
     for line in md.splitlines():
