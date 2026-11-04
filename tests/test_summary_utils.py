@@ -851,3 +851,8 @@ def test_body_items_cut_garbled_topic_numbers_and_particles():
     assert summary_utils.transcript_todo_rows("下週會再安排三場面試，由林主任主吃，希望在9月11日前完成報到好，最後") == \
         ["| 完成報到 | 林主任 | 9月11日前 |"]
     assert summary_utils.transcript_todo_rows("文宣請黃專員負責，週三前交初稿第11") == ["| 交初稿 | 黃專員 | 週三前 |"]
+
+
+def test_todo_action_drops_leading_shi_and_brackets():
+    assert summary_utils._todo_parts("存方面，決議是下一批11月5日到，待辦事項是劉課長是訂單調貨")[0] == "訂單調貨"
+    assert summary_utils._todo_parts("韌體方面，待辦事項是李協理《安排回歸測試》10月11日前")[0].startswith("安排回歸測試")

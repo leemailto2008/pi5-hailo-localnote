@@ -1026,7 +1026,13 @@ def _note_lines(notes: str) -> List[str]:
 # STT 常在「待辦事項」與負責人之間多打標點 (「待辦事項,是蔡組長,負責工安複訓」，95 份裡 11 次)，標點一起吃掉
 _TODO_MARK_RE = re.compile(r"待辦事項\s*[,，、.]?\s*(?:是|為|：|:)?\s*[,，、.]?\s*|待辦\s*(?:是|為|：|:)\s*[,，、.]?\s*")
 _CLAUSE_SPLIT_RE = re.compile(r"[，；;。]|,(?!\d)")          # 不切「1,200」這類數字
-_ACTION_LEAD_RE = re.compile(r"^(?:在|於|要|會|將|請|負責|之前|以前|前)+")
+_ACTION_LEAD_RE = re.compile(r"^(?:在|於|要|會|將|請|負責|之前|以前|前|是)+")   # 「劉課長是訂單調貨」
+
+
+def _clean_action(item: str) -> str:
+    """事項去掉 STT 插進來的書名號／引號 (「李協理《市安排回測是》」) 與殘留的「前」。"""
+    item = re.sub(r"[《》〈〉「」『』]", "", item or "").strip()
+    return _ACTION_LEAD_RE.sub("", re.sub(r"(?<=.{2})前$", "", item)).strip() or item
 
 
 def _todo_parts(line: str):
@@ -1054,7 +1060,7 @@ def _todo_parts(line: str):
                 topic = _CLAUSE_SPLIT_RE.split(parts[0])[0].strip()
                 topic = re.sub(r"\s*待辦(?:事項)?\s*$", "", topic).strip()
                 item = action if len(action) >= 2 else (topic or _CLAUSE_SPLIT_RE.split(line)[0].strip() or line)
-                return item[:20], mo.group(1), mt.group(1)
+                return _clean_action(item)[:20], mo.group(1), mt.group(1)
     mo, mt = _OWNER_RE.search(line), _TIME_RE.search(line)
     if not (mo and mt):
         return _todo_parts_en(line) if detect_language(line) == "en" else None
@@ -1064,14 +1070,14 @@ def _todo_parts(line: str):
         rest = first[mo.end():].replace(mt.group(0), "", 1)
         rest = _ACTION_LEAD_RE.sub("", rest.strip()).strip()
         if len(rest) >= 4:
-            return rest[:20], mo.group(1), mt.group(1)
+            return _clean_action(rest)[:20], mo.group(1), mt.group(1)
     if re.fullmatch(r".{0,6}方面", first):
         # 「招募方面，決議是12月3日前完成報到，拜半事像是王經理主持面試」：事項取負責人那一句的動作，不取議題名
         owner_clause = next((c for c in _CLAUSE_SPLIT_RE.split(line) if mo.group(0) in c), "")
         act = owner_clause[owner_clause.find(mo.group(0)) + len(mo.group(0)):].replace(mt.group(0), "", 1)
         act = _ACTION_LEAD_RE.sub("", act.strip()).strip()
         if len(act) >= 2:
-            return act[:20], mo.group(1), mt.group(1)
+            return _clean_action(act)[:20], mo.group(1), mt.group(1)
     return (first[:20] or line[:20]), mo.group(1), mt.group(1)
 
 
