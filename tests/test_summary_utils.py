@@ -620,3 +620,14 @@ def test_recap_topic_statement_with_garbled_decision_word_goes_to_decisions():
     md = assemble_long_minutes(chunks, max_summary=6, max_decisions=3)
     assert "簡報技巧9月2日開課" in md.split("## 決議")[1] and "簡報技巧" not in md.split("## 待辦")[0]
 
+
+def test_empty_todo_section_gets_a_table_so_the_recap_todos_can_be_added():
+    # 11-04 3 分鐘 e2e：模型寫了「## 待辦」就直接接「## 決議」，結尾總結的待辦因此補不進去，還黏在決議裡
+    md = ensure_sections("## 摘要\n- 招募：二個職缺\n\n## 待辦\n\n## 決議\n- 12月3日前完成報到")
+    assert "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 無 | - | - |" in md
+    transcript = ("第七個議題是招募，業務部目前二個職缺，下週會再安排四場面試，由王經理主持，希望在12月3日前完成報到。" * 3 +
+                  "好，最後總結，招募方面 決議是12日前完成報到待辦事項是王經理主持面試，今天就到這裡，謝謝大家")
+    out = summary_utils.merge_recap_into_minutes(md, transcript)
+    assert "| 王經理 |" in out.split("## 待辦")[1].split("## 決議")[0]
+    assert ensure_sections("## 摘要\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 無 | - | - |\n\n## 決議").count("- 無") == 2
+

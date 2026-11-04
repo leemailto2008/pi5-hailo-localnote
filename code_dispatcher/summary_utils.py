@@ -794,7 +794,25 @@ def ensure_sections(md: str) -> str:
             text += f"\n\n{sec}\n- {SECTION_MISSING_NOTE}"
     # 補上的缺段也要排回原位 (10-31 3 分鐘 e2e：模型先寫決議、待辦被截斷，補上的「## 待辦」原本會落在最後)
     empty_row = f"| {SECTION_MISSING_NOTE} | - | - |" if todo_cut else "| 無 | - | - |"
-    return "\n".join(_pad_todo_rows(_reorder_sections(text.strip().splitlines()), empty_row)).strip()
+    return "\n".join(_fill_empty_sections(_pad_todo_rows(_reorder_sections(text.strip().splitlines()), empty_row), empty_row)).strip()
+
+
+def _fill_empty_sections(lines: List[str], empty_row: str) -> List[str]:
+    """段落標題在、內容卻是空的 (11-04 3 分鐘 e2e：模型寫了「## 待辦」就直接接「## 決議」)：待辦補一個只有「無」的表格，
+    其他段補「- 無」。待辦表在才能讓後面 merge_recap_into_minutes() 把結尾總結的待辦補進去。"""
+    out: List[str] = []
+    i = 0
+    while i < len(lines):
+        out.append(lines[i])
+        s = lines[i].strip()
+        if s.startswith("## "):
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j >= len(lines) or lines[j].strip().startswith("## "):
+                out += (["| 事項 | 負責人 | 時間 |", "|---|---|---|", empty_row] if s == "## 待辦" else ["- 無"])
+        i += 1
+    return out
 
 
 # 長會議紀要組裝 (2026-10-27)：qwen3:1.7b 無法跨 20+ 條重點做歸納 (實測會照抄、待辦表留空、決議擠掉)，
