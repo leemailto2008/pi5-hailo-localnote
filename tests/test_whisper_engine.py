@@ -421,3 +421,9 @@ def test_gateway_with_misheard_gongye():
     assert fix_meeting_terms("第六個議題是工丶炸到器的韌體更新") == "第六個議題是工業閘道器的韌體更新"
     assert fix_meeting_terms("公益炸道器的韌體更新") == "工業閘道器的韌體更新"
     assert fix_meeting_terms("工業炸到起的韌體") == "工業閘道器的韌體"
+
+
+def test_dabanshi_before_owner_is_todo_marker():
+    from hailo_whisper.engine import fix_meeting_terms
+    assert fix_meeting_terms("決議是12月3日前完成報到大半事，由王經理主持面") == "決議是12月3日前完成報到待辦事項，由王經理主持面"
+    assert fix_meeting_terms("我們大半事情都做完了") == "我們大半事情都做完了"
