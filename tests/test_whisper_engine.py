@@ -366,3 +366,14 @@ def test_fix_li_xieli_variants(raw, fixed):
 def test_baiban_todo_marker():
     assert eng.fix_meeting_terms("招募方面，決議是12月3日前完成報到，拜半事像是王經理主持面試") == \
         "招募方面，決議是12月3日前完成報到，待辦事項是王經理主持面試"
+
+
+@pytest.mark.parametrize("raw, fixed", [
+    ("目前良率是95%請民主任跟對方確認，週五回報", "目前良率是95%請林主任跟對方確認，週五回報"),
+    ("負責人是牛課長，第十二個議題", "負責人是劉課長，第十二個議題"),
+    ("文宣請許經理負責,週五前交出港，第六", "文宣請許經理負責,週五前交初稿，第六"),
+    ("人民主任會議", "人民主任會議"),
+    ("黃牛經理", "黃牛經理"),
+])
+def test_fix_min_niu_surnames_and_draft(raw, fixed):
+    assert eng.fix_meeting_terms(raw) == fixed
