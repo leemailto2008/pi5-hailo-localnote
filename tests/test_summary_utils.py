@@ -898,3 +898,8 @@ def test_fill_missing_topics_adds_late_topic_from_transcript():
     assert summary_utils.fill_missing_topics(md, "第一個議題是供應商，交期延到10月10日") == md      # 只有一個議題不補
     said = md.replace("- 新版ERP", "- 韌體：藍牙斷線，6月25日上線\n- 新版ERP")
     assert summary_utils.fill_missing_topics(said, tr) == said     # 「六月二十五日」與「6月25日」算同一個日期
+
+
+def test_topic_segment_stops_at_topic_number_without_yiti():
+    segs = summary_utils._topic_segments("第八個議題是庫存，目前存1200臺，下一批500臺2月7日到，第九個是教育訓練，5月25日有一場課程")
+    assert segs == ["庫存，目前存1200臺，下一批500臺2月7日到"]

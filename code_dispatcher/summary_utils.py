@@ -1580,9 +1580,17 @@ def _fact_text(text: str) -> str:
     return _ZH_NUM_RE.sub(lambda m: str(_zh_small_num(m.group(1))), t)
 
 
+# 段落也在「第九個是…」(STT 漏了「議題」) 結束，否則下一個議題的日期會被當成這一段的 (5 分鐘 e2e：庫存那段吃到教育訓練的 5月25日)
+_TOPIC_CUT_RE = re.compile(r"第\s*[\d一二三四五六七八九十]{1,3}\s*個?\s*(?:[議意]題|是)")
+
+
 def _topic_segments(body: str) -> List[str]:
     marks = list(_TOPIC_MARK_RE.finditer(body))
-    segs = [body[m.end():(marks[i + 1].start() if i + 1 < len(marks) else len(body))].strip(" ，,。") for i, m in enumerate(marks)]
+    segs = []
+    for i, m in enumerate(marks):
+        end = marks[i + 1].start() if i + 1 < len(marks) else len(body)
+        cut = _TOPIC_CUT_RE.search(body, m.end(), end)
+        segs.append(body[m.end():cut.start() if cut else end].strip(" ，,。"))
     return [x for x in segs if len(x) >= 8]
 
 
