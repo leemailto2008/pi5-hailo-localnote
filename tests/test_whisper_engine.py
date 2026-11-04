@@ -427,3 +427,13 @@ def test_dabanshi_before_owner_is_todo_marker():
     from hailo_whisper.engine import fix_meeting_terms
     assert fix_meeting_terms("決議是12月3日前完成報到大半事，由王經理主持面") == "決議是12月3日前完成報到待辦事項，由王經理主持面"
     assert fix_meeting_terms("我們大半事情都做完了") == "我們大半事情都做完了"
+
+
+def test_shangxian_launch_and_xingcheng_trip():
+    from hailo_whisper.engine import fix_meeting_terms
+    assert fix_meeting_terms("新版ERP系統上限，資料轉換已經完成85%") == "新版ERP系統上線，資料轉換已經完成85%"
+    assert fix_meeting_terms("倉儲管理系口上限，資料轉換") == "倉儲管理系統上線，資料轉換"
+    assert fix_meeting_terms("修正版預計4月26日上限，測試的部分") == "修正版預計4月26日上線，測試的部分"
+    assert fix_meeting_terms("行城四天，預算抓12萬元") == "行程四天，預算抓12萬元"
+    for keep in ("預算上限是200萬", "每日上限", "銀行存3天"):
+        assert fix_meeting_terms(keep) == keep

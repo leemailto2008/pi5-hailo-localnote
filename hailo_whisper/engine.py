@@ -266,6 +266,11 @@ _MISC2_FIX = [
     (re.compile(r"交\s*其(?=\s*延)"), "交期"),
     (re.compile(r"專\s*[源原](?=\s*[會在負主跟安週，,])"), "專員"),
     (re.compile(r"有\s*一件(?=\s*[，,]?\s*希望)"), "有意見"),
+    # 11-05 450 份逐字稿：「系統上線」寫成「系統上限」約 280 次、「4月26日上限，測試的部分」約 50 次；
+    # 「行程四天」寫成「行城／行存／行乘／行成四天」約 200 次。只在這些上下文改 (「預算上限」「每日上限」「銀行存3天」不動)
+    (re.compile(r"(?<=統)\s*上\s*限"), "上線"),
+    (re.compile(r"(?<=系)\s*[-口]?\s*上\s*限"), "統上線"),          # 「倉儲管理系口上限」：「統」也聽壞
+    (re.compile(r"(?<![銀進執流發運旅步飛航])行\s*[城存成誠乘承呈](?=\s*[\d一二三四五六七八九十兩]+\s*天)"), "行程"),
 ]
 
 
@@ -422,6 +427,8 @@ _MISSING_DAY_RE = re.compile(
     r"(?!\s*[\d日號号萬千百元%臺台個位人天點週周年次場支件批輪張份.:：月])")
 
 
+# 「修正版預計4月26日上限，測試的部分」：日期後面的「上限」是「上線」(日期要在最後整理完才認得，所以放在最後也做一次)
+_DATE_LAUNCH_RE = re.compile(r"(?<=[\d一二三四五六七八九十]日)\s*上\s*限(?=\s*(?:[，,。]|測|的|部分|待辦|$))")
 _DOUBLE_DAY_RE = re.compile(r"(?<=\d日)(?:\s*日)+(?=\s*(?:之前|以前|前|[，,。]|完成|的|報|拿|到))")   # 「11月10日日前完成報到」(138 份 21 次)
 
 
@@ -459,7 +466,7 @@ def fix_meeting_terms(text: str) -> str:
     text = _FUZE_STUB_RE.sub("負責", _FUZE_STUTTER_RE.sub("負責", text))
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     text = _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", _fix_misheard_dates(text))
-    return _DOUBLE_DAY_RE.sub("", text)        # 日期的空白先收掉 (「6 月 18 日 日 拿到」)
+    return _DATE_LAUNCH_RE.sub("上線", _DOUBLE_DAY_RE.sub("", text))        # 日期的空白先收掉 (「6 月 18 日 日 拿到」)
 
 
 try:
