@@ -164,19 +164,23 @@ def _summary_table_to_bullets(lines: List[str]) -> List[str]:
 # 系統提示要求「寫出該議題的關鍵數字、日期、金額與人名」，小模型偶爾把這幾個字當欄位名附在條目後面：
 # 「…交期延至10月10日，關鍵數字：10月10日，金額：無，人名：曦代料」(11-04 3 分鐘 e2e；最近 26 份紀要 1 份、舊的 104 份 3 份)。
 # 值是「無」、前面已經寫過、或「人名」後面不是「姓＋職稱」時整段拿掉；「負責人：X」是正常寫法，不動。
-_LABEL_ECHO_RE = re.compile(r"\s*[，,；;]\s*(關鍵數字|數字|金額|人名|日期|預計時間|時間|公司名?)\s*[：:]\s*([^，,；;。]*)")
+_LABEL_ECHO_RE = re.compile(r"\s*[，,；;]\s*(關鍵數字|數字|金額|人名|日期|預計時間|時間|公司名?|預算)\s*[：:]\s*([^，,；;。]*)")
 _TODO_HEADER_ECHO = {"事項", "待辦", "待辦事項", "Item", "item"}
 _DECISION_LABEL_RE = re.compile(r"^[-*•]\s*(?:決議|決定|結論)\s*[：:]\s*(?=\S)")
 _EMPTY_VALUES = {"", "-", "無", "不明", "未提及", "未知", "無提及", "待定", "未定", "n/a", "N/A"}
 
 
 def _drop_label_echo(item: str) -> str:
+    """摘要條目照抄提示詞欄位 (「…，關鍵數字：10月10日，金額：無，人名：李協理」)：空值或前面已說過的整段拿掉，
+    其餘只留值 (「，李協理」)。「預算」只在空值時拿掉 (「預算：200萬元」本身就是內容)。"""
     def rep(m):
         val = m.group(2).strip()
         said = re.sub(r"\s", "", item[:m.start()])
         if val in _EMPTY_VALUES or re.sub(r"\s", "", val) in said or (m.group(1) == "人名" and not _OWNER_RE.fullmatch(val)):
             return ""
-        return m.group(0)
+        if m.group(1) == "預算":
+            return m.group(0)
+        return "，" + val
     return _LABEL_ECHO_RE.sub(rep, item)
 
 

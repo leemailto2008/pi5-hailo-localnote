@@ -683,7 +683,7 @@ def test_clean_summary_drops_prompt_label_echo():
     out = clean_summary_markdown(md)
     assert "- 供應商星光材料電源晶片交期延至10月10日\n" in out
     assert "- 新版ERP系統正式切換定於2月3日，負責人：李協理\n" in out
-    assert "- 訂單先簽60臺試單，人名：王經理\n" in out      # 是「姓＋職稱」且前面沒寫過：不動
+    assert "- 訂單先簽60臺試單，王經理\n" in out      # 是「姓＋職稱」且前面沒寫過：留名字，欄位名稱拿掉
 
 
 def test_merge_recap_moves_known_todo_out_of_decisions():
