@@ -417,6 +417,9 @@ _MISSING_DAY_RE = re.compile(
     r"(?!\s*[\d日號号萬千百元%臺台個位人天點週周年次場支件批輪張份.:：月])")
 
 
+_DOUBLE_DAY_RE = re.compile(r"(?<=\d日)(?:\s*日)+(?=\s*(?:之前|以前|前|[，,。]|完成|的|報|拿|到))")   # 「11月10日日前完成報到」(138 份 21 次)
+
+
 def _fix_misheard_dates(text: str) -> str:
     text = _MONTH_MISHEARD_DATE_RE.sub(r"\1月\2日", text)
     text = _REPEATED_DAY_RE.sub(r"\1月\2日", _DAY_AS_MONTH_RE.sub(r"\1月\2日", text))
@@ -450,7 +453,8 @@ def fix_meeting_terms(text: str) -> str:
     text = _PRONOUN_SURNAME_FIX_RE.sub(lambda m: "李" if m.group(0) == "你" else "林", text)
     text = _FUZE_STUB_RE.sub("負責", _FUZE_STUTTER_RE.sub("負責", text))
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
-    return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", _fix_misheard_dates(text))
+    text = _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", _fix_misheard_dates(text))
+    return _DOUBLE_DAY_RE.sub("", text)        # 日期的空白先收掉 (「6 月 18 日 日 拿到」)
 
 
 try:

@@ -392,3 +392,13 @@ def test_fix_ge_bumen():
 ])
 def test_fix_truncated_fuze(raw, fixed):
     assert eng.fix_meeting_terms(raw) == fixed
+
+
+@pytest.mark.parametrize("raw, fixed", [
+    ("希望在11月10日日前完成報到", "希望在11月10日前完成報到"),
+    ("希望在 6 月 18 日 日 拿到 300 臺", "希望在 6月18日 拿到 300 臺"),
+    ("3日日本出差，每日日報", "3日日本出差，每日日報"),
+])
+def test_fix_double_day(raw, fixed):
+    assert eng.fix_meeting_terms(raw) == fixed
+    assert eng.fix_meeting_terms(fixed) == fixed
