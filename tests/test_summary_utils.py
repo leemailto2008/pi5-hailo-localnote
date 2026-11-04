@@ -726,3 +726,18 @@ def test_closing_filler_removed_from_todo_item_and_todo_only_decision_dropped():
     known = lambda t: summary_utils._todo_known(t, [[x.strip() for x in r.strip("|").split("|")] for r in rows[2:]])
     assert summary_utils._drop_listed_todo_clause(["待辦：劉課長主持面試", "待辦：王經理回覆客戶"], rows, known=known) == \
         ["待辦：王經理回覆客戶"]
+
+
+def test_assemble_long_minutes_prefers_recap_and_body_todos():
+    notes = ["- 公安：上週二事故未受傷，許經理負責\n- 存貨：庫存1500臺，張工程師1月3日盤點",
+             "- 品質異常：溫控模組客訴，劉課長9月15日報告",
+             "- 訂單方面，決議是先簽五十臺試單，待辦事項是林主任週三前回覆華新"]
+    body = ["| 完成全員複訓 | 許經理 | 8月15日前 |", "| 提出改善報告 | 劉課長 | 9月15日前 |",
+            "| 回覆客戶 | 黃專員 | 週三前 |"]
+    out = summary_utils.assemble_long_minutes(notes, max_todos=4, body_todos=body)
+    table = out.split("## 待辦")[1].split("## 決議")[0]
+    assert "| 回覆華新 | 林主任 | 週三 |" in table                  # 結尾總結的待辦一定在
+    assert "| 完成全員複訓 | 許經理 | 8月15日前 |" in table and "| 提出改善報告 | 劉課長 | 9月15日前 |" in table
+    assert table.count("劉課長") == 1                                 # 筆記裡同一件事不重複
+    assert "- 訂單方面，決議是先簽五十臺試單\n" in out + "\n"          # 待辦半句已在表上
+    assert summary_utils.assemble_long_minutes(notes, max_todos=4) == summary_utils.assemble_long_minutes(notes, max_todos=4, body_todos=[])

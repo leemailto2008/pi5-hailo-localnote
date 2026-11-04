@@ -48,7 +48,7 @@ except Exception as _fix_err:   # 開發環境找不到時，只是少了跨切�
         return text
 from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, fill_decisions_from_transcript,
                            detect_language, drop_unspoken_years, ground_todo_table, is_recap_chunk, keep_alive_plan, localize_minutes,
-                           merge_body_todos, merge_recap_into_minutes, recap_notes, to_internal_sections,
+                           merge_body_todos, merge_recap_into_minutes, recap_notes, to_internal_sections, transcript_todo_rows,
                            map_notes_complete, split_with_recap, summary_limits, take_stable_chunk, tidy_live_transcript)
 
 # 長會議紀要 (2026-10-27 e2e)：Hailo qwen3:1.7b 單次請求約 1500 字就 context full (HTTP 500)，
@@ -1242,6 +1242,8 @@ class MeetingJobManager:
             print("[MeetingMinutes] 逐字稿前段與預先整理時不同，不沿用，全部重新整理")
         lang = detect_language(transcript)
         lim = LANG_LIMITS[lang]
+        # 正文裡明講的交辦 (請X在…前…)：長會議待辦表優先用它，各段筆記抽出的列常是議題摘要 (見 summary_utils._long_todo_rows)
+        body_todos = transcript_todo_rows(transcript, max_rows=200)
         chunks = split_with_recap(rest, lim["chunk"]) if rest else []   # 結尾總結自成一段
         total = len(notes) + len(chunks)
         print(f"[MeetingMinutes] 📚 長逐字稿 {len(transcript)} 字 ({lang}) → {total} 段 (每段 <= {lim['chunk']} 字)，逐段整理")
@@ -1260,7 +1262,7 @@ class MeetingJobManager:
                 # 口頭總結直接用原句 (見 summary_utils.recap_notes)；模型仍常駐時由 finally 的 _release_hailo() 釋放 NPU
                 notes.append(recap_notes(piece))
                 print(f"[MeetingMinutes] 段 {idx}/{total}: 結尾總結 {len(piece)} 字，直接採用原句")
-                self.status.summary_stream = localize_minutes(assemble_long_minutes(notes, **summary_limits(total)), lang)
+                self.status.summary_stream = localize_minutes(assemble_long_minutes(notes, body_todos=body_todos, **summary_limits(total)), lang)
                 continue
             try:
                 self._hailo_pinned = True
@@ -1279,13 +1281,13 @@ class MeetingJobManager:
             if ka is None and idx < total:
                 await asyncio.sleep(3.0)   # 視窗切換：等 hailo-ollama 卸載完成再送下一段 (避免撞上卸載)
             # 逐段把目前組出的紀要推給前端，使用者不必等全部完成
-            partial = localize_minutes(assemble_long_minutes(notes, **summary_limits(total)), lang)
+            partial = localize_minutes(assemble_long_minutes(notes, body_todos=body_todos, **summary_limits(total)), lang)
             self.status.summary_stream = partial
             if job_id:
                 await ws_manager.broadcast("summary_stream", {"job_id": job_id, "token": "", "accumulated": partial})
 
         self.status.metrics["summary_map_s"] = round(time.time() - t_map, 1)
-        full_text = assemble_long_minutes(notes, **summary_limits(total))
+        full_text = assemble_long_minutes(notes, body_todos=body_todos, **summary_limits(total))
         self.status.summary_stream = localize_minutes(full_text, lang)
         print(f"[MeetingMinutes] 長會議紀要完成：{total} 段，{time.time() - t_map:.1f}s")
         return full_text

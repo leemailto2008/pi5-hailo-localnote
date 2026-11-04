@@ -1018,11 +1018,38 @@ def _topic_key(line: str) -> str:
 _RECAP_STATEMENT_RE = re.compile(r"^[\u4e00-\u9fff]{1,6}方面\s*[，,、]?\s*[\u4e00-\u9fff]{1,3}\s*是")
 
 
+def _long_todo_rows(per_all: List[List[str]], body_todos: List[str], max_todos: int) -> List[str]:
+    """長會議待辦表：結尾總結的待辦 > 逐字稿正文明講的交辦 > 各段筆記抽出的列。
+    11-04 離線 35 份 10–60 分鐘 e2e：各段筆記抽出的列常是議題摘要 (「公安：上週二事故未受傷 | 許經理 | 週二」)，
+    負責人與期限對得上講稿同一議題的只有 65%；正文交辦 86%，而且每份約 25 列 (表只有 6–12 列)。
+    名額不夠時正文交辦平均取自整場會議 (不只取前面)；顯示順序：正文交辦、筆記、結尾總結。"""
+    cells = lambda l: [x.strip() for x in l.strip().strip("|").split("|")]
+    tail = per_all[-1] if len(per_all) > 1 else []
+    tail_rows = extract_todos(tail, max_rows=max_todos) if tail else []
+    note_rows = extract_todos([l for p in (per_all[:-1] if tail else per_all) for l in p], max_rows=max_todos * 2)
+    chosen = list(tail_rows[:max_todos])
+    body = []
+    for r in body_todos:
+        if not _todo_known(cells(r), [cells(x) for x in chosen + body]):
+            body.append(r)
+    room = max_todos - len(chosen)
+    if len(body) > room > 0:
+        body = [body[round(i * (len(body) - 1) / max(1, room - 1))] for i in range(room)] if room > 1 else body[:1]
+    body = body[:max(0, room)]
+    notes = []
+    for r in note_rows:
+        if len(chosen) + len(body) + len(notes) >= max_todos:
+            break
+        if not _todo_known(cells(r), [cells(x) for x in chosen + body + notes]):
+            notes.append(r)
+    return body + notes + chosen
+
+
 def assemble_long_minutes(chunk_notes: List[str], max_summary: int = 8, max_decisions: int = 3, tail_lines: int = 4,
-                          max_todos: int = 6) -> str:
+                          max_todos: int = 6, body_todos: Optional[List[str]] = None) -> str:
     """chunk_notes：每段的 compact_notes() 輸出 (依時間順序)。
     摘要：最後一段 (會議結尾常有總結) 先保留 tail_lines 條，其餘名額每段先取第 1 條、有剩再取第 2 條…，維持時間順序；
-    待辦/決議由規則從全部重點擷取。"""
+    待辦/決議由規則從全部重點擷取。body_todos：逐字稿正文裡明講的交辦 (transcript_todo_rows)，見 _long_todo_rows。"""
     per_all = [_note_lines(tidy_dates(to_taiwan_traditional(n))) for n in chunk_notes]
     all_lines = [l for p in per_all for l in p]
     # 決議先取最後一段 (結尾總結的原句，會議最後拍板的內容)，名額有剩再依時間順序補前面各段的 (11-03 夜間 60 分鐘實錄：
@@ -1065,8 +1092,10 @@ def assemble_long_minutes(chunk_notes: List[str], max_summary: int = 8, max_deci
                     used.add(_topic_key(lines[rank]))
             rank += 1
     picked.sort()
-    todos = extract_todos(all_lines, max_rows=max_todos)
-    decisions = _drop_listed_todo_clause(decisions, todos)
+    todos = _long_todo_rows(per_all, body_todos, max_todos) if body_todos else extract_todos(all_lines, max_rows=max_todos)
+    cells = lambda l: [x.strip() for x in l.strip().strip("|").split("|")]
+    decisions = _drop_listed_todo_clause(decisions, todos,
+                                         known=(lambda t: _todo_known(t, [cells(r) for r in todos])) if body_todos else None)
     out = ["## 摘要"] + [f"- {l}" for _, _, l in picked] if picked else ["## 摘要", "- 無"]
     out += ["", "## 待辦", "| 事項 | 負責人 | 時間 |", "|---|---|---|"] + (todos or ["| 無 | - | - |"])
     out += ["", "## 決議"] + ([f"- {l}" for l in decisions] or ["- 無"])
