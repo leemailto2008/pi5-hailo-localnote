@@ -692,13 +692,28 @@ _EN_RECAP_FILLER_RE = re.compile(r"^(?:okay|ok|so|alright|right)?[,\s]*(?:to wra
                                  r"|thanks,? everyone|thank you all|see you next week)[.!]?", re.I)
 
 
-def _recap_notes_en(recap: str, max_lines: int = 6, max_len: int = 160) -> str:
-    """英文的結尾總結：一句一行 (句子本身就是「Topic: we decided…, and John will…」)，去掉開場與道謝。"""
+def _recap_notes_en(recap: str, max_lines: int = 6, max_len: int = 160, topics=()) -> str:
+    """英文的結尾總結：一句一行 (句子本身就是「Topic: we decided…, and John will…」)，去掉開場與道謝。
+    topics：正文的議題名稱。STT 沒斷句時 (「training names go to mary by thursday, firmware we decided…, and Kevin owns
+    the testing customer order」，78 份英文 e2e 有 6 份) 在「, 議題名稱」前再切開；太長時截在字與字之間，不留半個字。"""
     out = []
+    # 多字的議題名稱也認第一個字 (正文「the firmware update for…」，總結只說「firmware」)；要接在逗號後面才切
+    names = sorted({x.lower() for t in topics for x in (t, t.split()[0]) if len(x) >= 5}, key=len, reverse=True)
+    split_re = re.compile(r",\s+(?=(?:" + "|".join(re.escape(n) for n in names) + r")\b)", re.I) if names else None
+    # 句尾黏著下一個議題 (「Kevin owns the testing customer order」)：多字議題名稱、前面不是冠詞或介系詞時切掉
+    multi = [n for n in names if " " in n]
+    tail_re = re.compile(r"\b(\w+)[\s,]+(?:" + "|".join(re.escape(n) for n in multi) + r")\s*$", re.I) if multi else None
+    keep_words = {"the", "a", "an", "on", "for", "to", "of", "with", "about", "our", "this", "that", "new"}
     for sent in re.split(r"(?<=[.!?;])\s+", recap or ""):
-        t = _EN_RECAP_FILLER_RE.sub("", sent.strip()).strip(" .")
-        if len(t) >= 8:
-            out.append("- " + t[:max_len])
+        pieces = split_re.split(sent) if split_re and len(sent) > 60 else [sent]
+        for piece in pieces:
+            t = _EN_RECAP_FILLER_RE.sub("", piece.strip()).strip(" .,")
+            if tail_re:
+                t = tail_re.sub(lambda m: m.group(0) if m.group(1).lower() in keep_words else m.group(1), t).strip(" ,")
+            if len(t) > max_len:
+                t = t[:max_len].rsplit(" ", 1)[0].rstrip(" ,")
+            if len(t) >= 8:
+                out.append("- " + t)
     return "\n".join(out[:max_lines])
 
 
@@ -1396,12 +1411,12 @@ def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_de
     parts = split_with_recap(transcript)
     if len(parts) < 2 or not is_recap_chunk(parts[-1]):
         return md
-    lines = _note_lines(recap_notes(parts[-1]))
+    topics = [m.group(1).strip() for m in _EN_TOPIC_RE.finditer(" ".join(parts[:-1]))] if not _CJK_RE.search(parts[-1]) else []
+    lines = _note_lines(_recap_notes_en(parts[-1], topics=topics) if topics else recap_notes(parts[-1]))
     if not lines:
         return md
     m = _minutes_section(md, "待辦")
     rows = extract_todos(lines, max_rows=max_rows)
-    topics = [m.group(1).strip() for m in _EN_TOPIC_RE.finditer(" ".join(parts[:-1]))] if not _CJK_RE.search(parts[-1]) else []
     timeless = [_recap_timeless_todo_en(l, topics) if topics else _recap_timeless_todo(l) for l in lines]
     rows += [f"| {t[0]} | {t[1]} | {t[2]} |" for t in timeless if t][:max(0, max_rows - len(rows))]
     cells = lambda l: [x.strip() for x in l.strip().strip("|").split("|")]

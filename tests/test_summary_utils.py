@@ -953,3 +953,17 @@ def test_drop_placeholder_items_only_when_section_has_real_items():
     assert out.startswith("## 摘要\n- 無\n") and "| 無 | - | - |" in out
     assert out.endswith("## 決議\n- Firmware fix released March 15\n- We agreed on a 30-unit trial order\n")
     assert summary_utils.drop_placeholder_items(out) == out
+
+
+def test_en_recap_run_on_sentence_split_at_topics():
+    recap = ("OK, to wrap up training names go to mary by thursday, firmware we decided to release the fix on march 15th "
+             "after 10 rounds of regression tests, and Kevin owns the testing customer order. "
+             "We agreed on a 30-unit trial order at the new price. That's all for today.")
+    notes = summary_utils._recap_notes_en(recap, topics=["training", "firmware update", "customer order"])
+    assert notes.splitlines()[:2] == ["- training names go to mary by thursday",
+                                      "- firmware we decided to release the fix on march 15th after 10 rounds of regression tests, "
+                                      "and Kevin owns the testing"]
+    assert summary_utils._recap_notes_en("We agreed on the customer order with a longer explanation than sixty characters here.",
+                                         topics=["customer order"]).endswith("customer order with a longer explanation than sixty characters here")
+    long = summary_utils._recap_notes_en("We decided " + "very " * 40 + "carefully.", max_len=50)
+    assert long.startswith("- We decided very") and long.endswith(" very") and len(long) <= 52
