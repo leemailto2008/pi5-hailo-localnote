@@ -786,3 +786,10 @@ def test_ground_todo_drops_empty_item_rows():
     md = "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n|  | 王經理 | - |  |\n| 主持面試 | 王經理 | 12月3日 |"
     out = ground_todo_table(md, "下週由王經理主持面試，12月3日前完成報到")
     assert "|  |" not in out and "| 主持面試 | 王經理 | 12月3日 |" in out
+
+
+def test_chinese_numeral_dates_are_deadlines():
+    assert summary_utils.transcript_todo_rows("預算表請李協理在七月一日前送到財務部，第五個議題") == \
+        ["| 送到財務部 | 李協理 | 七月一日前 |"]
+    assert summary_utils.extract_todos(["存方面，決議是下一批十一月五日到，待辦事項是劉課長調整訂單"]) == \
+        ["| 調整訂單 | 劉課長 | 十一月五日 |"]
