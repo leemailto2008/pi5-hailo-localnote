@@ -377,3 +377,8 @@ def test_baiban_todo_marker():
 ])
 def test_fix_min_niu_surnames_and_draft(raw, fixed):
     assert eng.fix_meeting_terms(raw) == fixed
+
+
+def test_fix_ge_bumen():
+    assert eng.fix_meeting_terms("還剩8個名額，請隔部門在週四前把名單交給許經理") == "還剩8個名額，請各部門在週四前把名單交給許經理"
+    assert eng.fix_meeting_terms("隔壁部門的同事") == "隔壁部門的同事"

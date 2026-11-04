@@ -844,3 +844,10 @@ def test_en_owner_accent_and_stt_typo():
     md = "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| Test firmware | Kévin | March 15 |\n| Test 100 units | Kevn | March 15 |"
     out = ground_todo_table(md, "Kevn will arrange the testing on March 15. Kevin owns the testing.")
     assert "| Test firmware | Kevin | March 15 |" in out and "| Test 100 units | Kevin | March 15 |" in out
+
+
+def test_body_items_cut_garbled_topic_numbers_and_particles():
+    assert summary_utils.transcript_todo_rows("預算表請王經理在6月14日前送到財務部第11個已提是公啊") == ["| 送到財務部 | 王經理 | 6月14日前 |"]
+    assert summary_utils.transcript_todo_rows("下週會再安排三場面試，由林主任主吃，希望在9月11日前完成報到好，最後") == \
+        ["| 完成報到 | 林主任 | 9月11日前 |"]
+    assert summary_utils.transcript_todo_rows("文宣請黃專員負責，週三前交初稿第11") == ["| 交初稿 | 黃專員 | 週三前 |"]

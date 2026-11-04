@@ -1400,7 +1400,7 @@ _BODY_CUE_RE = re.compile(r"(?:請|由|交給|交由)\s*(" + _BODY_OWNER + r")|�
                           r"|^(?:這件事|並|再)?\s*(" + _BODY_OWNER + r")\s*(?=負責|會|要|將|主持|安排|在)")
 _BODY_TOPIC_CUT_RE = re.compile(r"第\s*\S{1,3}\s*個?\s*[議意]題")     # STT 沒斷句時，下一個議題的開頭不算進這句
 _BODY_JUNK_RE = re.compile(r"[A-Za-z\-]*(?=[A-Za-z\-]*\d)(?=[\dA-Za-z\-]*[A-Za-z])[\dA-Za-z\-]{4,}")   # 字母數字混雜的碎片
-_BODY_BARE_RE = re.compile(r"^(?:負責|主持|處理|安排|跟進|追蹤)?$")
+_BODY_BARE_RE = re.compile(r"^(?:負責|主持|主吃|處理|安排|跟進|追蹤)?$")      # 「主吃」：STT 把主持聽壞
 _BODY_LEAD_RE = re.compile(r"^(?:這件事|並且?|再|然後|在|於|要|會|將|請|由|負責|之前|以前|前|希望|把|先)+")
 
 
@@ -1416,8 +1416,11 @@ def _body_action(text: str) -> str:
     m = _body_due(text)
     if m:
         text = re.sub(r"(?:在|於)?\s*\0\s*(?:之前|以前|前)?", "", text[:m.start()] + "\0" + text[m.end():])
-    text = re.sub(r"^(?:負責|主持)(?=希望|並|然後|在|於)", "", re.sub(r"\s+", "", text))
+    text = re.sub(r"^(?:負責|主持|主吃)(?=希望|並|然後|在|於)", "", re.sub(r"\s+", "", text))
     text = re.sub(r"^(?:負)+(?=請|前|交)", "", text)        # 「負責」聽壞成「負負請交初稿」
+    # 下一個議題沒斷句、編號也聽壞 (「送到財務部第11個已提是公啊」「交初稿第11」)；句尾語氣詞 (「完成報到好」)
+    text = re.split(r"第\s*[\d一二三四五六七八九十]{1,3}(?:\s*個?.{0,2}?[題提體]|\s*$)", text, 1)[0]
+    text = re.sub(r"(?<=.{3})[好吧啊]$", "", text)
     return re.sub(r"[.。，,、]+$", "", _BODY_LEAD_RE.sub("", text))
 
 
