@@ -958,6 +958,11 @@ def _topic_key(line: str) -> str:
     return head[0].strip() if len(head) == 2 and 1 <= len(head[0].strip()) <= 8 else line[:4]
 
 
+# 結尾總結的「X方面，__是…」：__ 是「決議」被 STT 聽壞 (爭一、旬一式、隨意、只一…，每次都不一樣)；
+# 只用在最後一段 (總結原句)，把這種句子當決議，不讓它佔摘要名額
+_RECAP_STATEMENT_RE = re.compile(r"^[\u4e00-\u9fff]{1,6}方面\s*[，,、]?\s*[\u4e00-\u9fff]{1,3}\s*是")
+
+
 def assemble_long_minutes(chunk_notes: List[str], max_summary: int = 8, max_decisions: int = 3, tail_lines: int = 4,
                           max_todos: int = 6) -> str:
     """chunk_notes：每段的 compact_notes() 輸出 (依時間順序)。
@@ -968,7 +973,9 @@ def assemble_long_minutes(chunk_notes: List[str], max_summary: int = 8, max_deci
     # 決議先取最後一段 (結尾總結的原句，會議最後拍板的內容)，名額有剩再依時間順序補前面各段的 (11-03 夜間 60 分鐘實錄：
     # 前段先佔滿 3 個名額，總結裡的兩條決議被擠到摘要，摘要因此出現「公安方面決議是…待辦事…」原句)
     tail = per_all[-1] if per_all else []
-    ordered = [l for l in tail if _DECISION_RE.search(l)] + [l for p in per_all[:-1] for l in p if _DECISION_RE.search(l)]
+    ordered = [l for l in tail if _DECISION_RE.search(l)] + \
+              [l for l in tail if len(per_all) > 1 and not _DECISION_RE.search(l) and _RECAP_STATEMENT_RE.match(l)] + \
+              [l for p in per_all[:-1] for l in p if _DECISION_RE.search(l)]
     decisions: List[str] = []
     dup_of_decision = set()
     for l in ordered:          # 同一件事在總結與前段各寫一次 (「總結：決議先簽60臺試單」「訂單：決議先簽60臺試單」) 只留一條

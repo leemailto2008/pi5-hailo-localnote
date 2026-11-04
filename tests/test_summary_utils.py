@@ -614,3 +614,9 @@ def test_recap_line_splits_at_a_second_decision_without_topic():
     assert lines[0].startswith("公安方面") and "3月19日" not in lines[0]
     assert lines[1].startswith("決議是3月19日完成報到")
 
+
+def test_recap_topic_statement_with_garbled_decision_word_goes_to_decisions():
+    chunks = ["- 品質：上個月客訴18件\n- 預算：明年預算200萬元", "- 訓練方面爭一是簡報技巧9月2日開課，待辦事項十個部門週四前交名單"]
+    md = assemble_long_minutes(chunks, max_summary=6, max_decisions=3)
+    assert "簡報技巧9月2日開課" in md.split("## 決議")[1] and "簡報技巧" not in md.split("## 待辦")[0]
+
