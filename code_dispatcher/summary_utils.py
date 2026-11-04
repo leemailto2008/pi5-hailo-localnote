@@ -1510,6 +1510,25 @@ def cut_glued_topic_numbers(md: str) -> str:
         md = md[:m.start(2)] + "\n".join(lines) + md[m.end(2):]
     return md
 
+
+_PLACEHOLDER_ITEM_RE = re.compile(r"^(?:[-*•]\s*)*\**\s*(?:無|none|n/?a|nothing|（無）|\(none\))\s*[.。]?\s*\**$", re.I)
+
+
+def drop_placeholder_items(md: str) -> str:
+    """摘要／決議段已有實際條目時，拿掉佔位的「- 無」「- None」「- - None」(結尾總結補進決議後，模型原本寫的 None 還留著)。
+    11-05 228：60 份英文 e2e 紀要有 7 份決議段夾著 None，其中 2 份因此有重複條目 (en_long「- None」兩次)。"""
+    for sec in ("摘要", "決議"):
+        m = _minutes_section(md or "", sec)
+        if not m:
+            continue
+        lines = m.group(2).split("\n")
+        items = [l for l in lines if l.strip().startswith("- ")]
+        holders = [l for l in items if _PLACEHOLDER_ITEM_RE.match(l.strip()[2:].strip())]
+        if not holders or len(holders) == len(items):
+            continue
+        md = md[:m.start(2)] + "\n".join(l for l in lines if l not in holders) + md[m.end(2):]
+    return md
+
 # 逐字稿正文 (結尾總結之前) 裡明講的交辦 → 待辦表列。qwen3:1.7b 單次紀要的待辦表常只寫 1–2 列：
 # 11-04 離線 37 份 1–15 分鐘 e2e 逐字稿，劇本有負責人的議題 3 分鐘 7 個、5 分鐘 13 個，紀要待辦表平均只有 1.4–1.5 列。
 # 只認有明確交辦用語的負責人 (「請X」「由X」「交給X」「負責人是X」、子句開頭的「X負責／會／要」) 且同一子句或相鄰子句有期限

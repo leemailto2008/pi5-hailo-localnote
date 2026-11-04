@@ -944,3 +944,12 @@ def test_en_recap_owner_without_deadline_gets_a_row():
           "| reply to Lotus Tech | John | Wednesday |\n\n## 決議\n- 無\n")
     out = summary_utils.merge_recap_into_minutes(md, tr)
     assert "| owns the testing | Kevin | - |" in out and out.count("| John |") == 1
+
+
+def test_drop_placeholder_items_only_when_section_has_real_items():
+    md = ("## 摘要\n- 無\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 無 | - | - |\n\n"
+          "## 決議\n- Firmware fix released March 15\n- 無\n- - None\n- We agreed on a 30-unit trial order\n")
+    out = summary_utils.drop_placeholder_items(md)
+    assert out.startswith("## 摘要\n- 無\n") and "| 無 | - | - |" in out
+    assert out.endswith("## 決議\n- Firmware fix released March 15\n- We agreed on a 30-unit trial order\n")
+    assert summary_utils.drop_placeholder_items(out) == out
