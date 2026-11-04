@@ -382,3 +382,13 @@ def test_fix_min_niu_surnames_and_draft(raw, fixed):
 def test_fix_ge_bumen():
     assert eng.fix_meeting_terms("還剩8個名額，請隔部門在週四前把名單交給許經理") == "還剩8個名額，請各部門在週四前把名單交給許經理"
     assert eng.fix_meeting_terms("隔壁部門的同事") == "隔壁部門的同事"
+
+
+@pytest.mark.parametrize("raw, fixed", [
+    ("同意這件事由楊工程師負責負 週五前回覆客戶", "同意這件事由楊工程師負責 週五前回覆客戶"),
+    ("文宣請許經理負，週五前交初稿", "文宣請許經理負責，週五前交初稿"),
+    ("吳副理負負負週一前交初稿", "吳副理負責週一前交初稿"),
+    ("負債很高，負面影響", "負債很高，負面影響"),
+])
+def test_fix_truncated_fuze(raw, fixed):
+    assert eng.fix_meeting_terms(raw) == fixed
