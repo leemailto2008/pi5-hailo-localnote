@@ -314,3 +314,20 @@ def test_fix_meeting_terms_is_idempotent():
 def test_fix_misheard_dates(raw, fixed):
     assert eng.fix_meeting_terms(raw) == fixed
     assert eng.fix_meeting_terms(fixed) == fixed
+
+
+@pytest.mark.parametrize("raw, fixed", [
+    # 負責人前面黏著別的字 (11-04 95 份逐字稿：被抓成「表情許經理」「有李協理」「小時李協理」「安排黃專員」的約 200 次)
+    ("人力要再增加二位工程師，預算表情利協理在8月7日前送到財務部", "人力要再增加二位工程師，預算表請李協理在8月7日前送到財務部"),
+    ("下週會再安排三場面試,有許經理主，希望在7月1日前完成報到", "下週會再安排三場面試,由許經理主持，希望在7月1日前完成報到"),
+    ("預計停機 3 小時李協理負責通知所有使用者", "預計停機 3 小時，李協理負責通知所有使用者"),
+    ("第五個議題是出差安排黃專員下個月要去首爾拜訪", "第五個議題是出差安排，黃專員下個月要去首爾拜訪"),
+    ("請力協理跟對方確認，週五回報", "請李協理跟對方確認，週五回報"),
+    # 不動
+    ("他的表情很好，王經理說", "他的表情很好，王經理說"),
+    ("人力經理會在週五前回覆", "人力經理會在週五前回覆"),
+    ("這是勝利經理說的", "這是勝利經理說的"),
+])
+def test_fix_owner_glue(raw, fixed):
+    assert eng.fix_meeting_terms(raw) == fixed
+    assert eng.fix_meeting_terms(fixed) == fixed
