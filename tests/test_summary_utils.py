@@ -684,3 +684,24 @@ def test_clean_summary_drops_prompt_label_echo():
     assert "- 供應商星光材料電源晶片交期延至10月10日\n" in out
     assert "- 新版ERP系統正式切換定於2月3日，負責人：李協理\n" in out
     assert "- 訂單先簽60臺試單，人名：王經理\n" in out      # 是「姓＋職稱」且前面沒寫過：不動
+
+
+def test_merge_recap_moves_known_todo_out_of_decisions():
+    md = ("## 摘要\n- 招募業務部，面試15人\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n"
+          "| 招募業務部面試 | 王經理 | 12月3日前 |\n\n## 決議\n- 招募方面 決議是12日前完成報到待辦事項是王經理主持面\n")
+    tr = ("第七個議題是招募，業務部目前2個職缺，下週會再安排四場面試，由王經理主持，" * 8 +
+          "好 最後總結，出差方面，決議是李協理出差新加坡，待辦事項是李協理，週會報告，"
+          "訂單方面，決議是先簽60臺試單，待辦事項是王經理週五前回覆客戶，今天就到這裡，謝謝大家")
+    out = summary_utils.merge_recap_into_minutes(md, tr)
+    table = out.split("## 待辦")[1].split("## 決議")[0]
+    dec = out.split("## 決議")[1]
+    assert "- 招募方面 決議是12日前完成報到\n" in dec                 # 同一件事已在表上：待辦半句拿掉
+    assert "| 週會報告 | 李協理 | - |" in table                       # 沒有期限的總結待辦也進表
+    assert "| 回覆客戶 | 王經理 | 週五 |" in table                     # 同一負責人的另一件事照樣加
+    assert "待辦事項" not in dec
+
+
+def test_drop_listed_todo_clause_removes_owner_only_clause_with_its_action():
+    rows = ["| 事項 | 負責人 | 時間 |", "|---|---|---|", "| 訂單掉貨 | 劉課長 | 1月5日 |"]
+    out = summary_utils._drop_listed_todo_clause(["存方面，決議是下一批3000臺1月5日到，待辦事項是劉課長，訂單掉貨"], rows)
+    assert out == ["存方面，決議是下一批3000臺1月5日到"]

@@ -949,24 +949,32 @@ def extract_todos(lines: List[str], max_rows: int = 6) -> List[str]:
     return rows
 
 
-def _drop_listed_todo_clause(decisions: List[str], todo_rows: List[str]) -> List[str]:
+def _drop_listed_todo_clause(decisions: List[str], todo_rows: List[str], known=None) -> List[str]:
     """結尾總結的決議條目常是「X方面，決議是…，待辦事項是某人某日前…」。待辦那半句已經寫進待辦表
-    (認得出負責人與時間) 時，決議只留前半句，不在兩段重複；待辦表沒收到的照舊整句保留，負責人不會不見。"""
+    (認得出負責人與時間) 時，決議只留前半句，不在兩段重複；待辦表沒收到的照舊整句保留，負責人不會不見。
+    known((事項, 負責人, 時間)) 另外判斷這件事是否已在表上 (merge_recap_into_minutes 用，見 _todo_known)。"""
     listed = {r.split("|")[1].strip() for r in todo_rows if r.count("|") >= 4}
     table = [(r.split("|")[1].strip(), r.split("|")[2].strip()) for r in todo_rows if r.count("|") >= 4]
     out = []
     for line in decisions:
         parts = _TODO_MARK_RE.split(line, 1)
-        got = _todo_parts(line) if len(parts) == 2 else None
-        if len(parts) == 2 and not (got and got[0] in listed) and _clause_in_table(_CLAUSE_SPLIT_RE.split(parts[1], 1)[0], table):
+        got = (_todo_parts(line) or _recap_timeless_todo(line)) if len(parts) == 2 else None
+        if got and known is not None and known(got):
+            got = ("", "", "")
+        elif len(parts) == 2 and not (got and got[0] in listed) and _clause_in_table(_CLAUSE_SPLIT_RE.split(parts[1], 1)[0], table):
             got = ("", "", "")       # 待辦子句沒有期限 (「待辦事項是劉課長送預算表」)，但同一負責人、同一件事已在待辦表
         elif got and got[0] not in listed:
             got = None
         if not got:
             out.append(line)
             continue
-        # 只拿掉待辦那一個子句；後面若還接著別的議題 (STT 漏了「方面」時常黏成一行) 照樣保留
-        seg = _CLAUSE_SPLIT_RE.split(parts[1], 1)[0]
+        # 只拿掉待辦那一個子句；後面若還接著別的議題 (STT 漏了「方面」時常黏成一行) 照樣保留。
+        # 負責人自成一句時 (「待辦事項是李協理，周會報告」) 連下一句一起拿掉
+        pieces = _CLAUSE_SPLIT_RE.split(parts[1], 2)
+        seg = pieces[0]
+        if len(pieces) > 1 and _OWNER_RE.fullmatch(seg.strip()):
+            m2 = re.match(re.escape(seg) + r"[，；;。,]\s*" + re.escape(pieces[1]), parts[1])
+            seg = m2.group(0) if m2 else seg
         head = re.sub(r"[，,；;、\s]*待辦(?:事項)?\s*$", "", parts[0]).rstrip("，,；;、 ")
         rest = parts[1][len(seg):].lstrip("，,；;。、 ")
         trimmed = f"{head}，{rest}" if head and rest else (head or rest)
@@ -1095,6 +1103,41 @@ def _already_said(core: str, md_norm: str, decisions: List[str]) -> bool:
     return any(len(set(c) & set(norm(x))) >= 0.7 * len(set(c)) for x in decisions)
 
 
+_TODO_COMMON_CHARS = set("的前日月週周在是和與及會要將把再並完成")
+
+
+def _recap_timeless_todo(line: str):
+    """「待辦事項是李協理，周會報告」：有負責人、沒有期限的總結待辦 → (事項, 負責人, "-")；其他回傳 None。"""
+    parts = _TODO_MARK_RE.split(line, 1)
+    if len(parts) != 2:
+        return None
+    clauses = _CLAUSE_SPLIT_RE.split(parts[1])
+    seg = clauses[0].strip()
+    if len(clauses) > 1 and _OWNER_RE.fullmatch(seg):
+        seg = seg + clauses[1].strip()
+    mo = _OWNER_RE.search(seg)
+    if not mo or _TIME_RE.search(line):
+        return None
+    action = _ACTION_LEAD_RE.sub("", seg.replace(mo.group(0), "", 1).strip()).strip()
+    return (action[:20], mo.group(1), "-") if len(action) >= 2 else None
+
+
+def _todo_known(row, table) -> bool:
+    """(事項, 負責人, 時間) 是否已在待辦表 (table 為各列的格子)：同一負責人 (負責人欄或寫在事項欄)，
+    且期限相同、或事項有一個以上相同的字 (不算「的、前、完成」這類常見字)。
+    例：「主持面 | 王經理 | 12日前」與「招募業務部面試 | 王經理 | 12月3日前」是同一件事；「回覆客戶 | 王經理」不是。"""
+    item, owner, when = row[:3]
+    core = lambda x: set(re.sub(r"[\s，,。、：:|\-]", "", x)) - _TODO_COMMON_CHARS
+    for c in table:
+        if len(c) < 3 or not owner or (owner not in c[1] and owner not in c[0]):
+            continue
+        if when not in _TODO_SKIP and re.sub(r"[\s前]", "", when) == re.sub(r"[\s前]", "", c[2]):
+            return True
+        if core(item) & (core(c[0].replace(owner, "")) or core(c[0])):
+            return True
+    return False
+
+
 def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_decisions: int = 5) -> str:
     """單次紀要 (短會議) 補上結尾口頭總結：qwen3:1.7b 常只寫前面幾個議題，把最後「X方面，決議是…，待辦事項是…」漏掉。
     與長會議相同，總結用逐字稿原句 (recap_notes)；待辦表補上負責人還沒出現的列，決議段補上還沒寫到的決議。
@@ -1112,14 +1155,19 @@ def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_de
         return md
     m = _minutes_section(md, "待辦")
     rows = extract_todos(lines, max_rows=max_rows)
+    rows += [f"| {t[0]} | {t[1]} | {t[2]} |" for t in map(_recap_timeless_todo, lines) if t][:max(0, max_rows - len(rows))]
+    cells = lambda l: [x.strip() for x in l.strip().strip("|").split("|")]
     if m and rows:
         body = m.group(2).rstrip("\n").splitlines()
         table = [l for l in body if l.strip().startswith("|") and not _is_sep(l.strip())]
         data = table[1:] if table else []
         placeholder = [l for l in data if l.count("|") >= 2 and l.split("|")[1].strip() in ("無", SECTION_MISSING_NOTE)]
-        table_text = "\n".join(data)       # 負責人可能被寫在「事項」欄 (「| 王經理主持面試 | - | - |」)
         real = [l for l in data if l not in placeholder]
-        add = [r for r in rows if r.split("|")[2].strip() not in table_text][:max(0, max_rows - len(real))]
+        add = []
+        for r in rows:      # 同一負責人已有同一件事才不加 (原本是負責人出現過就不加，另一件事會被丟掉)
+            if not _todo_known(cells(r), [cells(l) for l in real + add]):
+                add.append(r)
+        add = add[:max(0, max_rows - len(real))]
         if add and table:
             new_body = [l for l in body if l not in placeholder] + add
             rest = md[m.end():]
@@ -1130,11 +1178,16 @@ def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_de
         real = [l for l in items if l[2:].strip() not in ("無", SECTION_MISSING_NOTE)]
         tm = _minutes_section(md, "待辦")
         todo_rows = [l.strip() for l in (tm.group(2).splitlines() if tm else []) if l.strip().startswith("|")]
+        known = lambda t: _todo_known(t, [cells(r) for r in todo_rows if not _is_sep(r)][1:])
+        # 模型 (或照抄總結) 寫的決議也一樣：待辦那半句已在表上就拿掉
+        trimmed_real = ["- " + x for x in _drop_listed_todo_clause([l[2:] for l in real], todo_rows, known=known)]
+        changed_real = trimmed_real != real
+        real = trimmed_real
         md_norm = re.sub(r"[\s，,。、：:]", "", md)
         add = []
         for line in lines:
             if "決議" in line:
-                d = _drop_listed_todo_clause([line], todo_rows)[0]
+                d = _drop_listed_todo_clause([line], todo_rows, known=known)[0]
                 core = _CLAUSE_SPLIT_RE.split(re.split(r"決議\s*(?:是|為|：|:)", d, 1)[-1])[0].strip()
                 # 「決議是12日前完成報到待辦事項是王經理主持面」：STT 沒斷句時待辦黏在決議後面，比對只看決議本身
                 core = _TODO_MARK_RE.split(core, 1)[0].strip()
@@ -1146,9 +1199,9 @@ def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_de
             if len(core) >= 4 and not _already_said(core, md_norm, [x[2:] for x in real] + add):
                 add.append(d)
         add = add[:max(0, max_decisions - len(real))]
-        if add:
+        if add or changed_real:
             rest = md[m.end():]
-            body = "\n".join(real + [f"- {x}" for x in add])
+            body = "\n".join((real or ["- 無"] if not add else real) + [f"- {x}" for x in add])
             md = md[:m.start(2)] + body + ("\n\n" + rest.lstrip("\n") if rest.strip() else "\n")
     return md.rstrip() + "\n" if md.endswith("\n") else md.rstrip()
 
@@ -1187,7 +1240,7 @@ def transcript_todo_rows(transcript: str, max_rows: int = 8) -> List[str]:
     return [f"| {item} | {owner} | {when} |" for item, owner, when, _ in _transcript_todos(transcript, max_rows)]
 
 
-def _transcript_todos(transcript: str, max_rows: int = 8) -> List[tuple]:
+def _transcript_todos(transcript: str, max_rows: int = 12) -> List[tuple]:
     """(事項, 負責人, 時間, 出處子句) 的清單；出處用來比對模型寫的同一件事。"""
     text = (transcript or "").strip()
     if not text or detect_language(text) == "en":
@@ -1246,7 +1299,7 @@ def _longest_common_run(a: str, b: str) -> int:
     return difflib.SequenceMatcher(None, a, b, autojunk=False).find_longest_match(0, len(a), 0, len(b)).size
 
 
-def merge_body_todos(md: str, transcript: str, max_rows: int = 8) -> str:
+def merge_body_todos(md: str, transcript: str, max_rows: int = 10) -> str:
     """單次紀要 (短會議)：待辦表補上逐字稿正文裡明講、表上還沒有的交辦 (_transcript_todos)。
     - 同一負責人已有一列，且期限相同或事項有兩個以上相同的字：視為已列。
     - 模型寫的列負責人對不上逐字稿 (「-」)，且事項裡有連續三個字出現在交辦那句：補上負責人 (與期限)，不另加一列。
