@@ -402,3 +402,9 @@ def test_fix_truncated_fuze(raw, fixed):
 def test_fix_double_day(raw, fixed):
     assert eng.fix_meeting_terms(raw) == fixed
     assert eng.fix_meeting_terms(fixed) == fixed
+
+
+def test_fix_recap_marker_variants():
+    raw = "總結一下訓練方面,聰一是簡報技巧，佩辦事向十個部門週四前把名單交給吳副理，展覽方面，軍意是參加新竹展覽，待辦事頁是吳副理週一前交初稿"
+    out = eng.fix_meeting_terms(raw)
+    assert out.count("決議是") == 2 and out.count("待辦事項") == 2
