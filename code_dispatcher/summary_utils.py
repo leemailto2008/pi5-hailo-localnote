@@ -201,6 +201,10 @@ def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) 
             line = s
             if len(re.sub(r"[\W_]", "", _BULLET_RE.sub("", s))) < 2:     # 只剩標點 (「-，謝謝」拿掉後的「-，」)
                 continue
+        if is_row and _CLOSING_FILLER_RE.search(s):      # 「| 王經理主持面試，今天就到這裡 | 王經理 | - |」(541cd0c 3 分鐘 e2e)
+            cells = s.strip().strip("|").split("|")
+            cells[0] = " " + (_CLOSING_FILLER_RE.sub("", cells[0]).strip(" ，,、") or cells[0].strip()) + " "
+            s = line = "|" + "|".join(cells) + "|"
         if is_item and section in ("摘要", "決議") and _LABEL_ECHO_RE.search(s):
             s = line = _drop_label_echo(s)
         if is_item or is_row:
@@ -971,6 +975,8 @@ def _drop_listed_todo_clause(decisions: List[str], todo_rows: List[str], known=N
         if not got:
             out.append(line)
             continue
+        if not parts[0].strip(" -，,：:") and known is not None:
+            continue            # 整條就是待辦 (模型寫的「- 待辦：劉課長主持面試」)，表上已有：整條拿掉
         # 只拿掉待辦那一個子句；後面若還接著別的議題 (STT 漏了「方面」時常黏成一行) 照樣保留。
         # 負責人自成一句時 (「待辦事項是李協理，周會報告」) 連下一句一起拿掉
         pieces = _CLAUSE_SPLIT_RE.split(parts[1], 2)

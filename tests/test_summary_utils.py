@@ -716,3 +716,13 @@ def test_clean_summary_drops_jinri_closing_filler():
     md = "## 摘要\n- 預算200萬元\n- 今日會議結束，謝謝\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 無 | - | - |\n\n## 決議\n- 招募8月26日前完成報到\n- 今日就到這裡"
     out = clean_summary_markdown(md)
     assert "今日" not in out and "- 招募8月26日前完成報到" in out and "- 預算200萬元" in out
+
+
+def test_closing_filler_removed_from_todo_item_and_todo_only_decision_dropped():
+    md = ("## 摘要\n- 招募面試15人\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n"
+          "| 王經理主持面試，今天就到這裡 | 王經理 | - |\n\n## 決議\n- 招募12月3日前完成報到")
+    assert "| 王經理主持面試 | 王經理 | - |" in clean_summary_markdown(md)
+    rows = ["| 事項 | 負責人 | 時間 |", "|---|---|---|", "| 主持面試 | 劉課長 | 8月26日 |"]
+    known = lambda t: summary_utils._todo_known(t, [[x.strip() for x in r.strip("|").split("|")] for r in rows[2:]])
+    assert summary_utils._drop_listed_todo_clause(["待辦：劉課長主持面試", "待辦：王經理回覆客戶"], rows, known=known) == \
+        ["待辦：王經理回覆客戶"]
