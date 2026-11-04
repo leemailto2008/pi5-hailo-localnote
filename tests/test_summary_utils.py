@@ -903,3 +903,12 @@ def test_fill_missing_topics_adds_late_topic_from_transcript():
 def test_topic_segment_stops_at_topic_number_without_yiti():
     segs = summary_utils._topic_segments("第八個議題是庫存，目前存1200臺，下一批500臺2月7日到，第九個是教育訓練，5月25日有一場課程")
     assert segs == ["庫存，目前存1200臺，下一批500臺2月7日到"]
+
+
+def test_long_minutes_treat_recap_line_with_todo_as_decision():
+    notes = ["- 訂單：客戶要120臺樣品\n- 品質：客訴18件",
+             "- 隨時韌體修正版10月11日上線待辦事項是李協理安排回歸測試10月11日前\n- 待辦事項是林主任週三前回覆華新"]
+    md = summary_utils.assemble_long_minutes(notes, max_summary=4, max_decisions=3)
+    dec = md.split("## 決議")[1]
+    assert "- 隨時韌體修正版10月11日上線" in dec and "隨時韌體" not in md.split("## 待辦")[0]
+    assert "待辦事項" not in summary_utils.drop_listed_todos_from_summary(md).split("## 待辦")[0]

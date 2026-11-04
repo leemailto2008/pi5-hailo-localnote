@@ -1160,6 +1160,16 @@ def _topic_key(line: str) -> str:
 _RECAP_STATEMENT_RE = re.compile(r"^[\u4e00-\u9fff]{1,6}方面\s*[，,、]?\s*[\u4e00-\u9fff]{1,3}\s*是")
 
 
+def _recap_statement(line: str) -> bool:
+    """結尾總結的決議句：「X方面，__是…」，或「__是先簽五十臺試單待辦事項是林主任…」(「方面」與「決議」都聽壞，
+    但後面接著待辦事項：總結的句型是「決議是…，待辦事項是…」，前半句就是決議)。11-05 60 份喇叭實錄：11 句，
+    原本被選進摘要、而且帶著待辦那半句 (night7_m10「隨時韌體修正版10月11日上線待辦事項《市李協理安排回測是》」)。"""
+    if _RECAP_STATEMENT_RE.match(line):
+        return True
+    parts = _TODO_MARK_RE.split(line, 1)
+    return len(parts) == 2 and len(re.sub(r"[\s，,、：:]", "", parts[0])) >= 6
+
+
 def _long_todo_rows(per_all: List[List[str]], body_todos: List[str], max_todos: int) -> List[str]:
     """長會議待辦表：結尾總結的待辦 > 逐字稿正文明講的交辦 > 各段筆記抽出的列。
     11-04 離線 35 份 10–60 分鐘 e2e：各段筆記抽出的列常是議題摘要 (「公安：上週二事故未受傷 | 許經理 | 週二」)，
@@ -1198,7 +1208,7 @@ def assemble_long_minutes(chunk_notes: List[str], max_summary: int = 8, max_deci
     # 前段先佔滿 3 個名額，總結裡的兩條決議被擠到摘要，摘要因此出現「公安方面決議是…待辦事…」原句)
     tail = per_all[-1] if per_all else []
     ordered = [l for l in tail if _DECISION_RE.search(l)] + \
-              [l for l in tail if len(per_all) > 1 and not _DECISION_RE.search(l) and _RECAP_STATEMENT_RE.match(l)] + \
+              [l for l in tail if len(per_all) > 1 and not _DECISION_RE.search(l) and _recap_statement(l)] + \
               [l for p in per_all[:-1] for l in p if _DECISION_RE.search(l)]
     decisions: List[str] = []
     dup_of_decision = set()
