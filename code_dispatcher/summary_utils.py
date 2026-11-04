@@ -406,12 +406,39 @@ def _fill_en_owner_from_transcript(md: str, transcript: str) -> str:
     return "\n".join(out)
 
 
+def _fill_en_due_from_transcript(md: str, transcript: str) -> str:
+    """英文待辦表有負責人、期限卻空著，而逐字稿裡「這個人 + 這件事的動詞 + by <時間>」只有一句時補上期限
+    (11-04 英文 e2e：「| Reply to Lotus Tech | John | - |」，逐字稿「John will reply to the customer by Wednesday」；
+    25 份英文輸出 184 列中 49 列期限空著)。動詞取事項的第一個字，對不上就不補 (「Sign trial order」不拿 reply 的期限)。"""
+    sents = [x for x in re.split(r"(?<=[.!?])\s+", transcript or "") if _EN_TIME_RE.search(x)]
+    if not sents:
+        return md
+    out, section = [], None
+    for line in md.splitlines():
+        s = line.strip()
+        if s.startswith("## "):
+            section = s[3:].strip()
+        if section == "待辦" and s.startswith("|") and not _is_sep(s):
+            cols = [c.strip() for c in s.strip("|").split("|")]
+            if (len(cols) >= 3 and cols[2] in _TODO_SKIP and cols[1] not in _TODO_SKIP
+                    and not _CJK_RE.search(cols[0] + cols[1]) and cols[0].split()):
+                owner, verb = cols[1].split()[0], cols[0].split()[0].lower()
+                verb = re.sub(r"(?:e?s|ed|ing)$", "", verb) if len(verb) > 4 else verb
+                hits = {_EN_TIME_RE.search(x).group(1) for x in sents
+                        if re.search(rf"\b{re.escape(owner)}\b", x) and re.search(rf"\b{re.escape(verb)}", x, re.I)}
+                if len(hits) == 1:
+                    cols[2] = hits.pop()
+                    line = "| " + " | ".join(cols) + " |"
+        out.append(line)
+    return "\n".join(out)
+
+
 def ground_todo_table(md: str, transcript: str) -> str:
     """待辦表每列的負責人、時間欄若在逐字稿中找不到，改成「-」 (多人時只留找得到的人)；事項欄與其他段落不動。
     空的負責人／時間欄先從事項欄補 (_fill_todo_cells)，補上的也一樣要在逐字稿裡找得到。"""
     if not md or not transcript or "## 待辦" not in md:
         return md
-    md = _fill_en_owner_from_transcript(_fill_todo_cells(md), transcript)
+    md = _fill_en_due_from_transcript(_fill_en_owner_from_transcript(_fill_todo_cells(md), transcript), transcript)
     tr = _ground_norm(transcript)
     out, section = [], None
     for line in md.splitlines():

@@ -803,3 +803,11 @@ def test_header_echo_rows_and_topic_label_items():
     assert "| 事項 | 王經理 |" not in out and "今天做到這裡" not in out
     assert summary_utils._todo_parts("招募方面，決議是12月3日前完成報到，待辦事項王經理主持面試") is not None
     assert summary_utils._todo_parts("招募方面，決議是12月3日前完成報到，王經理主持面試") == ("主持面試", "王經理", "12月3日")
+
+
+def test_en_due_filled_from_owner_sentence():
+    md = "## 待辦\n| Item | Owner | Due |\n|---|---|---|\n| Reply to Lotus Tech | John | - |\n| Sign 30-unit trial order | John | - |"
+    tr = "Everyone agreed. John will reply to the customer by Wednesday. Kevin owns the testing."
+    out = ground_todo_table(md, tr)
+    assert "| Reply to Lotus Tech | John | Wednesday |" in out
+    assert "| Sign 30-unit trial order | John | - |" in out          # 動詞對不上：不補
