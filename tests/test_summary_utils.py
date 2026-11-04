@@ -838,3 +838,9 @@ def test_dateless_row_gets_date_from_assignment_sharing_three_chars():
     md2 = "## 摘要\n- x\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 王經理主持面試 | 王經理 | - |\n\n## 決議\n- 無\n"
     out2 = summary_utils.merge_body_todos(md2, "同意這件事由王經理負責週五前回覆客戶")
     assert "| 王經理主持面試 | 王經理 | - |" in out2 and "| 回覆客戶 | 王經理 | 週五前 |" in out2   # 只因為名字相同不算同一件事
+
+
+def test_en_owner_accent_and_stt_typo():
+    md = "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| Test firmware | Kévin | March 15 |\n| Test 100 units | Kevn | March 15 |"
+    out = ground_todo_table(md, "Kevn will arrange the testing on March 15. Kevin owns the testing.")
+    assert "| Test firmware | Kevin | March 15 |" in out and "| Test 100 units | Kevin | March 15 |" in out

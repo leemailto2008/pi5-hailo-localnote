@@ -2,6 +2,7 @@
 """會議紀要 (LLM 輸出) 後處理，純函式，供 meeting_minutes 使用並可離線單元測試。"""
 import difflib
 import re
+import unicodedata
 from typing import Dict, List, Optional
 
 # 小模型 (qwen3:1.7b) 的紀要偶爾混出簡體字：2026-10-29 檢查 228 的 29 份 e2e／實錄紀要，11 份含簡體 (应、许、条、温…)，
@@ -445,10 +446,16 @@ def _snap_en_todo_cells(md: str, transcript: str) -> str:
             cols = [c.strip() for c in s.strip("|").split("|")]
             if len(cols) >= 3 and not _CJK_RE.search(cols[0] + cols[1] + cols[2]):
                 words = cols[1].split()
-                if words and re.fullmatch(r"[A-Z][a-z]{2,}", words[0]) and words[0] not in names:
-                    near = {n for n in names if n[0] == words[0][0] and _edit1(n, words[0])}
+                w = unicodedata.normalize("NFKD", words[0]).encode("ascii", "ignore").decode() if words else ""   # Kévin → Kevin
+                if re.fullmatch(r"[A-Z][a-z]{2,}", w):
+                    near = {n for n in names if n != w and n[0] == w[0] and _edit1(n, w)}
+                    if w in names:      # STT 自己也拼錯過一次 (「Kevn will arrange…」「Kevin owns the testing」)：取出現較多、較長的那個
+                        cnt = lambda x: len(re.findall(rf"\b{x}\b", transcript))
+                        near = {n for n in near if len(n) > len(w) and cnt(n) >= cnt(w)}
                     if len(near) == 1:
                         cols[1] = " ".join([near.pop()] + words[1:])
+                    elif w != words[0] and w in names:
+                        cols[1] = " ".join([w] + words[1:])
                 full = _EN_WEEKDAY_ABBR.get(cols[2].lower().rstrip("."))
                 if full and full.lower() in low:
                     cols[2] = full
