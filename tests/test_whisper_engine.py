@@ -331,3 +331,13 @@ def test_fix_misheard_dates(raw, fixed):
 def test_fix_owner_glue(raw, fixed):
     assert eng.fix_meeting_terms(raw) == fixed
     assert eng.fix_meeting_terms(fixed) == fixed
+
+
+@pytest.mark.parametrize("raw, fixed", [
+    ("測試的部分請你協理安排，至少要做三輪", "測試的部分請李協理安排，至少要做三輪"),
+    ("請您主任跟對方確認，週五回報", "請林主任跟對方確認，週五回報"),
+    ("你經理說的對", "你經理說的對"),
+    ("你協理的看法", "你協理的看法"),
+])
+def test_fix_pronoun_surname(raw, fixed):
+    assert eng.fix_meeting_terms(raw) == fixed

@@ -205,6 +205,9 @@ _AGAIN_FIX_RE = re.compile(r"(?:(?<=問題)|(?<=結果)|(?<=會)|(?<=之後)|(?<
 _TRIAL_FIX_RE = re.compile(r"(?<=等)\s*[是市事式](?=\s*用\s*結果)|(?<=[臺台]裝置上)\s*[市是事]\s*(?=跑)|(?<=[臺台]設備上)\s*[市是事]\s*(?=跑)")
 _HOSTED_BY_FIX_RE = re.compile(r"[有遊](?=\s*[\u4e00-\u9fff]\s*(?:協理|經理|副理|課長|組長|工程師|專員|主任)\s*主\s*(?:[持吃]|[，,。]))")
 # 「安排三場面試,有許經理主，希望在…」：「主持」只剩「主」(95 份 92 次，「由」也常聽成「有」)
+# 代名詞聽錯的姓 (11-04 98 份逐字稿)：「請你協理安排」(李，23 次)、「請您主任跟對方確認」(林，7 次)。只認這兩種職稱組合；
+# 「你經理」(4 次) 可能真的是「你的經理」，不動。
+_PRONOUN_SURNAME_FIX_RE = re.compile(r"你(?=\s*協理" + _OWNER_FOLLOW[3:-1] + r")|您(?=\s*主任" + _OWNER_FOLLOW[3:-1] + r")")
 _HOSTED_STUB_FIX_RE = re.compile(r"(由\s*[\u4e00-\u9fff]\s*(?:協理|經理|副理|課長|組長|工程師|專員|主任)\s*)主(?=\s*[，,。])")
 # 沒斷句時負責人前面黏著上一句的尾巴：「預計停機3小時李協理負責通知所有使用者」(63 次)、
 # 「第57個議題是出差安排黃專員下個月要去首爾」(59 次)，負責人會被抓成「小時李協理」「安排黃專員」。補一個逗號。
@@ -427,6 +430,7 @@ def fix_meeting_terms(text: str) -> str:
     text = _fix_owner_names(_fix_misc_terms(text))   # 也在英文碎片拿掉、英文數字改成中文之後 (「two 個直」「請皇 er 專員」)
     text = _HOSTED_BY_FIX_RE.sub("由", _fix_hiring_and_order_terms(text))   # 「六場面是有李協理主持」：前面的修正做完才認得
     text = _OWNER_GLUE_FIX_RE.sub(r"\1，", _HOSTED_STUB_FIX_RE.sub(r"\1主持", text))
+    text = _PRONOUN_SURNAME_FIX_RE.sub(lambda m: "李" if m.group(0) == "你" else "林", text)
     text = _DOT_DATE_RE.sub(lambda m: f"{int(m.group(1))}月{int(m.group(2))}日", text)
     return _SPACED_DATE_RE.sub(lambda m: f"{m.group(1)}月{m.group(2)}日", _fix_misheard_dates(text))
 
