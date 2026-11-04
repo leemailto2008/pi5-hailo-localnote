@@ -856,3 +856,15 @@ def test_body_items_cut_garbled_topic_numbers_and_particles():
 def test_todo_action_drops_leading_shi_and_brackets():
     assert summary_utils._todo_parts("存方面，決議是下一批11月5日到，待辦事項是劉課長是訂單調貨")[0] == "訂單調貨"
     assert summary_utils._todo_parts("韌體方面，待辦事項是李協理《安排回歸測試》10月11日前")[0].startswith("安排回歸測試")
+
+
+def test_summary_drops_todo_clause_already_in_table():
+    md = ("## 摘要\n- 韌體修正版10月11日上線待辦事項是李協理安排回測\n- 待辦事項是林主任週三前回覆華新\n"
+          "- 待辦事項是吳副理週五前交文宣\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n"
+          "| 安排回測 | 李協理 | 10月11日 |\n| 回覆華新 | 林主任 | 週三 |\n\n## 決議\n- 無\n")
+    out = summary_utils.drop_listed_todos_from_summary(md)
+    assert "- 韌體修正版10月11日上線\n" in out and "回覆華新 | 林主任" in out and "- 待辦事項是林主任" not in out
+    assert "- 待辦事項是吳副理週五前交文宣\n\n## 待辦" in out        # 表上沒有的照舊保留
+    assert summary_utils.drop_listed_todos_from_summary(out) == out
+    only = "## 摘要\n- 待辦事項是林主任週三前回覆華新\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 回覆華新 | 林主任 | 週三 |\n"
+    assert summary_utils.drop_listed_todos_from_summary(only) == only     # 摘要至少留一條

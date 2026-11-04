@@ -1396,6 +1396,36 @@ def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_de
     return md.rstrip() + "\n" if md.endswith("\n") else md.rstrip()
 
 
+
+def drop_listed_todos_from_summary(md: str) -> str:
+    """摘要條目裡的「…待辦事項是某人某日前…」：多半是結尾總結的原句 (「決議」被 STT 聽壞，認不出是決議，就被選進摘要)。
+    待辦表已有那件事時只留前半句；整條就是待辦時整條拿掉，摘要至少留一條。表上沒有的照舊整句保留。
+    11-05 60 份喇叭實錄紀要：22 份摘要有這種條目 (「隨時韌體修正版10月11日上線待辦事項《市李協理安排回測是》」)。"""
+    sm, tm = _minutes_section(md or "", "摘要"), _minutes_section(md or "", "待辦")
+    if not sm or not tm or not _TODO_MARK_RE.search(sm.group(2)):
+        return md
+    cells = lambda l: [x.strip() for x in l.strip().strip("|").split("|")]
+    todo_rows = [l.strip() for l in tm.group(2).splitlines() if l.strip().startswith("|") and not _is_sep(l.strip())][1:]
+    todo_rows = [r for r in todo_rows if r.count("|") >= 4 and cells(r)[0] not in ("無", SECTION_MISSING_NOTE)]
+    if not todo_rows:
+        return md
+    known = lambda t: _todo_known(t, [cells(r) for r in todo_rows])
+    body = sm.group(2).rstrip()
+    out, changed = [], False
+    for line in body.splitlines():
+        s = line.strip()
+        if s.startswith("- ") and _TODO_MARK_RE.search(s):
+            kept = _drop_listed_todo_clause([s[2:]], todo_rows, known=known)
+            if kept != [s[2:]]:
+                changed = True
+                if kept and kept[0].strip(" -，,：:"):
+                    out.append(line[:len(line) - len(line.lstrip())] + "- " + kept[0].strip())
+                continue
+        out.append(line)
+    if not changed or not any(l.strip().startswith("- ") for l in out):
+        return md
+    return md[:sm.start(2)] + "\n".join(out) + sm.group(2)[len(body):] + md[sm.end(2):]
+
 # 逐字稿正文 (結尾總結之前) 裡明講的交辦 → 待辦表列。qwen3:1.7b 單次紀要的待辦表常只寫 1–2 列：
 # 11-04 離線 37 份 1–15 分鐘 e2e 逐字稿，劇本有負責人的議題 3 分鐘 7 個、5 分鐘 13 個，紀要待辦表平均只有 1.4–1.5 列。
 # 只認有明確交辦用語的負責人 (「請X」「由X」「交給X」「負責人是X」、子句開頭的「X負責／會／要」) 且同一子句或相鄰子句有期限

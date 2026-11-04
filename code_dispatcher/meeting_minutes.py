@@ -47,7 +47,7 @@ except Exception as _fix_err:   # 開發環境找不到時，只是少了跨切�
     def fix_meeting_terms(text: str) -> str:
         return text
 from summary_utils import (assemble_long_minutes, clean_summary_markdown, compact_notes, ensure_sections, fill_decisions_from_transcript,
-                           detect_language, drop_unspoken_years, ground_todo_table, is_recap_chunk, keep_alive_plan, localize_minutes,
+                           detect_language, drop_listed_todos_from_summary, drop_unspoken_years, ground_todo_table, is_recap_chunk, keep_alive_plan, localize_minutes,
                            merge_body_todos, merge_recap_into_minutes, recap_notes, to_internal_sections, transcript_todo_rows,
                            map_notes_complete, split_with_recap, summary_limits, take_stable_chunk, tidy_live_transcript)
 
@@ -1103,6 +1103,7 @@ class MeetingJobManager:
             raw_markdown = _safe_post(ground_todo_table, raw_markdown, transcript)   # 待辦的負責人／時間必須出自逐字稿
             raw_markdown = _safe_post(drop_unspoken_years, raw_markdown, transcript)  # 模型自己補的年份 (逐字稿沒說) 拿掉
             raw_markdown = _safe_post(fill_decisions_from_transcript, raw_markdown, transcript)   # 決議段空白但逐字稿有明講
+            raw_markdown = _safe_post(drop_listed_todos_from_summary, raw_markdown)   # 摘要裡已列在待辦表的「待辦事項是…」半句拿掉
             minutes_lang = detect_language(transcript)
             self.status.summary_stream = localize_minutes(raw_markdown, minutes_lang)
 
@@ -1183,6 +1184,7 @@ class MeetingJobManager:
                 raw_markdown = _safe_post(ground_todo_table, await self._generate_summary_llm(transcript, job_id=job_id), transcript)
                 raw_markdown = _safe_post(drop_unspoken_years, raw_markdown, transcript)
                 raw_markdown = _safe_post(fill_decisions_from_transcript, raw_markdown, transcript)
+                raw_markdown = _safe_post(drop_listed_todos_from_summary, raw_markdown)
                 minutes_lang = detect_language(transcript)
                 self.status.summary_stream = localize_minutes(raw_markdown, minutes_lang)
                 parsed = localize_parsed(parse_markdown_minutes(raw_markdown), minutes_lang)
