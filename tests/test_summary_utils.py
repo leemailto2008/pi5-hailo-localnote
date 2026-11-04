@@ -912,3 +912,13 @@ def test_long_minutes_treat_recap_line_with_todo_as_decision():
     dec = md.split("## 決議")[1]
     assert "- 隨時韌體修正版10月11日上線" in dec and "隨時韌體" not in md.split("## 待辦")[0]
     assert "待辦事項" not in summary_utils.drop_listed_todos_from_summary(md).split("## 待辦")[0]
+
+
+def test_same_owner_same_task_rows_collapse():
+    md = ("## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 劉課長送預算表 | 劉課長 | 10月7日前 |\n| 主持面試 | 劉課長 | 8月26日 |\n"
+          "| 送預算表 | 劉課長 | - |\n| 面試：劉課長主持 | 劉課長 | 8月26日前 |\n| 回覆客戶 | 王經理 | 週五前 |\n| 主持面試 | 王經理 | 12月3日前 |\n")
+    out = summary_utils._drop_same_task_rows(md)
+    assert "| 送預算表 | 劉課長 | - |" not in out and "面試：劉課長主持" not in out
+    assert "| 劉課長送預算表 | 劉課長 | 10月7日前 |" in out and "| 主持面試 | 劉課長 | 8月26日 |" in out
+    assert "| 主持面試 | 王經理 | 12月3日前 |" in out and "| 回覆客戶 | 王經理 | 週五前 |" in out
+    assert summary_utils._drop_same_task_rows(out) == out

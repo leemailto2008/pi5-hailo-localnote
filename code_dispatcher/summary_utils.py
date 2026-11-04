@@ -515,7 +515,7 @@ def ground_todo_table(md: str, transcript: str) -> str:
                     cols[i] = "、".join(kept) if kept and len(parts) > 1 else "-"
                 line = "| " + " | ".join(cols) + " |"
         out.append(line)
-    return _drop_ownerless_duplicate_rows(_drop_empty_item_rows("\n".join(out)))
+    return _drop_same_task_rows(_drop_ownerless_duplicate_rows(_drop_empty_item_rows("\n".join(out))))
 
 
 def _drop_empty_item_rows(md: str) -> str:
@@ -547,6 +547,32 @@ def _drop_ownerless_duplicate_rows(md: str) -> str:
     if not drop:
         return md
     return "\n".join(l for l in md.splitlines() if l.strip() not in drop)
+
+def _drop_same_task_rows(md: str) -> str:
+    """同一負責人、同一件事寫了兩列時只留一列 (11-05 離線 3／5 分鐘紀要：每份平均 0.6／0.7 列是重複的)：
+    - 一列沒有期限 (結尾總結「待辦事項是劉課長送預算表」)，另一列有期限且事項有兩個以上相連的字相同 → 拿掉沒期限的
+      (「| 送預算表 | 劉課長 | - |」與「| 劉課長送預算表 | 劉課長 | 10月7日前 |」)；
+    - 期限相同 (不計「前」) 且事項有兩個以上相連的字相同 → 留第一列 (「| 主持面試 | 劉課長 | 8月26日 |」與「| 面試：劉課長主持 | 劉課長 | 8月26日前 |」)。
+    比對時事項去掉負責人與常見字。"""
+    rows = [l.strip() for l in md.splitlines() if l.strip().startswith("|") and not _is_sep(l)]
+    cells = [[c.strip() for c in r.strip("|").split("|")] for r in rows]
+    data = [(r, c) for r, c in zip(rows, cells) if len(c) >= 3 and c[0] not in _TODO_HEADER_ECHO and c[0] not in _EMPTY_CELL
+            and c[1] not in _TODO_SKIP and _CJK_RE.search(c[0])]      # 英文事項逐字比對沒有意義 (「Test firmware」「Test 100 units」)
+    core = lambda c: "".join(ch for ch in re.sub(r"[\s，,。、：:|\-]", "", c[0].replace(c[1], "")) if ch not in _TODO_COMMON_CHARS)
+    when = lambda c: re.sub(r"[\s前]", "", c[2])
+    drop = set()
+    for i, (ri, ci) in enumerate(data):
+        for j, (rj, cj) in enumerate(data):
+            if i == j or ri in drop or rj in drop or ci[1] != cj[1] or _longest_common_run(core(ci), core(cj)) < 2:
+                continue
+            if ci[2] in _TODO_SKIP and cj[2] not in _TODO_SKIP:
+                drop.add(ri)
+            elif ci[2] not in _TODO_SKIP and when(ci) == when(cj) and i > j:
+                drop.add(ri)
+    if not drop:
+        return md
+    return "\n".join(l for l in md.splitlines() if l.strip() not in drop)
+
 
 def _is_sep(line: str) -> bool:
     return line.strip().startswith("|") and set(line.strip()) <= set("|-: ")
