@@ -202,6 +202,8 @@ def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) 
             line = s
             if len(re.sub(r"[\W_]", "", _BULLET_RE.sub("", s))) < 2:     # 只剩標點 (「-，謝謝」拿掉後的「-，」)
                 continue
+        if is_row and section == "待辦" and not s.strip("|").split("|")[0].strip():
+            continue        # 事項欄空白的列 (「|  | 許經理 | 11月28日 |」)：先拿掉，結尾總結／正文交辦會補上完整的列
         if is_row and _CLOSING_FILLER_RE.search(s):      # 「| 王經理主持面試，今天就到這裡 | 王經理 | - |」(541cd0c 3 分鐘 e2e)
             cells = s.strip().strip("|").split("|")
             cells[0] = " " + (_CLOSING_FILLER_RE.sub("", cells[0]).strip(" ，,、") or cells[0].strip()) + " "
@@ -414,7 +416,25 @@ def ground_todo_table(md: str, transcript: str) -> str:
                     cols[i] = "、".join(kept) if kept and len(parts) > 1 else "-"
                 line = "| " + " | ".join(cols) + " |"
         out.append(line)
-    return _drop_ownerless_duplicate_rows("\n".join(out))
+    return _drop_ownerless_duplicate_rows(_drop_empty_item_rows("\n".join(out)))
+
+
+def _drop_empty_item_rows(md: str) -> str:
+    """事項欄是空的列拿掉，多出來的空白格去掉 (11-04 夜間 3 分鐘實錄：「|  | 王經理 | - |  |」)。"""
+    out, section = [], None
+    for line in md.splitlines():
+        s = line.strip()
+        if s.startswith("## "):
+            section = s[3:].strip()
+        if section == "待辦" and s.startswith("|") and not _is_sep(s):
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if not cells[0]:
+                continue
+            while len(cells) > 3 and not cells[-1]:
+                cells.pop()
+            line = "| " + " | ".join(cells) + " |"
+        out.append(line)
+    return "\n".join(out)
 
 
 def _drop_ownerless_duplicate_rows(md: str) -> str:
@@ -1271,15 +1291,16 @@ _BODY_OWNER = _NAME_CHAR + r"{1,3}?(?:經理|副理|協理|主任|專員|工程�
 _BODY_CUE_RE = re.compile(r"(?:請|由|交給|交由)\s*(" + _BODY_OWNER + r")|負責人\s*(?:是|為)?\s*(" + _BODY_OWNER + r")"
                           r"|^(?:這件事|並|再)?\s*(" + _BODY_OWNER + r")\s*(?=負責|會|要|將|主持|安排|在)")
 _BODY_TOPIC_CUT_RE = re.compile(r"第\s*\S{1,3}\s*個?\s*[議意]題")     # STT 沒斷句時，下一個議題的開頭不算進這句
+_BODY_JUNK_RE = re.compile(r"[A-Za-z\-]*(?=[A-Za-z\-]*\d)(?=[\dA-Za-z\-]*[A-Za-z])[\dA-Za-z\-]{4,}")   # 字母數字混雜的碎片
 _BODY_BARE_RE = re.compile(r"^(?:負責|主持|處理|安排|跟進|追蹤)?$")
 _BODY_LEAD_RE = re.compile(r"^(?:這件事|並且?|再|然後|在|於|要|會|將|請|由|負責|之前|以前|前|希望|把|先)+")
 
 
 def _body_due(clause: str):
-    for m in _TIME_RE.finditer(clause):
-        if clause[max(0, m.start() - 1):m.start()] not in ("上", "昨"):     # 「上週三樓產線發生…」不是期限
-            return m
-    return None
+    """子句裡的期限。有「…前」的優先 (「下週會再安排四場面試由王經理主持希望在12月3日前完成報到」取 12月3日前，
+    不取「下週」，11-04 夜間 3 分鐘實錄)；「上週三樓產線發生…」這類過去的不算。"""
+    found = [m for m in _TIME_RE.finditer(clause) if clause[max(0, m.start() - 1):m.start()] not in ("上", "昨")]
+    return next((m for m in found if re.match(r"\s*(?:之前|以前|前)", clause[m.end():])), found[0] if found else None)
 
 
 def _body_action(text: str) -> str:
@@ -1317,7 +1338,7 @@ def _transcript_todos(transcript: str, max_rows: int = 12) -> List[tuple]:
         nxt = clauses[i + 1] if i + 1 < len(clauses) else ""
         prv = clauses[i - 1] if i > 0 else ""
         mt, item, src = _body_due(c), "", c
-        if mt is None and nxt and _body_due(nxt) and not _BODY_CUE_RE.search(nxt) and len(nxt) <= 12:
+        if mt is None and nxt and _body_due(nxt) and not _BODY_CUE_RE.search(nxt) and len(nxt) <= 16:
             # 「這件事由王經理負責，週五前回覆客戶」「請李協理跟對方確認，週五回報」
             mt, a, src = _body_due(nxt), _body_action(after), nxt
             item = a if not _BODY_BARE_RE.match(a) else _body_action(nxt)
@@ -1332,6 +1353,7 @@ def _transcript_todos(transcript: str, max_rows: int = 12) -> List[tuple]:
                 segs = [x for x in re.split(r"並|然後", before) if x.strip()] or [before]
                 a = _body_action(segs[-1])[-12:]
             item = a
+        item = _BODY_JUNK_RE.split(item, 1)[0]     # 「回覆客戶PLOG1T-E是工業…」：下一個議題聽壞、沒斷句
         if mt is None or len(item) < 2:
             continue
         if "把" in before and re.search(r"交[給由]\s*$", c[:mo.start(1) if mo.group(1) else mo.start()]):

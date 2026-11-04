@@ -773,3 +773,16 @@ def test_truncated_table_separator_is_restored():
 def test_replacement_char_removed():
     out = clean_summary_markdown("## 摘要\n- �品保部明年預算200萬元\n\n## 決議\n- 無")
     assert "�" not in out and "- 品保部明年預算200萬元" in out
+
+
+def test_body_due_prefers_explicit_deadline_and_cuts_junk():
+    assert summary_utils.transcript_todo_rows("下週會再安排四場面試由王經理主持希望在12月3日前完成報到，第八個議題是") == \
+        ["| 完成報到 | 王經理 | 12月3日前 |"]
+    assert summary_utils.transcript_todo_rows("同意 這件事由王經理負責週五前回覆客戶PLOG1T-E是工業杈到器的便體更新，目前") == \
+        ["| 回覆客戶 | 王經理 | 週五前 |"]
+
+
+def test_ground_todo_drops_empty_item_rows():
+    md = "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n|  | 王經理 | - |  |\n| 主持面試 | 王經理 | 12月3日 |"
+    out = ground_todo_table(md, "下週由王經理主持面試，12月3日前完成報到")
+    assert "|  |" not in out and "| 主持面試 | 王經理 | 12月3日 |" in out
