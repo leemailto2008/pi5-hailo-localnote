@@ -868,3 +868,12 @@ def test_summary_drops_todo_clause_already_in_table():
     assert summary_utils.drop_listed_todos_from_summary(out) == out
     only = "## 摘要\n- 待辦事項是林主任週三前回覆華新\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 回覆華新 | 林主任 | 週三 |\n"
     assert summary_utils.drop_listed_todos_from_summary(only) == only     # 摘要至少留一條
+
+
+def test_cut_glued_topic_number_at_bullet_end():
+    md = ("## 摘要\n- 客戶訂單：臺南訂單提前，請劉課長調貨第十五個議題\n- 第28議題品質異常：客訴六件\n- 第3個議題\n\n"
+          "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 交初稿 | 第3個議題 | - |\n\n## 決議\n- 黃專員通知使用者第120個議題是出差安排\n")
+    out = summary_utils.cut_glued_topic_numbers(md)
+    assert "- 客戶訂單：臺南訂單提前，請劉課長調貨\n" in out and "- 第28議題品質異常：客訴六件\n" in out
+    assert "- 第3個議題\n" in out and "| 第3個議題 |" in out and out.endswith("- 黃專員通知使用者\n")
+    assert summary_utils.cut_glued_topic_numbers(out) == out

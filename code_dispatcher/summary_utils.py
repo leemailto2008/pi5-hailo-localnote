@@ -1426,6 +1426,29 @@ def drop_listed_todos_from_summary(md: str) -> str:
         return md
     return md[:sm.start(2)] + "\n".join(out) + sm.group(2)[len(body):] + md[sm.end(2):]
 
+
+# STT 沒在下一個議題前斷句時，「…請劉課長調貨第十五個議題是客戶訂單」的議題編號 (還常聽錯、編號亂跳) 黏在條目尾巴
+_GLUED_TOPIC_TAIL_RE = re.compile(r"[，,、\s]*第\s*[\d一二三四五六七八九十百]{1,4}\s*個?\s*[議意]題(?:\s*[是為]?\s*[\u4e00-\u9fff]{0,4})?\s*[。.]?\s*$")
+
+
+def cut_glued_topic_numbers(md: str) -> str:
+    """摘要／決議條目尾巴黏著的「第N個議題(是X)」拿掉 (前面至少留 6 個字)；條目開頭的「第28議題品質異常：」是議題名稱，不動。"""
+    if not md or not re.search(r"[議意]題", md):
+        return md
+    out = []
+    for sec in ("摘要", "決議"):
+        m = _minutes_section(md, sec)
+        if not m:
+            continue
+        lines = m.group(2).split("\n")
+        for i, line in enumerate(lines):
+            if line.lstrip().startswith("- "):
+                cut = _GLUED_TOPIC_TAIL_RE.sub("", line)
+                if cut != line and len(re.sub(r"[\s\-，,：:]", "", cut)) >= 6:
+                    lines[i] = cut
+        md = md[:m.start(2)] + "\n".join(lines) + md[m.end(2):]
+    return md
+
 # 逐字稿正文 (結尾總結之前) 裡明講的交辦 → 待辦表列。qwen3:1.7b 單次紀要的待辦表常只寫 1–2 列：
 # 11-04 離線 37 份 1–15 分鐘 e2e 逐字稿，劇本有負責人的議題 3 分鐘 7 個、5 分鐘 13 個，紀要待辦表平均只有 1.4–1.5 列。
 # 只認有明確交辦用語的負責人 (「請X」「由X」「交給X」「負責人是X」、子句開頭的「X負責／會／要」) 且同一子句或相鄰子句有期限
