@@ -414,3 +414,10 @@ def test_engineer_heard_as_chen_or_shen():
     from hailo_whisper.engine import fix_meeting_terms
     assert fix_meeting_terms("這件事由張工臣師負責，週五前回覆客戶") == "這件事由張工程師負責，週五前回覆客戶"
     assert "楊工程師安排" in fix_meeting_terms("請楊工沈師安排至少五輪回歸測試")
+
+
+def test_gateway_with_misheard_gongye():
+    from hailo_whisper.engine import fix_meeting_terms
+    assert fix_meeting_terms("第六個議題是工丶炸到器的韌體更新") == "第六個議題是工業閘道器的韌體更新"
+    assert fix_meeting_terms("公益炸道器的韌體更新") == "工業閘道器的韌體更新"
+    assert fix_meeting_terms("工業炸到起的韌體") == "工業閘道器的韌體"
