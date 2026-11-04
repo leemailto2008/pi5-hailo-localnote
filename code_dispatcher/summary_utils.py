@@ -199,7 +199,7 @@ def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) 
         if is_item and _CLOSING_FILLER_RE.search(s):     # 「…主持面試，今天就到這裡」：結尾客套話不是內容
             s = _CLOSING_FILLER_RE.sub("", s).rstrip("，,、 ")
             line = s
-            if len(_BULLET_RE.sub("", s).strip()) < 2:
+            if len(re.sub(r"[\W_]", "", _BULLET_RE.sub("", s))) < 2:     # 只剩標點 (「-，謝謝」拿掉後的「-，」)
                 continue
         if is_item and section in ("摘要", "決議") and _LABEL_ECHO_RE.search(s):
             s = line = _drop_label_echo(s)
@@ -264,7 +264,9 @@ def _drop_placeholder_bullets(lines: List[str]) -> List[str]:
     return out
 
 
-_CLOSING_FILLER_RE = re.compile(r"[，,。\s]*(?:好\s*[，,]?\s*)?(?:今天(?:就|先)?(?:到|開到)(?:這裡|這邊)|謝謝(?:大家|各位))[^，。\n]*")
+# 11-04 ad981d9 5 分鐘 e2e 的決議出現「- 今日就到這裡」：模型把「今天」寫成「今日」；也有「- 今日會議結束，謝謝」
+_CLOSING_FILLER_RE = re.compile(r"[，,。\s]*(?:好\s*[，,]?\s*)?(?:今[天日](?:就|先)?(?:到|開到)(?:這裡|這邊)|今[天日](?:的)?會議(?:到此)?結束"
+                                r"|謝謝(?:大家|各位)|謝謝(?=[\s!！。.]*$))[^，。\n]*")
 
 
 def _join_split_tables(lines: List[str]) -> List[str]:

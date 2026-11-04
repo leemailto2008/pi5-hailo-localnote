@@ -710,3 +710,9 @@ def test_drop_listed_todo_clause_removes_owner_only_clause_with_its_action():
 def test_past_weekday_is_not_a_deadline():
     assert summary_utils.extract_todos(["公安：上週三事故，許經理負責"]) == []
     assert summary_utils.extract_todos(["許經理週三前回報"]) == ["| 許經理週三前回報 | 許經理 | 週三 |"]
+
+
+def test_clean_summary_drops_jinri_closing_filler():
+    md = "## 摘要\n- 預算200萬元\n- 今日會議結束，謝謝\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 無 | - | - |\n\n## 決議\n- 招募8月26日前完成報到\n- 今日就到這裡"
+    out = clean_summary_markdown(md)
+    assert "今日" not in out and "- 招募8月26日前完成報到" in out and "- 預算200萬元" in out
