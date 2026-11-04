@@ -741,3 +741,8 @@ def test_assemble_long_minutes_prefers_recap_and_body_todos():
     assert table.count("劉課長") == 1                                 # 筆記裡同一件事不重複
     assert "- 訂單方面，決議是先簽五十臺試單\n" in out + "\n"          # 待辦半句已在表上
     assert summary_utils.assemble_long_minutes(notes, max_todos=4) == summary_utils.assemble_long_minutes(notes, max_todos=4, body_todos=[])
+
+
+def test_decision_label_prefix_removed():
+    out = clean_summary_markdown("## 摘要\n- 招募面試\n\n## 決議\n- 決議：8月26日前完成報到\n- 決定是先簽60臺")
+    assert "- 8月26日前完成報到" in out and "- 決定是先簽60臺" in out

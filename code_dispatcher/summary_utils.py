@@ -164,6 +164,7 @@ def _summary_table_to_bullets(lines: List[str]) -> List[str]:
 # 「…交期延至10月10日，關鍵數字：10月10日，金額：無，人名：曦代料」(11-04 3 分鐘 e2e；最近 26 份紀要 1 份、舊的 104 份 3 份)。
 # 值是「無」、前面已經寫過、或「人名」後面不是「姓＋職稱」時整段拿掉；「負責人：X」是正常寫法，不動。
 _LABEL_ECHO_RE = re.compile(r"\s*[，,；;]\s*(關鍵數字|數字|金額|人名|日期|預計時間|時間|公司名?)\s*[：:]\s*([^，,；;。]*)")
+_DECISION_LABEL_RE = re.compile(r"^[-*•]\s*(?:決議|決定|結論)\s*[：:]\s*(?=\S)")
 _EMPTY_VALUES = {"", "-", "無", "不明", "未提及", "未知", "無提及", "待定", "未定", "n/a", "N/A"}
 
 
@@ -205,6 +206,8 @@ def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) 
             cells = s.strip().strip("|").split("|")
             cells[0] = " " + (_CLOSING_FILLER_RE.sub("", cells[0]).strip(" ，,、") or cells[0].strip()) + " "
             s = line = "|" + "|".join(cells) + "|"
+        if is_item and section == "決議" and _DECISION_LABEL_RE.match(s):
+            s = line = _DECISION_LABEL_RE.sub("- ", s)       # 「- 決議：8月26日前完成報到」：段名已是決議 (138 份紀要 11 份)
         if is_item and section in ("摘要", "決議") and _LABEL_ECHO_RE.search(s):
             s = line = _drop_label_echo(s)
         if is_item or is_row:
