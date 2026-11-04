@@ -182,7 +182,7 @@ def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) 
     """LLM 紀要後處理：轉台灣繁體、移除重複行 (小模型偶發重複迴圈直到 num_predict 用盡)，並限制摘要/決議點數。"""
     limits = max_items or {"摘要": 5, "決議": 3}
     out, seen, section, count = [], set(), None, 0
-    for line in tidy_dates(to_taiwan_traditional(md or "")).splitlines():
+    for line in tidy_dates(to_taiwan_traditional(md or "")).replace("\ufffd", "").splitlines():   # 模型偶爾吐出半個字元 (「�品保部」)
         s = line.strip()
         if s.startswith("|") and set(s) <= set("| "):   # 整列空白的表格列 (小模型偶爾連印 20 多列「| | | |」)
             continue
@@ -726,25 +726,30 @@ def _reorder_sections(lines: List[str]) -> List[str]:
 
 def _pad_todo_rows(lines: List[str], empty_row: str = "| 無 | - | - |") -> List[str]:
     """待辦表格列的格數少於表頭時補「-」(例：模型寫到「| 出差報告 |」就停，10-31 5 分鐘 e2e)。
-    表格只有表頭沒有資料列時補一列「| 無 | - | - |」(11-01 5 分鐘 e2e：模型只印了 20 多列空白列，清掉後表格是空的)。"""
-    out, section, width, rows, sep_at = [], None, 0, 0, None
+    表格只有表頭沒有資料列時補一列「| 無 | - | - |」(11-01 5 分鐘 e2e：模型只印了 20 多列空白列，清掉後表格是空的)。
+    分隔線被截斷 (「| 事項 | 負責人 | 時間 |」後面只有「|---」，11-04 夜間 3 分鐘實錄) 時連分隔線一起補，
+    否則後面補進來的列不會顯示成表格。"""
+    out, section, width, rows, sep_at, head_at = [], None, 0, 0, None, None
 
     def close_table():
-        if section == "待辦" and width and not rows and sep_at is not None:
-            out.insert(sep_at + 1, empty_row)
+        if section == "待辦" and width and not rows:
+            if sep_at is not None:
+                out.insert(sep_at + 1, empty_row)
+            elif head_at is not None and out[head_at].strip().strip("|").split("|")[0].strip() not in ("無", SECTION_MISSING_NOTE):
+                out[head_at + 1:head_at + 1] = ["|" + "---|" * width, empty_row]
 
     for line in lines:
         s = line.strip()
         if s.startswith("## "):
             close_table()
-            section, width, rows, sep_at = s[3:].strip(), 0, 0, None
+            section, width, rows, sep_at, head_at = s[3:].strip(), 0, 0, None, None
         if section == "待辦" and s.startswith("|") and s.endswith("|"):
             if _is_sep(s):
                 sep_at = len(out)
             else:
                 cells = s.count("|") - 1
                 if not width:
-                    width = cells
+                    width, head_at = cells, len(out)
                 else:
                     rows += 1
                     if cells < width:
@@ -1228,7 +1233,10 @@ def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_de
         add = []
         for line in lines:
             if "決議" in line:
-                d = _drop_listed_todo_clause([line], todo_rows, known=known)[0]
+                kept = _drop_listed_todo_clause([line], todo_rows, known=known)
+                if not kept:        # 整條就是表上已有的待辦 (「待辦事項是王經理主持面試」)：不當決議
+                    continue
+                d = kept[0]
                 core = _CLAUSE_SPLIT_RE.split(re.split(r"決議\s*(?:是|為|：|:)", d, 1)[-1])[0].strip()
                 # 「決議是12日前完成報到待辦事項是王經理主持面」：STT 沒斷句時待辦黏在決議後面，比對只看決議本身
                 core = _TODO_MARK_RE.split(core, 1)[0].strip()

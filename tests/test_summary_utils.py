@@ -751,3 +751,25 @@ def test_decision_label_prefix_removed():
 def test_hand_over_item_starts_after_please():
     rows = summary_utils.transcript_todo_rows("目前已經報名8人，還剩8個名額請各部門在週一前把名單交給許經理，第十個議題是上線")
     assert rows == ["| 各部門把名單交給許經理 | 許經理 | 週一前 |"]
+
+
+def test_merge_recap_todo_only_recap_line_does_not_crash():
+    # 11-04 夜間 3 分鐘實錄：總結裡「待辦事項是王經理主持面試」整條就是表上已有的待辦 → IndexError (處理失敗)
+    md = ("## 摘要\n- 招募已面試15位候選人\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n"
+          "| 主持面試 | 王經理 | 12月3日 |\n\n## 決議\n- 無\n")
+    tr = ("第七個議題是招募，下週會再安排四場面試，由王經理主持，" * 8 +
+          "好 最後總結，招募方面，待辦事項是王經理主持面試，今天就到這裡，謝謝")
+    out = summary_utils.merge_recap_into_minutes(md, tr)
+    assert "| 主持面試 | 王經理 | 12月3日 |" in out
+
+
+def test_truncated_table_separator_is_restored():
+    raw = "## 摘要\n- 預算200萬元\n\n## 決議\n- 先簽60臺試單\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---"
+    out = ensure_sections(clean_summary_markdown(raw))
+    todo = out.split("## 待辦")[1].split("## ")[0]
+    assert "| 事項 | 負責人 | 時間 |\n|---|---|---|\n|" in todo
+
+
+def test_replacement_char_removed():
+    out = clean_summary_markdown("## 摘要\n- �品保部明年預算200萬元\n\n## 決議\n- 無")
+    assert "�" not in out and "- 品保部明年預算200萬元" in out
