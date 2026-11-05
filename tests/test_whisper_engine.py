@@ -606,3 +606,17 @@ def test_night8_m30b_speaker_take_misspellings():
     assert f("正式切換定在4月28日，預記停機4小時") == "正式切換定在4月28日，預計停機4小時"
     for keep in ("黃專案", "製造訓練", "專員", "顧客成交"):
         assert f(keep) == keep
+
+
+def test_night9_m10_speaker_take_misspellings():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert f("目前存1500臺，大約可以乘四週，下一批") == "目前存1500臺，大約可以撐四週，下一批"
+    assert f("修正版預季11月7日上線") == "修正版預計11月7日上線" and f("預集停機4小時") == "預計停機4小時"
+    assert f("第一個議題是電源工藝器的韌體更新") == "第一個議題是電源供應器的韌體更新"
+    assert f("目前回報的問題是這提當機,修正版") == "目前回報的問題是韌體當機,修正版"
+    assert f("10月11日上線，測室的部分請李協理安排") == "10月11日上線，測試的部分請李協理安排"
+    out = f("好 最後總結一下，庫存方面 決議是下一批3000臺11月5日到貨，在版事向是劉課長視訂單調貨，"
+            "訂單方面決議是先簽五十臺試單，開辦事領是林主任週三前回覆華新機電")
+    assert out.count("待辦事項是") == 2 and f(out) == out
+    for keep in ("可以撥出時間", "預警系統", "最後總結，品質方面，決議是加強檢查，注意事項是安全"):
+        assert f(keep) == keep
