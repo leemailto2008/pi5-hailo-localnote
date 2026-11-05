@@ -997,3 +997,10 @@ def test_doubled_or_decorated_headings_are_recognised():
     assert out.count("## 摘要") == 1 and out.count("## 待辦") == 1 and out.count("## 決議") == 1
     assert summary_utils.SECTION_MISSING_NOTE not in out and "- Training on Sept 2" in out
     assert summary_utils.to_internal_sections("### 摘要\n- a\n## 待辦事項：\n| x |") == "## 摘要\n- a\n## 待辦\n| x |"
+
+
+def test_extra_recap_section_merges_into_summary():
+    raw = ("## Summary\n- a\n\n## Action Items\n| Item | Owner | Due |\n|---|---|---|\n| x | John | Monday |\n\n"
+           "## Decisions\n- d\n\n## Recap\n- Warehouse: Migration 90%\n")
+    out = summary_utils.ensure_sections(clean_summary_markdown(summary_utils.to_internal_sections(raw)))
+    assert out.count("## 摘要") == 1 and "Recap" not in out and out.split("## 待辦")[0].endswith("- Warehouse: Migration 90%\n\n")

@@ -83,7 +83,8 @@ def split_translation_sections(text: str) -> List[tuple]:
 # 英文紀要在模型輸出後先換成內部標題，處理完再換回英文。
 SECTION_MISSING_NOTE_EN = "(Not generated: the model ran out of output length. Please refer to the transcript.)"
 _EN_HEADINGS = {"摘要": "Summary", "待辦": "Action Items", "決議": "Decisions"}
-_EN_HEADING_RE = re.compile(r"^\s*#{1,4}\s*\**\s*(summary|key points|action items?|to-?dos?|tasks|decisions?)\s*\**\s*:?\s*$", re.I | re.M)
+_EN_HEADING_RE = re.compile(r"^\s*#{1,4}\s*\**\s*(summary|key points|recap|overview|highlights|key takeaways|action items?|to-?dos?|tasks"
+                            r"|decisions?)\s*\**\s*:?\s*$", re.I | re.M)      # 「## Recap」(11-05 a6da144 en_long 多寫一段) 併進摘要
 _EN_TODO_HEADER_RE = re.compile(r"^\|\s*(?:item|task|action(?: item)?)\s*\|\s*(?:owner|assignee|responsible)\s*\|\s*(?:due|deadline|time|date|when)\s*\|\s*$", re.I | re.M)
 
 
@@ -97,7 +98,8 @@ def to_internal_sections(md: str) -> str:
 
     def head(m):
         k = m.group(1).lower()
-        name = "摘要" if k in ("summary", "key points") else ("決議" if k.startswith("decision") else "待辦")
+        name = "摘要" if k in ("summary", "key points", "recap", "overview", "highlights", "key takeaways") \
+            else ("決議" if k.startswith("decision") else "待辦")
         return f"## {name}"
     md = _EN_HEADING_RE.sub(head, md)
     md = _EN_TODO_HEADER_RE.sub("| 事項 | 負責人 | 時間 |", md)
