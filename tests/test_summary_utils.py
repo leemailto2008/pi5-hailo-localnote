@@ -1004,3 +1004,10 @@ def test_extra_recap_section_merges_into_summary():
            "## Decisions\n- d\n\n## Recap\n- Warehouse: Migration 90%\n")
     out = summary_utils.ensure_sections(clean_summary_markdown(summary_utils.to_internal_sections(raw)))
     assert out.count("## 摘要") == 1 and "Recap" not in out and out.split("## 待辦")[0].endswith("- Warehouse: Migration 90%\n\n")
+
+
+def test_vague_row_time_gets_the_spoken_date():
+    md = "## 摘要\n- x\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 面試 | 王經理 | 下週 |\n\n## 決議\n- 無\n"
+    tr = "第七個議題是招募，業務部目前二個職缺，下週會再安排四場面試由王經理主持，希望在12月3日前完成報到"
+    out = summary_utils.merge_body_todos(md, tr)
+    assert "| 面試 | 王經理 | 12月3日前 |" in out and out.count("王經理") == 1

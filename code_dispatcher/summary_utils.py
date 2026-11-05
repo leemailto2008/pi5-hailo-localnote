@@ -1792,6 +1792,9 @@ def fill_missing_topics(md: str, transcript: str, max_bullets: int = 10) -> str:
     body_lines = lines + [f"- {b}" for b in add]
     return md[:sm.start(2)] + "\n".join(body_lines) + sm.group(2)[len(text):] + md[sm.end(2):]
 
+_VAGUE_WHEN = {"下週", "本週", "這週", "明天", "今天", "月底", "年底", "近期", "盡快", "儘快"}
+
+
 def merge_body_todos(md: str, transcript: str, max_rows: int = 10) -> str:
     """單次紀要 (短會議)：待辦表補上逐字稿正文裡明講、表上還沒有的交辦 (_transcript_todos)。
     - 同一負責人已有一列，且期限相同或事項有兩個以上相同的字：視為已列。
@@ -1835,8 +1838,11 @@ def merge_body_todos(md: str, transcript: str, max_rows: int = 10) -> str:
                      # 「| 送預算表 | 劉課長 | - |」與「預算表請劉課長在10月7日前送到財務部」：沒寫期限的列與交辦那句有三個字相連
                      or (c[2] in _TODO_SKIP and run(c[0]) >= 3))]
         if same:
-            # 同一件事、模型那列沒寫期限 (「| 王經理主持面試 | 王經理 | - |」)：補上交辦那句的期限
-            k = next((k for k, c in enumerate(rows) if c in same and c[2] in _TODO_SKIP and k not in filled), None)
+            # 同一件事、模型那列沒寫期限 (「| 王經理主持面試 | 王經理 | - |」)，或只寫了「下週」這類模糊的時間、交辦那句有明確日期
+            # (11-05 3 分鐘 e2e「| 面試 | 王經理 | 下週 |」，講稿是「下週會再安排四場面試…希望在12月3日前完成報到」)：補上交辦那句的期限
+            dated = bool(re.search(r"月\s*\S{1,3}\s*[日號]", when))
+            k = next((k for k, c in enumerate(rows) if c in same and k not in filled
+                      and (c[2] in _TODO_SKIP or (dated and norm(c[2]) in _VAGUE_WHEN))), None)
             if k is not None:
                 filled[k] = rows[k][:2] + [when] + rows[k][3:]
             continue
