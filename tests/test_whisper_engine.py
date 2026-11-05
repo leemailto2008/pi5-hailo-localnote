@@ -540,3 +540,10 @@ def test_night8_t3_speaker_take_misspellings():
 def test_daifen_todo_marker():
     from hailo_whisper.engine import fix_meeting_terms as f
     assert "待辦事項" in f("十月十一日上，待分事向是李協理安排回歸測試")
+
+
+def test_night8_m30_speaker_take_misspellings():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert f("待辦事項是黃專了週三回報宏遠科技的交期") == "待辦事項是黃專員週三回報宏遠科技的交期"
+    assert f("替代料持續驗痀，") == "替代料持續驗證，" and f("並在2月26日前完成全園付訊") == "並在2月26日前完成全員複訓"
+    assert f("請許經理跟對方確院，週二回報") == "請許經理跟對方確認，週二回報"
