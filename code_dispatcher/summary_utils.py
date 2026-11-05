@@ -1708,6 +1708,7 @@ def _zh_small_num(t: str) -> int:
 def _fact_text(text: str) -> str:
     """比對用：去掉空白與標點、臺／台統一、「十二月三日／百分之九十／十五位」改成阿拉伯數字。"""
     t = re.sub(r"[\s，,。、：:；;|\-]", "", text or "").replace("台", "臺").replace("％", "%")
+    t = re.sub(r"(?<=[萬億千])元", "", t)        # 「200萬元」與「200萬」算同一個數量 (11-05 3 分鐘 e2e：預算那段被重複補了一條)
     t = re.sub(r"百分之([一二三四五六七八九]?十[一二三四五六七八九]?|[一二三四五六七八九]|\d+)",
                lambda m: f"{m.group(1) if m.group(1).isdigit() else _zh_small_num(m.group(1))}%", t)
     return _ZH_NUM_RE.sub(lambda m: str(_zh_small_num(m.group(1))), t)

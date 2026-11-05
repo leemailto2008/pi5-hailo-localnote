@@ -1011,3 +1011,12 @@ def test_vague_row_time_gets_the_spoken_date():
     tr = "第七個議題是招募，業務部目前二個職缺，下週會再安排四場面試由王經理主持，希望在12月3日前完成報到"
     out = summary_utils.merge_body_todos(md, tr)
     assert "| 面試 | 王經理 | 12月3日前 |" in out and out.count("王經理") == 1
+
+
+def test_fill_missing_topics_treats_wan_and_wanyuan_as_same():
+    tr = ("第一個議題是供應商，新光材料的電源晶片交期延到10月10日。第二個議題是預，明年品保部的預算是 200萬元，其中硬體佔 30萬元，"
+          "人力的部分要再增加二位工程師。第三個議題是工業閘道器的韌體更新，目前回報的問題是藍牙斷線，修正版預計6月25日上線。")
+    md = ("## 摘要\n- 供應商新光材料交期延至10月10日\n- 品保部明年預算 200萬，硬體 30萬\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n"
+          "|---|---|---|\n| 無 | - | - |\n\n## 決議\n- 無\n")
+    out = summary_utils.fill_missing_topics(md, tr)
+    assert "明年品保部的預算是" not in out and "工業閘道器的韌體更新" in out
