@@ -620,3 +620,14 @@ def test_night9_m10_speaker_take_misspellings():
     assert out.count("待辦事項是") == 2 and f(out) == out
     for keep in ("可以撥出時間", "預警系統", "最後總結，品質方面，決議是加強檢查，注意事項是安全"):
         assert f(keep) == keep
+
+
+def test_wu_deputy_manager_garbles():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert f("待辦事項是吾福李州以前交文宣初稿") == "待辦事項是吳副理週一前交文宣初稿"
+    assert f("不良率從5%降到1%，吳父禮會在7月20日前") == "不良率從5%降到1%，吳副理會在7月20日前"
+    assert f("文宣請無副理責,週四前交初稿") == "文宣請吳副理負責,週四前交初稿"
+    assert f("把名單交給吳富領，供應商方面") == "把名單交給吳副理，供應商方面"
+    assert f("待辦事頂是林主任週三前回覆") == "待辦事項是林主任週三前回覆"
+    for keep in ("員工無福利", "無付利息", "吳副理", "管理責任"):
+        assert f(keep) == keep
