@@ -459,3 +459,17 @@ def test_second_alignment_round_misspellings():
     assert f("明年品保布的預算") == "明年品保部的預算"
     for keep in ("周而復始", "自主吃飯", "工作掉了"):
         assert f(keep) == keep
+
+
+def test_speaker_take_alignment_misspellings():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert f("人力的部分要在增加二位工程師") == "人力的部分要再增加二位工程師"
+    assert f("增加二為工程時預算表請") == "增加二位工程師預算表請"
+    assert f("電源供應器的任體，修正版") == "電源供應器的韌體，修正版" and f("倉處管理系統") == "倉儲管理系統"
+    assert f("已經家中十支警示") == "已經加裝十支警示" and f("比原本晚的七天") == "比原本晚了七天"
+    assert f("下的月要去新加坡") == "下個月要去新加坡" and f("在30臺裝置上市跑三天") == "在30臺裝置上試跑三天"
+    assert f("簡包技巧課程") == "簡報技巧課程" and f("5月25日由一場課程") == "5月25日有一場課程"
+    assert f("行交活動") == "行銷活動" and f("王經理負負同之所有使用者") == "王經理負責通知所有使用者"
+    assert f("週五前回部客戶") == "週五前回覆客戶"
+    for keep in ("剩下的月份", "林主任體諒大家", "我要在家裡"):
+        assert f(keep) == keep
