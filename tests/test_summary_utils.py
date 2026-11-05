@@ -988,3 +988,12 @@ def test_recap_and_body_todos_fill_a_todo_section_the_model_never_wrote():
     todo = out.split("## 待辦")[1].split("## 決議")[0]
     assert "| 事項 | 負責人 | 時間 |" in todo and "劉課長" in todo and "王經理" in todo and note not in todo
     assert summary_utils.merge_body_todos(md, "今天沒有交辦事項。") == md     # 沒有可補的列：保留「未產生」說明
+
+
+def test_doubled_or_decorated_headings_are_recognised():
+    raw = ("## ## Summary\n- Training on Sept 2\n\n## ## Action Items\n| Item | Owner | Due |\n|---|---|---|\n"
+           "| Send names | Mary | Thursday |\n\n### **Decisions**\n- Fix released March 15\n")
+    out = summary_utils.ensure_sections(clean_summary_markdown(summary_utils.to_internal_sections(raw)))
+    assert out.count("## 摘要") == 1 and out.count("## 待辦") == 1 and out.count("## 決議") == 1
+    assert summary_utils.SECTION_MISSING_NOTE not in out and "- Training on Sept 2" in out
+    assert summary_utils.to_internal_sections("### 摘要\n- a\n## 待辦事項：\n| x |") == "## 摘要\n- a\n## 待辦\n| x |"

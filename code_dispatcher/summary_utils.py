@@ -91,6 +91,9 @@ def to_internal_sections(md: str) -> str:
     """英文紀要 → 內部格式：段落標題、待辦表頭、「None」佔位換成中文。內容文字不動。"""
     if not md:
         return md or ""
+    # 「## ## Summary」(11-05：最近 40 份 en_long 有 4 份)：標題認不出來，ensure_sections 又補一段「Summary：未產生」，畫面上兩個 Summary
+    md = re.sub(r"^[ \t]*#{1,4}(?:[ \t]*#{1,4})+[ \t]*", "## ", md, flags=re.M)
+    md = re.sub(r"^[ \t]*#{1,4}[ \t]*\**[ \t]*(摘要|待辦|決議)(?:事項)?[ \t]*\**[ \t]*[:：]?[ \t]*$", r"## \1", md, flags=re.M)
 
     def head(m):
         k = m.group(1).lower()
