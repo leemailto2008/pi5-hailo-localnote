@@ -11,6 +11,14 @@ SVC=pi5-dispatcher-api.service
 api_state() { curl -s -m 5 http://127.0.0.1/api/status | python3 -c 'import sys,json;print(json.load(sys.stdin).get("state",""))' 2>/dev/null || echo down; }
 st=$(api_state)
 case "$st" in recording|processing) echo "app 忙碌中 ($st)，停止部署"; exit 75;; esac
+# 最近 15 分鐘內有人在網頁上錄音 (不是 e2e 開的工作，見 tools/e2e/e2e.py OWN_JOBS)：不要重啟服務打斷他 (11-05)
+if [ -z "${LN_DEPLOY_FORCE:-}" ]; then
+  job=$(curl -s -m 5 http://127.0.0.1/api/status | python3 -c 'import sys,json;print(json.load(sys.stdin).get("job") or "")' 2>/dev/null || true)
+  if [[ "$job" =~ ^m_([0-9]{9,})$ ]] && ! grep -qx "$job" /dev/shm/ln_e2e_jobs.txt 2>/dev/null \
+      && (( $(date +%s) - BASH_REMATCH[1] < 900 )); then
+    echo "有人在用 app (job $job，15 分鐘內)，停止部署；確定要部署請設 LN_DEPLOY_FORCE=1"; exit 75
+  fi
+fi
 
 echo "[deploy] 1/4 語法檢查"
 python3 -m py_compile "$SRC"/code_dispatcher/*.py "$SRC"/hailo_whisper/*.py

@@ -100,12 +100,31 @@ def _resources(rows, t0, rec_end, total, head, tail):
     }
 
 
+OWN_JOBS = "/dev/shm/ln_e2e_jobs.txt"      # e2e 自己開的錄音工作 (job id)；不在這裡的近期工作是有人在網頁上用
+USER_IDLE_S = 15 * 60
+
+
+def someone_else_using(st, now=None):
+    """最近 15 分鐘內有不是 e2e 開的錄音工作 (11-05 使用者在 228 上親自測時，自動測試照跑、錄到現場講話又被手動取消)。"""
+    job = st.get("job") or ""
+    m = re.match(r"m_(\d{9,})$", job)
+    if not m:
+        return False
+    try:
+        own = set(open(OWN_JOBS).read().split())
+    except OSError:
+        own = set()
+    return job not in own and (now or time.time()) - int(m.group(1)) < USER_IDLE_S
+
+
 def run_case(wav, fixture_path, label, bypass_summary=False, out_dir="/tmp"):
     fixture = json.load(open(fixture_path, encoding="utf-8"))
     dur = float(sh(f"ffprobe -v error -show_entries format=duration -of csv=p=0 '{wav}'").strip())
     st = api("/api/status")
     if st.get("state") in ("recording", "processing"):
         raise RuntimeError(f"app busy: {st.get('state')}")
+    if someone_else_using(st) and not os.environ.get("LN_E2E_IGNORE_USER"):
+        raise RuntimeError(f"app in use by someone else (job {st.get('job')}); set LN_E2E_IGNORE_USER=1 to run anyway")
     sh(f"pw-cli destroy {SINK} 2>/dev/null")
     sh("pw-cli create-node adapter '{ factory.name=support.null-audio-sink node.name=%s media.class=Audio/Sink "
        "audio.position=[MONO] audio.rate=16000 object.linger=true }'" % SINK)
@@ -122,6 +141,8 @@ def run_case(wav, fixture_path, label, bypass_summary=False, out_dir="/tmp"):
         with open(FORCE, "w") as f:
             f.write(SINK + ".monitor")
         job = api("/api/record", {"seconds": int(dur + 4), "bypass_summary": bool(bypass_summary)}).get("job")
+        with open(OWN_JOBS, "a") as f:
+            f.write(f"{job}\n")
         time.sleep(1.5)
         play = subprocess.Popen(["ffmpeg", "-nostdin", "-v", "error", "-re", "-i", wav, "-f", "pulse", "-device", SINK, "ln_e2e"])
         last, last_ok, fail_since = None, time.time(), None
