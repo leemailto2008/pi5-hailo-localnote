@@ -447,3 +447,15 @@ def test_more_common_digital_e2e_misspellings():
     assert f("第四立一題是品質") == "第四個議題是品質" and f("第一一題是招募") == "第一個議題是招募"
     for keep in ("第一題是什麼", "可以穿過四週", "爆明天的料"):
         assert f(keep) == keep
+
+
+def test_second_alignment_round_misspellings():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert f("這件事由黃專員負責，周而前回覆客戶") == "這件事由黃專員負責，週二前回覆客戶"
+    assert f("他們對丹架有意見") == "他們對單價有意見" and f("客訴有酒店，主要是外殼") == "客訴有九件，主要是外殼"
+    assert f("提出改喪報告") == "提出改善報告" and f("莊存智慧電表") == "庫存智慧電表"
+    assert f("曣代料已經在驗證") == "替代料已經在驗證" and f("其中硫體佔40萬") == "其中硬體佔40萬"
+    assert f("出拆安排，吳副理") == "出差安排，吳副理" and f("要請劉課長掉，第15個") == "要請劉課長調貨，第15個"
+    assert f("明年品保布的預算") == "明年品保部的預算"
+    for keep in ("周而復始", "自主吃飯", "工作掉了"):
+        assert f(keep) == keep
