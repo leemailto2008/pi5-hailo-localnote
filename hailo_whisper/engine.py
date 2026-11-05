@@ -309,6 +309,12 @@ _MISC2_FIX = [
     (re.compile(r"行\s*[交消宵](?=\s*活動)"), "行銷"),
     (re.compile(r"同\s*之(?=\s*所有)"), "通知"),
     (re.compile(r"(目前|已經|我們|然後)\s*\1"), r"\1"),                 # 「目前目前存1200臺」(5 分鐘 e2e)
+    # 11-05 10／30 分鐘 e2e：「倉儲管理系 系統上線」(30 處)、「待辦事項十個部門週四前把名單」(是各部門，17)、
+    # 「待辦事項是黃專的週三回報」(黃專員，11)、「完成全'附訊／全原埠／全元赴…」(全員複訓，約 60)
+    (re.compile(r"系\s+系統"), "系統"),
+    (re.compile(r"(?<=事[項向像])\s*[，,]?\s*十\s*[個哥]\s*(?=部門)"), "是各"),
+    (re.compile(r"(?<=[黃皇])\s*專\s*[的得德](?=\s*(?:週|在|負|會|跟|主|[，,]))"), "專員"),
+    (re.compile(r"(?<=完成)\s*全\s*['’]?\s*(?:[員元原圓完呈呿處]\s*)?(?:[附復複赴服製夠布執夷呼覊陰夵的處付埠b]\s*){0,2}[訊訓迅附埠赴]"), "全員複訓"),
     (re.compile(r"出\s*拆(?=\s*(?:安排|方面|[東新日美臺台]))"), "出差"),
     (re.compile(r"(?<=[理長師員任])\s*掉(?=\s*(?:[，,。第]|$))"), "調貨"),
     (re.compile(r"(?<=品保|資訊|業務|研發|財務)\s*布(?=\s*(?:的|明年|目前|預算|[，,]))"), "部"),
@@ -503,6 +509,7 @@ def fix_meeting_terms(text: str) -> str:
     text = _COMPLAINT_FIX_RE.sub("客訴", _REPLY_CUSTOMER_FIX_RE.sub(r"\1回覆客戶", text))
     text = _TOPIC_FIX_RE.sub(r"\1議題", text)
     text = _fix_owner_names(_fix_misc_terms(text))   # 也在英文碎片拿掉、英文數字改成中文之後 (「two 個直」「請皇 er 專員」)
+    text = _TODO_FIX_RE.sub("待辦事項", text)        # 「大半事向十個部門」：「十個部門」改成「是各部門」之後才認得出待辦事項
     text = _HOSTED_BY_FIX_RE.sub("由", _fix_hiring_and_order_terms(text))   # 「六場面是有李協理主持」：前面的修正做完才認得
     text = _OWNER_GLUE_FIX_RE.sub(r"\1，", _HOSTED_STUB_FIX_RE.sub(r"\1主持", text))
     text = _PRONOUN_SURNAME_FIX_RE.sub(lambda m: "李" if m.group(0) == "你" else "林", text)
