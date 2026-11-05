@@ -1414,6 +1414,20 @@ def _todo_known(row, table) -> bool:
     return False
 
 
+def _open_todo_table(md: str) -> str:
+    """「## 待辦」段沒有表格、只有「無」或「未產生」說明時 (模型輸出長度用完，11-05 離線 107 份 1–5 分鐘紀要有 5 份)，
+    換成空的待辦表，讓結尾總結與正文的交辦補得進去。呼叫端只在確定會補上列時才用。"""
+    m = _minutes_section(md or "", "待辦")
+    if not m:
+        return md
+    lines = [l.strip() for l in m.group(2).splitlines() if l.strip()]
+    if any(l.startswith("|") for l in lines) or any(l[2:].strip() not in ("無", SECTION_MISSING_NOTE) for l in lines if l.startswith("- ")) \
+            or any(not l.startswith("- ") for l in lines):
+        return md
+    rest = md[m.end():]
+    return md[:m.start(2)] + "| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 無 | - | - |" + ("\n\n" + rest.lstrip("\n") if rest.strip() else "\n")
+
+
 def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_decisions: int = 5) -> str:
     """單次紀要 (短會議) 補上結尾口頭總結：qwen3:1.7b 常只寫前面幾個議題，把最後「X方面，決議是…，待辦事項是…」漏掉。
     與長會議相同，總結用逐字稿原句 (recap_notes)；待辦表補上負責人還沒出現的列，決議段補上還沒寫到的決議。
@@ -1430,10 +1444,12 @@ def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_de
     lines = _note_lines(_recap_notes_en(parts[-1], topics=topics) if topics else recap_notes(parts[-1]))
     if not lines:
         return md
-    m = _minutes_section(md, "待辦")
     rows = extract_todos(lines, max_rows=max_rows)
     timeless = [_recap_timeless_todo_en(l, topics) if topics else _recap_timeless_todo(l) for l in lines]
     rows += [f"| {t[0]} | {t[1]} | {t[2]} |" for t in timeless if t][:max(0, max_rows - len(rows))]
+    if rows:
+        md = _open_todo_table(md)
+    m = _minutes_section(md, "待辦")
     cells = lambda l: [x.strip() for x in l.strip().strip("|").split("|")]
     if m and rows:
         body = m.group(2).rstrip("\n").splitlines()
@@ -1781,6 +1797,8 @@ def merge_body_todos(md: str, transcript: str, max_rows: int = 10) -> str:
     if not md or not transcript:
         return md
     orig, md = md, ground_todo_table(md, transcript)        # 先知道模型寫的負責人哪些對不上逐字稿
+    if _open_todo_table(md) != md and _transcript_todos(transcript, max_rows=max_rows):
+        md = _open_todo_table(md)
     m = _minutes_section(md, "待辦")
     if not m:
         return orig

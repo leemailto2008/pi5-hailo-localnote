@@ -976,3 +976,15 @@ def test_label_only_todo_rows_dropped_and_placeholder_kept():
     md2 = md.replace("| 決議 | - | - |\n", "| 招募方面 | 王經理 | 12月3日前 |\n| 主持面試 | 王經理 | 週五 |\n")
     out2 = summary_utils._drop_empty_item_rows(md2)
     assert "| 招募方面 | 王經理 | 12月3日前 |" in out2 and "| 主持面試 | 王經理 | 週五 |" in out2 and "| 無 |" not in out2
+
+
+def test_recap_and_body_todos_fill_a_todo_section_the_model_never_wrote():
+    note = summary_utils.SECTION_MISSING_NOTE
+    md = f"## 摘要\n- 預算：品保部明年預算200萬元\n\n## 待辦\n- {note}\n\n## 決議\n- {note}\n"
+    tr = ("第一個議題是預算，品保部明年預算是200萬元，預算表請劉課長在10月7日前送到財務部。第二個議題是招募，業務部目前缺二個職缺，"
+          "下週會再安排四場面試，由王經理主持，希望在12月3日前完成報到。好，最後總結一下，預算方面，決議是品保部明年預算兩百萬元，"
+          "待辦事項是劉課長10月7日前送預算表，今天就到這裡，謝謝大家")
+    out = summary_utils.merge_body_todos(summary_utils.merge_recap_into_minutes(md, tr), tr)
+    todo = out.split("## 待辦")[1].split("## 決議")[0]
+    assert "| 事項 | 負責人 | 時間 |" in todo and "劉課長" in todo and "王經理" in todo and note not in todo
+    assert summary_utils.merge_body_todos(md, "今天沒有交辦事項。") == md     # 沒有可補的列：保留「未產生」說明
