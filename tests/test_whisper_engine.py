@@ -495,3 +495,9 @@ def test_more_surname_garbles_before_titles():
     assert f("負責人是蔭組長") == "負責人是蔡組長" and f("人力待二絕工程師") == "人力待二位工程師"
     for keep in ("完成培訓經理", "教訓經理", "公米協理"):
         assert f(keep) == keep
+
+
+def test_reply_customer_dot_and_word_stutter():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert f("這件事由黃專員負責,週一前回.戶，第七個議題") == "這件事由黃專員負責,週一前回覆客戶，第七個議題"
+    assert f("智慧電表目前目前存1200臺") == "智慧電表目前存1200臺"
