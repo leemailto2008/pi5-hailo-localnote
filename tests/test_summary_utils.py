@@ -1020,3 +1020,12 @@ def test_fill_missing_topics_treats_wan_and_wanyuan_as_same():
           "|---|---|---|\n| 無 | - | - |\n\n## 決議\n- 無\n")
     out = summary_utils.fill_missing_topics(md, tr)
     assert "明年品保部的預算是" not in out and "工業閘道器的韌體更新" in out
+
+
+def test_summary_recap_bullet_dropped_when_decisions_and_todos_cover_it():
+    md = ("## 摘要\n- 招募資訊部：8位候選人面試，11月28日前完成報到\n- 今日會議總結：決議11月28日完成報到，待辦黃專員2月15日前提出改善報告\n\n"
+          "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 提出改善報告 | 黃專員 | 2月15日 |\n\n## 決議\n- 11月28日完成報到\n")
+    out = summary_utils.drop_recap_echo_bullets(md)
+    assert "今日會議總結" not in out and "- 招募資訊部" in out
+    other = md.replace("待辦黃專員2月15日前提出改善報告", "預算明年增加二位工程師")
+    assert summary_utils.drop_recap_echo_bullets(other) == other          # 有決議／待辦沒寫到的內容：保留

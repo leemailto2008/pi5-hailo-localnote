@@ -1562,6 +1562,37 @@ def cut_glued_topic_numbers(md: str) -> str:
     return md
 
 
+_RECAP_BULLET_RE = re.compile(r"^(?:今日|本次|今天)?(?:會議)?(?:總結|結論|小結)\s*[：:]\s*")
+
+
+def drop_recap_echo_bullets(md: str) -> str:
+    """摘要裡模型自己寫的「- 今日總結：決議11月28日完成報到，決議產線加開一站檢查，待辦黃專員2月15日前提出改善報告」：
+    每一個子句都已經寫在決議或待辦裡時整條拿掉 (摘要至少留一條)。11-05 260 份紀要有 23 條，多半是 1 分鐘會議。"""
+    sm = _minutes_section(md or "", "摘要")
+    if not sm:
+        return md
+    rest = "".join((_minutes_section(md, t) or sm).group(2) for t in ("待辦", "決議") if _minutes_section(md, t))
+    rest_t = _fact_text(rest)
+    if not rest_t:
+        return md
+    body = sm.group(2).rstrip()
+    lines = body.splitlines()
+    items = [l for l in lines if l.strip().startswith("- ")]
+    drop = []
+    for l in items:
+        text = l.strip()[2:]
+        m = _RECAP_BULLET_RE.match(text)
+        if not m:
+            continue
+        clauses = [re.sub(r"^(?:決議|待辦(?:事項)?)\s*(?:是|為|：|:)?", "", c.strip()) for c in _CLAUSE_SPLIT_RE.split(text[m.end():])]
+        clauses = [_fact_text(c) for c in clauses if len(c.strip()) >= 2]
+        if clauses and all(_longest_common_run(c, rest_t) >= min(4, len(c)) for c in clauses):
+            drop.append(l)
+    if not drop or len(drop) == len(items):
+        return md
+    kept = [l for l in lines if l not in drop]
+    return md[:sm.start(2)] + "\n".join(kept) + sm.group(2)[len(body):] + md[sm.end(2):]
+
 _PLACEHOLDER_ITEM_RE = re.compile(r"^(?:[-*•]\s*)*\**\s*(?:無|none|n/?a|nothing|（無）|\(none\))\s*[.。]?\s*\**$", re.I)
 
 
