@@ -641,3 +641,11 @@ def test_signup_and_course_quota_garbles():
     assert f("第一個議題是造訓列9月2日有一場") == "第一個議題是教育訓練9月2日有一場"
     for keep in ("課程名額30人", "已經到了20人", "公民30人"):
         assert f(keep) == keep
+
+
+def test_psu_dash_and_expected_date_garbles():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert f("下一批3000臺預警1月3日到貨") == "下一批3000臺預計1月3日到貨"
+    assert f("第二個議題是庫存，電源-in器目前存1500臺") == "第二個議題是庫存，電源供應器目前存1500臺"
+    assert f("修正版預訃 10月11日上線") == "修正版預計 10月11日上線"
+    assert f("預警系統上線") == "預警系統上線"
