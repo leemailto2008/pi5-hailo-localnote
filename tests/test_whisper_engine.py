@@ -512,3 +512,10 @@ def test_long_meeting_e2e_misspellings():
     assert f("並在8月15日前完成全'附訊") == "並在8月15日前完成全員複訓" and f("完成全原埠，負責人是許經理") == "完成全員複訓，負責人是許經理"
     for keep in ("完成全部工作", "十個部門都參加"):
         assert f(keep) == keep
+
+
+def test_clause_end_truncations():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert f("希望在11月19日完成報，第七個議題") == "希望在11月19日完成報到，第七個議題"
+    assert f("12月3日前完成報道") == "12月3日前完成報到" and f("完成報告") == "完成報告"
+    assert f("待辦事項是劉課長是訂單調，讀單方面") == "待辦事項是劉課長是訂單調貨，讀單方面"
