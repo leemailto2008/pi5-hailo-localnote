@@ -500,6 +500,14 @@ def _fill_en_due_from_transcript(md: str, transcript: str) -> str:
     return "\n".join(out)
 
 
+_OWNER_LIKE_RE = re.compile(r"經理|副理|協理|主任|專員|工程師|處長|課長|組長|主管|老師|董事|總監|執行長|助理|同仁|大家|全體|各部門|人資|財務"
+                            r"|[部組課處室線司廠]$|團隊|中心|[A-Za-z]")
+
+
+_TITLE_STUB = {"專": "專員", "協": "協理", "經": "經理", "課": "課長", "組": "組長", "主": "主任", "副": "副理", "工": "工程師"}
+_STUB_SURNAME = {"理": "李", "立": "李", "留": "劉", "皇": "黃", "零": "林", "陽": "楊", "無": "吳", "五": "吳"}
+
+
 def ground_todo_table(md: str, transcript: str) -> str:
     """待辦表每列的負責人、時間欄若在逐字稿中找不到，改成「-」 (多人時只留找得到的人)；事項欄與其他段落不動。
     空的負責人／時間欄先從事項欄補 (_fill_todo_cells)，補上的也一樣要在逐字稿裡找得到。"""
@@ -516,6 +524,13 @@ def ground_todo_table(md: str, transcript: str) -> str:
         if section == "待辦" and s.startswith("|") and not _is_sep(s):
             cols = [c.strip() for c in s.strip("|").split("|")]
             if len(cols) >= 3 and cols[0] != "事項":
+                # 中文負責人要像個人或單位 (姓＋職稱、X部／X組…)；「品明」(品質方面聽壞，11-05 1 分鐘 e2e)、「周會報告」不是人。
+                # 職稱只剩一個字的 (「黃專」「理協」) 先補成逐字稿裡有的完整寫法 (黃專員、李協理)
+                if _CJK_RE.search(cols[1]) and cols[1] not in _TODO_SKIP and not _OWNER_LIKE_RE.search(cols[1]):
+                    mt = re.fullmatch(r"([\u4e00-\u9fff])\s*([專協經課組主副工])", cols[1])
+                    full = [f"{x}{_TITLE_STUB[mt.group(2)]}" for x in dict.fromkeys((mt.group(1), _STUB_SURNAME.get(mt.group(1), mt.group(1))))] \
+                        if mt else []
+                    cols[1] = next((f for f in full if f in transcript), "-")
                 for i in (1, 2):
                     if cols[i] in _TODO_SKIP or _ground_norm(cols[i]) in tr:
                         continue

@@ -1029,3 +1029,12 @@ def test_summary_recap_bullet_dropped_when_decisions_and_todos_cover_it():
     assert "今日會議總結" not in out and "- 招募資訊部" in out
     other = md.replace("待辦黃專員2月15日前提出改善報告", "預算明年增加二位工程師")
     assert summary_utils.drop_recap_echo_bullets(other) == other          # 有決議／待辦沒寫到的內容：保留
+
+
+def test_owner_cell_must_look_like_a_person_or_unit():
+    md = ("## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 加開檢查 | 品明 | 2月15日 |\n| 品質改善報告 | 黃專 | 2月15日 |\n"
+          "| 周會報告 | 理協 | - |\n| 名單 | 各部門 | 週四前 |\n")
+    tr = "品明決議產線加開一站檢查，黃專員在2月15日前提出改善報告，李協理周會報告，請各部門週四前交名單"
+    out = summary_utils.ground_todo_table(md, tr)
+    assert "| 品質改善報告 | 黃專員 | 2月15日 |" in out and "| 周會報告 | 李協理 | - |" in out
+    assert "品明 |" not in out.replace("| 加開檢查 | - |", "") and "| 名單 | 各部門 | 週四前 |" in out
