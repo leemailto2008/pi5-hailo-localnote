@@ -397,7 +397,7 @@ def test_short_minutes_get_the_closing_recap_todos_and_decisions():
 def test_todo_clause_without_shi_after_shixiang():
     # STT 漏了「是」：「…開課待辦事項十個部門週四前把名單交給吳副理」
     assert summary_utils._todo_parts("決議是簡報技巧課程9月2日開課待辦事項十個部門週四前把名單交給吳副理") == \
-        ("十個部門前把名單交給", "吳副理", "週四")
+        ("十個部門把名單交給", "吳副理", "週四")      # 期限後的「前」一起拿掉 (11-05)
     assert summary_utils._todo_parts("待辦很多，大家辛苦了") is None
 
 

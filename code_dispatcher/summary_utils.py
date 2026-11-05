@@ -1134,7 +1134,7 @@ def _todo_parts(line: str):
         if mo:
             mt = _TIME_RE.search(seg)
             if mt:
-                action = seg.replace(mo.group(0), "", 1).replace(mt.group(0), "", 1)
+                action = _strip_time(seg.replace(mo.group(0), "", 1), mt.group(0))
             else:
                 mt = _TIME_RE.search(line)
                 action = seg.replace(mo.group(0), "", 1)
@@ -1150,18 +1150,23 @@ def _todo_parts(line: str):
     first = _CLAUSE_SPLIT_RE.split(line)[0].strip()
     if mo.end() <= len(first):
         # 負責人就在第一個子句裡 (STT 把「待辦事項是」聽成別的字時，整段總結常沒有標點)：事項取負責人後面的動作
-        rest = first[mo.end():].replace(mt.group(0), "", 1)
+        rest = _strip_time(first[mo.end():], mt.group(0))
         rest = _ACTION_LEAD_RE.sub("", rest.strip()).strip()
         if len(rest) >= 4:
             return _clean_action(rest)[:20], mo.group(1), mt.group(1)
     if re.fullmatch(r".{0,6}方面", first):
         # 「招募方面，決議是12月3日前完成報到，拜半事像是王經理主持面試」：事項取負責人那一句的動作，不取議題名
         owner_clause = next((c for c in _CLAUSE_SPLIT_RE.split(line) if mo.group(0) in c), "")
-        act = owner_clause[owner_clause.find(mo.group(0)) + len(mo.group(0)):].replace(mt.group(0), "", 1)
+        act = _strip_time(owner_clause[owner_clause.find(mo.group(0)) + len(mo.group(0)):], mt.group(0))
         act = _ACTION_LEAD_RE.sub("", act.strip()).strip()
         if len(act) >= 2:
             return _clean_action(act)[:20], mo.group(1), mt.group(1)
     return (first[:20] or line[:20]), mo.group(1), mt.group(1)
+
+
+def _strip_time(text: str, when: str) -> str:
+    """事項拿掉期限時，連後面的「前／之前／以前」一起拿掉 (「各部門週四前把名單交給」→「各部門把名單交給」，11-05 30 分鐘 e2e)。"""
+    return re.sub(re.escape(when) + r"\s*(?:之前|以前|前)?", "", text, count=1)
 
 
 def extract_todos(lines: List[str], max_rows: int = 6) -> List[str]:

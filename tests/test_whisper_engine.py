@@ -519,3 +519,9 @@ def test_clause_end_truncations():
     assert f("希望在11月19日完成報，第七個議題") == "希望在11月19日完成報到，第七個議題"
     assert f("12月3日前完成報道") == "12月3日前完成報到" and f("完成報告") == "完成報告"
     assert f("待辦事項是劉課長是訂單調，讀單方面") == "待辦事項是劉課長是訂單調貨，讀單方面"
+
+
+def test_presentation_skills_course_garbles():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert f("決議是簡包季巧克成9.2 開課") == "決議是簡報技巧課程9.2 開課"
+    assert f("簡報技巧誠9月2日開課") == "簡報技巧課程9月2日開課" and f("簡報技巧課程") == "簡報技巧課程"
