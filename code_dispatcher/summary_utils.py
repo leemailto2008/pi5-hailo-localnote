@@ -593,9 +593,16 @@ def _drop_same_task_rows(md: str) -> str:
     cells = [[c.strip() for c in r.strip("|").split("|")] for r in rows]
     data = [(r, c) for r, c in zip(rows, cells) if len(c) >= 3 and c[0] not in _TODO_HEADER_ECHO and c[0] not in _EMPTY_CELL
             and c[1] not in _TODO_SKIP and _CJK_RE.search(c[0])]      # 英文事項逐字比對沒有意義 (「Test firmware」「Test 100 units」)
+    # 英文：同一人一列沒有期限、另一列有期限，且事項有相同字根 (前 4 個字母) 時拿掉沒期限那列
+    # (c8cf7b6 en_short：「| owns the testing | Kevin | - |」與「| Run firmware tests on 100 units for 3 days | Kevin | March 15 |」)
+    stems = lambda x: {w[:4].lower() for w in re.findall(r"[A-Za-z]{4,}", x)} - {"owns", "will", "with", "from", "that", "this", "send"}
+    latin = [(r, c) for r, c in zip(rows, cells) if len(c) >= 3 and c[1] not in _TODO_SKIP and not _CJK_RE.search(c[0])
+             and _LATIN_RE.search(c[0]) and c[0] not in _TODO_HEADER_ECHO]
+    drop_en = {r for r, c in latin if c[2] in _TODO_SKIP
+               and any(c2[1] == c[1] and c2[2] not in _TODO_SKIP and stems(c[0]) & stems(c2[0]) for r2, c2 in latin if r2 != r)}
     core = lambda c: "".join(ch for ch in re.sub(r"[\s，,。、：:|\-]", "", c[0].replace(c[1], "")) if ch not in _TODO_COMMON_CHARS)
     when = lambda c: re.sub(r"[\s前]", "", c[2])
-    drop = set()
+    drop = set(drop_en)
     for i, (ri, ci) in enumerate(data):
         for j, (rj, cj) in enumerate(data):
             if i == j or ri in drop or rj in drop or ci[1] != cj[1] or _longest_common_run(core(ci), core(cj)) < 2:
@@ -1607,6 +1614,30 @@ def drop_recap_echo_bullets(md: str) -> str:
         return md
     kept = [l for l in lines if l not in drop]
     return md[:sm.start(2)] + "\n".join(kept) + sm.group(2)[len(body):] + md[sm.end(2):]
+
+
+def drop_duplicate_bullets(md: str) -> str:
+    """摘要與決議寫了同一條 (去掉標點空白後相同) 時拿掉後面那條；該段因此變空時保留。
+    (c8cf7b6 en_short：「- Safety refresher by August 15, David responsible」摘要、決議各一條，e2e 重複條目 1)"""
+    seen, out_md = set(), md
+    for sec in ("摘要", "決議"):
+        m = _minutes_section(out_md or "", sec)
+        if not m:
+            continue
+        lines = m.group(2).split("\n")
+        items = [l for l in lines if l.strip().startswith("- ")]
+        key = lambda l: re.sub(r"[\s，,。.、：:；;]", "", l.strip()[2:]).lower()
+        dup = [l for i, l in enumerate(items) if key(l) in seen or key(l) in {key(x) for x in items[:i]}]
+        seen |= {key(l) for l in items}
+        if dup and len(dup) < len(items):
+            kept, removed = [], set()
+            for l in lines:
+                if l in dup and l not in removed and l.strip()[2:].strip() not in ("無", SECTION_MISSING_NOTE):
+                    removed.add(l)
+                    continue
+                kept.append(l)
+            out_md = out_md[:m.start(2)] + "\n".join(kept) + out_md[m.end(2):]
+    return out_md
 
 _PLACEHOLDER_ITEM_RE = re.compile(r"^(?:[-*•]\s*)*\**\s*(?:無|none|n/?a|nothing|（無）|\(none\))\s*[.。]?\s*\**$", re.I)
 

@@ -817,7 +817,8 @@ def test_en_owner_typo_and_weekday_abbreviation():
     md = ("## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| Firmware testing | Kedin | March 15 |\n"
           "| Trial order of 30 units | John | Wed |\n| Confirm testing | Kevn | - |\n| Budget sheet | Susan | Fri |")
     out = ground_todo_table(md, "Kevin owns the testing. John will reply to Lotus Tech by Wednesday. We release on March 15. Susan sends it.")
-    assert "| Firmware testing | Kevin | March 15 |" in out and "| Confirm testing | Kevin | - |" in out
+    assert "| Firmware testing | Kevin | March 15 |" in out
+    assert "Confirm testing" not in out          # 同一人、同一件事 (test) 沒期限那列併掉 (11-05)
     assert "| Trial order of 30 units | John | Wednesday |" in out
     assert "| Budget sheet | Susan | - |" in out          # 逐字稿沒有 Friday：不寫全名，對照後清掉
 
@@ -1038,3 +1039,19 @@ def test_owner_cell_must_look_like_a_person_or_unit():
     out = summary_utils.ground_todo_table(md, tr)
     assert "| 品質改善報告 | 黃專員 | 2月15日 |" in out and "| 周會報告 | 李協理 | - |" in out
     assert "品明 |" not in out.replace("| 加開檢查 | - |", "") and "| 名單 | 各部門 | 週四前 |" in out
+
+
+def test_en_dateless_duplicate_task_row_dropped():
+    md = ("## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| Run firmware tests on 100 units | Kevin | March 15 |\n"
+          "| Reply to Lotus Tech | John | Wednesday |\n| owns the testing | Kevin | - |\n| Send budget sheet | Susan | - |\n")
+    out = summary_utils._drop_same_task_rows(md)
+    assert "owns the testing" not in out and "| Send budget sheet | Susan | - |" in out and "| Reply to Lotus Tech | John |" in out
+
+
+def test_duplicate_bullet_across_summary_and_decisions():
+    md = ("## 摘要\n- Training on Sept 2\n- Safety refresher by August 15, David responsible\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n"
+          "|---|---|---|\n| x | John | Monday |\n\n## 決議\n- Fix released March 15\n- Safety refresher by August 15, David responsible\n")
+    out = summary_utils.drop_duplicate_bullets(md)
+    assert out.count("Safety refresher") == 1 and out.endswith("## 決議\n- Fix released March 15\n")
+    only = md.replace("- Fix released March 15\n", "")
+    assert summary_utils.drop_duplicate_bullets(only).count("Safety refresher") == 2     # 決議只剩這條：保留
