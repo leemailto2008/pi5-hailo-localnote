@@ -631,3 +631,13 @@ def test_wu_deputy_manager_garbles():
     assert f("待辦事頂是林主任週三前回覆") == "待辦事項是林主任週三前回覆"
     for keep in ("員工無福利", "無付利息", "吳副理", "管理責任"):
         assert f(keep) == keep
+
+
+def test_signup_and_course_quota_garbles():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert f("目前已經報民22人，還剩8個名額") == "目前已經報名22人，還剩8個名額"
+    assert f("有一場資安課程，民而40人，目前") == "有一場資安課程，名額40人，目前"
+    assert f("有一場專案管理課程 名為20人，目前") == "有一場專案管理課程名額20人，目前"
+    assert f("第一個議題是造訓列9月2日有一場") == "第一個議題是教育訓練9月2日有一場"
+    for keep in ("課程名額30人", "已經到了20人", "公民30人"):
+        assert f(keep) == keep
