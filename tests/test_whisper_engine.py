@@ -535,3 +535,8 @@ def test_night8_t3_speaker_take_misspellings():
     assert f("完成全員複訓負責人是張工城，第四") == "完成全員複訓負責人是張工程師，第四"
     for keep in ("請行政部門", "協力廠商"):
         assert f(keep) == keep
+
+
+def test_daifen_todo_marker():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert "待辦事項" in f("十月十一日上，待分事向是李協理安排回歸測試")

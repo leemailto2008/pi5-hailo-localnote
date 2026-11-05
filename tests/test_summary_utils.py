@@ -1059,3 +1059,7 @@ def test_duplicate_bullet_across_summary_and_decisions():
 
 def test_topic_segment_after_marker_with_comma():
     assert summary_utils._topic_segments("第六個議題,是工業閘道器的韌體更新，目前回報的問題是藍牙斷線")[0].startswith("工業閘道器")
+
+
+def test_recap_filler_today_zuodao():
+    assert summary_utils.recap_notes("好，最後總結一下，訂單方面，決議是先簽五十臺試單，今天做到這裡，謝謝大家") == "- 訂單方面，決議是先簽五十臺試單"
