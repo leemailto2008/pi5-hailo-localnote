@@ -649,3 +649,12 @@ def test_psu_dash_and_expected_date_garbles():
     assert f("第二個議題是庫存，電源-in器目前存1500臺") == "第二個議題是庫存，電源供應器目前存1500臺"
     assert f("修正版預訃 10月11日上線") == "修正版預計 10月11日上線"
     assert f("預警系統上線") == "預警系統上線"
+
+
+def test_night9_m30c_recap_garbles():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    out = f("好,最後總結一下順利方面,決議是在揀包技巧 誠於9月2日開課，待辦事項是各部門週四前把名單交給吳副理 依印商方面,決議是替代料持續驗證")
+    assert "訓練方面,決議是在簡報技巧課程於9月2日開課" in out and "供應商方面,決議是" in out
+    assert f("文宣請吳理負責,週一前交初稿") == "文宣請吳副理負責,週一前交初稿"
+    for keep in ("一切順利", "專案進行得很順利，方面"):
+        assert f(keep) == keep
