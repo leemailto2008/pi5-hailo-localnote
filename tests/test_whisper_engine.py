@@ -573,3 +573,36 @@ def test_recap_decision_garbles_after_summary():
     assert f("人力方面，誰是窗口要再確認，最後總結") == "人力方面，誰是窗口要再確認，最後總結"
     assert f("最後總結，品質方面，還是要加強檢查") == "最後總結，品質方面，還是要加強檢查"
     assert f("最後總結，預算方面，就是200萬元") == "最後總結，預算方面，就是200萬元"
+
+
+def test_repeated_system_char_collapses_idempotently():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    out = f("第31個議題是新-1-1rp系 系 系-上限，資料轉換已經完成 80%")
+    assert "系統上線" in out and "系 系" not in out and f(out) == out
+
+
+def test_bluetooth_disconnect_training_and_presentation_garbles():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert f("目前回報的問題是蟬牙斷限修正版預計") == "目前回報的問題是藍牙斷線修正版預計"
+    assert f("目前回報的問題是來壓斷限，修正版") == "目前回報的問題是藍牙斷線，修正版"
+    assert f("第21個議題是教育訓，三月8日") == "第21個議題是教育訓練，三月8日"
+    assert f("第九個議題是教育訓絕7月26日") == "第九個議題是教育訓練7月26日"
+    assert f("9月2日有一場剪包技巧誠,名額30人") == "9月2日有一場簡報技巧課程,名額30人"
+    assert f("並在8月15日前完成全'陛訊負責人") == "並在8月15日前完成全員複訓負責人"
+    for keep in ("教育訓練", "剪報資料", "藍天", "簡報技巧成熟"):
+        assert f(keep) == keep
+
+
+def test_night8_m30b_speaker_take_misspellings():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert f("這件事由黃專院負責 週五前回覆客戶") == "這件事由黃專員負責 週五前回覆客戶"
+    assert f("待辦事項是黃專在2月15日前提出改善報告") == "待辦事項是黃專員在2月15日前提出改善報告"
+    assert f("不良率從5%降到1%，黃專呿會在6月6日前") == "不良率從5%降到1%，黃專員會在6月6日前"
+    assert f("測試的部分請黃專'安排至少要做五輪") == "測試的部分請黃專員安排至少要做五輪"
+    assert f("1月4日有一場三客城,名額40人") == "1月4日有一場資安課程,名額40人"
+    assert f("有一場品質工程客乘,名額40人") == "有一場品質工程課程,名額40人"
+    assert f("第25個議題是造訓練7月22日有一場") == "第25個議題是教育訓練7月22日有一場"
+    assert f("替代料持續驗鎮，待辦事項") == "替代料持續驗證，待辦事項"
+    assert f("正式切換定在4月28日，預記停機4小時") == "正式切換定在4月28日，預計停機4小時"
+    for keep in ("黃專案", "製造訓練", "專員", "顧客成交"):
+        assert f(keep) == keep

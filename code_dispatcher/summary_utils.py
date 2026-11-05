@@ -546,17 +546,37 @@ def ground_todo_table(md: str, transcript: str) -> str:
 _LABEL_ONLY_ITEM_RE = re.compile(r"^(?:決議|待辦(?:事項)?|摘要|總結|[\u4e00-\u9fff]{0,6}方面)$")
 
 
+def _said_elsewhere(when: str, md: str, row: str) -> bool:
+    """期限 (去掉「前／之前」) 在這一列以外的紀要裡也寫到了 (例如決議「下一批3000臺11月5日到貨」)。"""
+    w = re.sub(r"(?:之前|以前|前)$", "", re.sub(r"\s", "", when))
+    return bool(w) and w in re.sub(r"\s", "", md.replace(row, "", 1))
+
+
 def _drop_empty_item_rows(md: str) -> str:
     """事項欄是空的、或只有「X方面／決議」這類標籤沒有期限的列拿掉，多出來的空白格去掉
-    (11-04 夜間 3 分鐘實錄：「|  | 王經理 | - |  |」)。整張表都拿光時留一列「無」。"""
+    (11-04 夜間 3 分鐘實錄：「|  | 王經理 | - |  |」)。整張表都拿光時留一列「無」。
+    標籤列有期限、但同一負責人另有一列真正的事項、而且這個期限紀要別處也寫了時也拿掉：那個期限是總結裡決議的日期
+    (11-05 night8_m10b：「| 康存方面 | 劉課長 | 11月5日 |」，劉課長另有「提出改善報告」、決議寫了「11月5日到貨」；69 份紀要 5 列)。
+    期限只出現在這一列時保留，不讓日期從紀要裡消失。"""
     out, section, dropped, kept, last_row = [], None, 0, 0, None
+    real_owners, sec = set(), None
+    for line in md.splitlines():
+        s = line.strip()
+        if s.startswith("## "):
+            sec = s[3:].strip()
+        if sec == "待辦" and s.startswith("|") and not _is_sep(s):
+            c = [x.strip() for x in s.strip("|").split("|")]
+            if (len(c) >= 3 and c[0] and c[0] not in _TODO_HEADER_ECHO and not _LABEL_ONLY_ITEM_RE.match(c[0])
+                    and c[1] not in _TODO_SKIP):
+                real_owners.add(c[1])
     for line in md.splitlines():
         s = line.strip()
         if s.startswith("## "):
             section = s[3:].strip()
         if section == "待辦" and s.startswith("|") and not _is_sep(s):
             cells = [c.strip() for c in s.strip("|").split("|")]
-            if not cells[0] or (len(cells) >= 3 and _LABEL_ONLY_ITEM_RE.match(cells[0]) and cells[2] in _TODO_SKIP):
+            if not cells[0] or (len(cells) >= 3 and _LABEL_ONLY_ITEM_RE.match(cells[0])
+                                and (cells[2] in _TODO_SKIP or (cells[1] in real_owners and _said_elsewhere(cells[2], md, s)))):
                 dropped += 1
                 continue
             kept += cells[0] not in _TODO_HEADER_ECHO

@@ -1063,3 +1063,12 @@ def test_topic_segment_after_marker_with_comma():
 
 def test_recap_filler_today_zuodao():
     assert summary_utils.recap_notes("好，最後總結一下，訂單方面，決議是先簽五十臺試單，今天做到這裡，謝謝大家") == "- 訂單方面，決議是先簽五十臺試單"
+
+
+def test_dated_label_row_dropped_when_owner_has_real_task():
+    from code_dispatcher import summary_utils as su
+    md = ("## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 提出改善報告 | 劉課長 | 9月15日前 |\n"
+          "| 康存方面 | 劉課長 | 11月5日 |\n| 招募方面 | 王經理 | 12月3日 |\n\n## 決議\n- 下一批3000臺11月5日到貨\n")
+    out = su._drop_empty_item_rows(md)
+    assert "康存方面" not in out and "提出改善報告" in out
+    assert "| 招募方面 | 王經理 | 12月3日 |" in out      # 王經理沒有別的事項：保留 (至少留下負責人與期限)
