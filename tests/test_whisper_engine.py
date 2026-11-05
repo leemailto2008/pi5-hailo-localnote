@@ -486,3 +486,12 @@ def test_wu_surname_heard_as_five_or_noon():
     from hailo_whisper.engine import fix_meeting_terms as f
     assert f("出差安排，五副理下個月要去東京") == "出差安排，吳副理下個月要去東京" and f("安排午副理負責") == "安排吳副理負責"
     assert f("下午副理會來") == "下午副理會來" and f("第十五副理") == "第十五副理"
+
+
+def test_more_surname_garbles_before_titles():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert f("請訓經理主持") == "請許經理主持" and f("預算表請米協理在") == "預算表請李協理在"
+    assert f("由雅工程師負責") == "由楊工程師負責" and f("要請刀課長調貨") == "要請劉課長調貨"
+    assert f("負責人是蔭組長") == "負責人是蔡組長" and f("人力待二絕工程師") == "人力待二位工程師"
+    for keep in ("完成培訓經理", "教訓經理", "公米協理"):
+        assert f(keep) == keep
