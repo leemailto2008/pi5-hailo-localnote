@@ -1055,3 +1055,7 @@ def test_duplicate_bullet_across_summary_and_decisions():
     assert out.count("Safety refresher") == 1 and out.endswith("## 決議\n- Fix released March 15\n")
     only = md.replace("- Fix released March 15\n", "")
     assert summary_utils.drop_duplicate_bullets(only).count("Safety refresher") == 2     # 決議只剩這條：保留
+
+
+def test_topic_segment_after_marker_with_comma():
+    assert summary_utils._topic_segments("第六個議題,是工業閘道器的韌體更新，目前回報的問題是藍牙斷線")[0].startswith("工業閘道器")

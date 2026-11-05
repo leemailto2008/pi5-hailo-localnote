@@ -525,3 +525,13 @@ def test_presentation_skills_course_garbles():
     from hailo_whisper.engine import fix_meeting_terms as f
     assert f("決議是簡包季巧克成9.2 開課") == "決議是簡報技巧課程9.2 開課"
     assert f("簡報技巧誠9月2日開課") == "簡報技巧課程9月2日開課" and f("簡報技巧課程") == "簡報技巧課程"
+
+
+def test_night8_t3_speaker_take_misspellings():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    assert f("再全面更，第六個一提,是工業閘道器") == "再全面更，第六個議題,是工業閘道器"
+    assert f("良率是90%請你協力跟對方確，週五回報") == "良率是90%請李協理跟對方確，週五回報"
+    assert f("預算表請刑劉課長在10月7日前送到財務部") == "預算表請劉課長在10月7日前送到財務部"
+    assert f("完成全員複訓負責人是張工城，第四") == "完成全員複訓負責人是張工程師，第四"
+    for keep in ("請行政部門", "協力廠商"):
+        assert f(keep) == keep
