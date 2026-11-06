@@ -95,6 +95,11 @@ def to_internal_sections(md: str) -> str:
     # 「## ## Summary」(11-05：最近 40 份 en_long 有 4 份)：標題認不出來，ensure_sections 又補一段「Summary：未產生」，畫面上兩個 Summary
     md = re.sub(r"^[ \t]*#{1,4}(?:[ \t]*#{1,4})+[ \t]*", "## ", md, flags=re.M)
     md = re.sub(r"^[ \t]*#{1,4}[ \t]*\**[ \t]*(摘要|待辦|決議)(?:事項)?[ \t]*\**[ \t]*[:：]?[ \t]*$", r"## \1", md, flags=re.M)
+    # 11-06 3 分鐘 e2e：模型把標題寫成「## 要」，摘要段被當成沒寫、補上「未產生」佔位，真正的條目留在認不得的段落裡。
+    # 沒有「## 摘要」時，把只剩一個字或常見同義的標題 (要、摘、重點、要點、會議摘要、會議重點) 當成摘要。
+    if not re.search(r"^## 摘要[ \t]*$", md, flags=re.M):
+        md = re.sub(r"^[ \t]*#{1,4}[ \t]*\**[ \t]*(?:要|摘|重點|要點|會議摘要|會議重點|摘要重點)[ \t]*\**[ \t]*[:：]?[ \t]*$",
+                    "## 摘要", md, count=1, flags=re.M)
 
     def head(m):
         k = m.group(1).lower()

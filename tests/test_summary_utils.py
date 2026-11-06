@@ -1072,3 +1072,12 @@ def test_dated_label_row_dropped_when_owner_has_real_task():
     out = su._drop_empty_item_rows(md)
     assert "康存方面" not in out and "提出改善報告" in out
     assert "| 招募方面 | 王經理 | 12月3日 |" in out      # 王經理沒有別的事項：保留 (至少留下負責人與期限)
+
+
+def test_truncated_summary_heading_is_recognised():
+    from code_dispatcher import summary_utils as su
+    md = "## 要\n- 供應商交期延至10月10日\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 送預算表 | 劉課長 | 10月7日前 |\n\n## 決議\n- 無\n"
+    out = su.ensure_sections(su.clean_summary_markdown(su.to_internal_sections(md)))
+    assert out.startswith("## 摘要\n- 供應商交期延至10月10日") and su.SECTION_MISSING_NOTE not in out
+    # 已有「## 摘要」時其他標題不動
+    assert "## 重點" in su.to_internal_sections("## 摘要\n- a\n## 重點\n- b\n")
