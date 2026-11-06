@@ -658,3 +658,13 @@ def test_night9_m30c_recap_garbles():
     assert f("文宣請吳理負責,週一前交初稿") == "文宣請吳副理負責,週一前交初稿"
     for keep in ("一切順利", "專案進行得很順利，方面"):
         assert f(keep) == keep
+
+
+def test_recap_decision_is_garbles():
+    from hailo_whisper.engine import fix_meeting_terms as f
+    out = f("好,最後總結，依依商方面 決意施替代料持續驗證像是李協理週五回報星光材料的交期，預算方面，決議是品保部明年預算200萬元")
+    assert "供應商方面 決議是替代料持續驗證，待辦事項是李協理週五回報" in out and f(out) == out
+    assert "決議是韌體修正版" in f("最後總結一下，韌體方面,決一時韌體修正版10月11日上線")
+    # 總結之前、「決議事項」不動
+    assert f("品質方面，決意施行新流程") == "品質方面，決意施行新流程"
+    assert "決議事項" in f("最後總結，會議方面，決議事項如下")
