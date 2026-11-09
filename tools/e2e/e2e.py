@@ -210,6 +210,7 @@ def run_case(wav, fixture_path, label, bypass_summary=False, out_dir="/tmp"):
         "transcript_eval": scoring.transcript_checks(transcript, fixture),
         "summary_eval": None if bypass_summary else scoring.summary_checks(summary, fixture, transcript),
         "transcript": transcript, "summary": summary,
+        "summary_raw": s.get("summary_raw"),   # LLM 原文（未後處理）；長會議走分段路徑時為 None
     }
     with open(os.path.join(out_dir, f"e2e_{label}.json"), "w", encoding="utf-8") as f:
         json.dump(res, f, ensure_ascii=False, indent=1)

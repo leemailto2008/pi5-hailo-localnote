@@ -196,6 +196,8 @@ class JobStatus(BaseModel):
     transcript: Optional[str] = None
     audio_url: Optional[str] = None
     summary_stream: Optional[str] = None
+    # LLM 原始輸出（未經 clean/ensure/merge 後處理），僅供 e2e 存檔比對，不影響畫面
+    summary_raw: Optional[str] = None
     metrics: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -1364,6 +1366,7 @@ class MeetingJobManager:
                             "accumulated": curr_text
                         })
 
+            self.status.summary_raw = "".join(accumulated)   # 原文先存一份給 e2e 存檔 (JobStatus.summary_raw)
             full_text = clean_summary_markdown(to_internal_sections("".join(accumulated)))   # 英文標題先換成內部的中文標題
             if full_text:
                 full_text = ensure_sections(full_text)   # 被 num_predict 截斷時明確標示缺段，不捏造
