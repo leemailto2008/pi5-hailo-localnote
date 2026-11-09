@@ -203,12 +203,24 @@ def _drop_label_echo(item: str) -> str:
     return _LABEL_ECHO_RE.sub(rep, item)
 
 
+def _drop_cut_off_final_bullet(text: str) -> str:
+    """小模型重複迴圈撞上 num_predict 時，最後一行常被截成前面某條的前綴（「- 產線加一」←「- 產線加一傭一站查」）：不是完整條目，拿掉。只看最後一行。"""
+    lines = text.rstrip().splitlines()
+    if not lines or not lines[-1].lstrip().startswith(("-", "*", "•")):
+        return text
+    tail = _BULLET_RE.sub("", lines[-1]).strip()
+    if len(tail) < 3:
+        return text
+    earlier = [_BULLET_RE.sub("", l).strip() for l in lines[:-1] if l.lstrip().startswith(("-", "*", "•"))]
+    return "\n".join(lines[:-1]) if any(len(b) > len(tail) and b.startswith(tail) for b in earlier) else text
+
+
 def clean_summary_markdown(md: str, max_items: Optional[Dict[str, int]] = None) -> str:
     """LLM 紀要後處理：轉台灣繁體、移除重複行 (小模型偶發重複迴圈直到 num_predict 用盡)，並限制摘要/決議點數。"""
     limits = max_items or {"摘要": 5, "決議": 3}
     out, seen, section, count = [], set(), None, 0
     seen_header: Dict[str, bool] = {}
-    for line in tidy_dates(to_taiwan_traditional(md or "")).replace("\ufffd", "").splitlines():   # 模型偶爾吐出半個字元 (「�品保部」)
+    for line in _drop_cut_off_final_bullet(tidy_dates(to_taiwan_traditional(md or "")).replace("\ufffd", "")).splitlines():   # 模型偶爾吐出半個字元 (「�品保部」)
         s = line.strip()
         if s.startswith("|") and set(s) <= set("| "):   # 整列空白的表格列 (小模型偶爾連印 20 多列「| | | |」)
             continue

@@ -1121,3 +1121,21 @@ def test_empty_summary_section_does_not_hide_zhao_heading():
         assert su.SECTION_MISSING_NOTE not in out and "## 要" not in out
     # 「## 摘要」已有內容時，「## 要」不動
     assert "## 要\n- b" in su.to_internal_sections("## 摘要\n- a\n\n## 要\n- b\n")
+
+
+def test_final_bullet_cut_off_by_token_limit_is_dropped():
+    # 11-10 06:23 1 分鐘數位 E2E 的真實 LLM 原文 (job m_1794259475 的 summary_raw，節錄)：小模型重複「- 產線加一傭一站查」，
+    # 直到 num_predict 用盡，最後一行被截成「- 產線加一」。它是前面整條的前綴，不是完整決議，要拿掉；完整的那條要保留。
+    from code_dispatcher import summary_utils as su
+    raw = ("## 摘要  \n- 招募資訊部職缺面試進度  \n- 產線加開一傭一站檢查  \n- 品質異常客訴改進  \n- 產線加一傭一站查  \n\n"
+           "## 待辦  \n| 事項 | 負責人 | 時間 |  \n|---|---|---|  \n| 面試安排 | 許經理 | 11月28日 |  \n\n"
+           "## 決議  \n- 招募進度完成  \n- 產線加一傭一站查  \n- 品質異常改進  \n- 產線加一傭一站查  \n- 產線加一傭一站查  \n- 產線加一")
+    out = su.clean_summary_markdown(su.to_internal_sections(raw))
+    assert not any(l.strip() == "- 產線加一" for l in out.splitlines()), out
+    assert "- 產線加一傭一站查" in out and "- 品質異常改進" in out
+    # 最後一行不是任何條目的前綴（完整句）：不動
+    assert "- 確認預算" in su.clean_summary_markdown(su.to_internal_sections("## 決議\n- 招募進度完成\n- 確認預算"))
+    # 前綴不到 3 字：不動
+    assert "- 預" in su.clean_summary_markdown(su.to_internal_sections("## 摘要\n- 預算編列方式確認\n\n## 決議\n- 預"))
+    # 最後一行不是條目：不動
+    assert "招募" in su.clean_summary_markdown(su.to_internal_sections("## 決議\n- 招募進度完成\n招募"))
