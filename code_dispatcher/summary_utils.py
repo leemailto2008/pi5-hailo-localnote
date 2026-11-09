@@ -1143,6 +1143,14 @@ def _clean_action(item: str) -> str:
     return _ACTION_LEAD_RE.sub("", re.sub(r"(?<=.{2})前$", "", item)).strip() or item
 
 
+def _cut_item(text: str, n: int = 20) -> str:
+    """事項截到 n 字，但不切斷數字：「…拿到500臺」截在「5」會留下殘缺的數字 (11-09 3 分鐘 e2e)，
+    改退到那串數字之前；截點不在數字中間時照舊。"""
+    if len(text) <= n or not (text[n - 1].isdigit() and text[n].isdigit()):
+        return text[:n]
+    return re.sub(r"\d+$", "", text[:n]) or text[:n]
+
+
 def _todo_parts(line: str):
     """回傳 (事項, 負責人, 時間) 或 None。
     有「待辦事項是…」時只看它後面那一句：負責人從這句取，時間先找這句、沒有才用整行的 (決議的期限)，
@@ -1168,7 +1176,7 @@ def _todo_parts(line: str):
                 topic = _CLAUSE_SPLIT_RE.split(parts[0])[0].strip()
                 topic = re.sub(r"\s*待辦(?:事項)?\s*$", "", topic).strip()
                 item = action if len(action) >= 2 else (topic or _CLAUSE_SPLIT_RE.split(line)[0].strip() or line)
-                return _clean_action(item)[:20], mo.group(1), mt.group(1)
+                return _cut_item(_clean_action(item)), mo.group(1), mt.group(1)
     mo, mt = _OWNER_RE.search(line), _TIME_RE.search(line)
     if not (mo and mt):
         return _todo_parts_en(line) if detect_language(line) == "en" else None
@@ -1178,15 +1186,15 @@ def _todo_parts(line: str):
         rest = _strip_time(first[mo.end():], mt.group(0))
         rest = _ACTION_LEAD_RE.sub("", rest.strip()).strip()
         if len(rest) >= 4:
-            return _clean_action(rest)[:20], mo.group(1), mt.group(1)
+            return _cut_item(_clean_action(rest)), mo.group(1), mt.group(1)
     if re.fullmatch(r".{0,6}方面", first):
         # 「招募方面，決議是12月3日前完成報到，拜半事像是王經理主持面試」：事項取負責人那一句的動作，不取議題名
         owner_clause = next((c for c in _CLAUSE_SPLIT_RE.split(line) if mo.group(0) in c), "")
         act = _strip_time(owner_clause[owner_clause.find(mo.group(0)) + len(mo.group(0)):], mt.group(0))
         act = _ACTION_LEAD_RE.sub("", act.strip()).strip()
         if len(act) >= 2:
-            return _clean_action(act)[:20], mo.group(1), mt.group(1)
-    return (first[:20] or line[:20]), mo.group(1), mt.group(1)
+            return _cut_item(_clean_action(act)), mo.group(1), mt.group(1)
+    return _cut_item(first or line), mo.group(1), mt.group(1)
 
 
 def _strip_time(text: str, when: str) -> str:
@@ -1452,7 +1460,7 @@ def _recap_timeless_todo(line: str):
     if not mo or _TIME_RE.search(line):
         return None
     action = _ACTION_LEAD_RE.sub("", seg.replace(mo.group(0), "", 1).strip()).strip()
-    return (action[:20], mo.group(1), "-") if len(action) >= 2 else None
+    return (_cut_item(action), mo.group(1), "-") if len(action) >= 2 else None
 
 
 def _todo_known(row, table) -> bool:
@@ -1782,7 +1790,7 @@ def _transcript_todos(transcript: str, max_rows: int = 12) -> List[tuple]:
         when = mt.group(1).replace(" ", "")
         if re.match(r"\s*(?:之前|以前|前)", src[mt.end():]) and not when.endswith("前"):
             when += "前"          # 與模型寫的「10月7日前」「週五前」一致
-        rows.append((item[:20], owner, when, f"{prv}{c}{nxt}"))
+        rows.append((_cut_item(item), owner, when, f"{prv}{c}{nxt}"))
         if len(rows) >= max_rows:
             break
     return rows

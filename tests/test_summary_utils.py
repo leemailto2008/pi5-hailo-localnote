@@ -859,6 +859,15 @@ def test_todo_action_drops_leading_shi_and_brackets():
     assert summary_utils._todo_parts("韌體方面，待辦事項是李協理《安排回歸測試》10月11日前")[0].startswith("安排回歸測試")
 
 
+def test_todo_item_cut_never_splits_a_number():
+    # 11-09 3 分鐘 e2e：事項截到 20 字時切在「500」中間，待辦列留下「…拿到5」
+    assert summary_utils._cut_item("客戶訂單臺中蓮華精力希望3月17日拿到500臺車用樣") == "客戶訂單臺中蓮華精力希望3月17日拿到"
+    assert summary_utils._cut_item("客戶訂單臺中蓮華精力希望3月17日拿到500臺") == "客戶訂單臺中蓮華精力希望3月17日拿到"
+    assert summary_utils._cut_item("送到財務部") == "送到財務部"
+    assert summary_utils._cut_item("0123456789012345678901234") == "01234567890123456789"    # 全是數字時不回空字串
+    assert summary_utils._cut_item("回覆客戶月底前完成詳細報價單與合約條款確認") == "回覆客戶月底前完成詳細報價單與合約條款確認"[:20]
+
+
 def test_summary_drops_todo_clause_already_in_table():
     md = ("## 摘要\n- 韌體修正版10月11日上線待辦事項是李協理安排回測\n- 待辦事項是林主任週三前回覆華新\n"
           "- 待辦事項是吳副理週五前交文宣\n\n## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n"
