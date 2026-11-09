@@ -166,6 +166,12 @@ def clean_hallucination_repetitions(text: str) -> str:
 
 _WORD_LOOP_RE = re.compile(r"((?:[A-Za-z']+[\s,]+){2,6}?)\1{2,}")     # 2~6 個字的片語連續 3 次 (「yes yes yes」不算)
 _LETTER_RUN_RE = re.compile(r"([A-Za-z])\1{3,}", re.IGNORECASE)
+# 夾在中文之間、全小寫、4 個詞以上的英文片語 (沒有大寫詞或數字詞以外的專有名詞)：解碼幻覺，例如
+# 「…，w to stop the time for 3 hours，…」(2026-11-09 3 分鐘 digital E2E 逐字稿)。中英夾雜的正常用法多半是單詞、
+# 專有名詞或大寫句首 (ERP、Friday、Q3)，不會命中。推測 (未以真人逐字稿驗證)：真人說的全小寫英文長句也會被一併拿掉。
+_CJK_ISLAND_EN_RE = re.compile(r"(?<=[一-鿿，,、。！？!?\s])"
+                               r"[a-z][a-z']*(?:\s+[a-z0-9][a-z0-9']*){3,}"
+                               r"[\s，,、。！？!?]*(?=[一-鿿]|$)")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
@@ -177,12 +183,15 @@ def clean_stt_segment(text: str) -> str:
     - 同一個英文字母連續 4 次以上 (不分大小寫) 整串刪掉 (正常語音不會出現)。
     - 中文／符號片語的重複迴圈：collapse_phrase_loops() 只留一次。不用 clean_hallucination_repetitions() 的
       「結尾殘字」規則：那是給 CPU 路徑 token 用盡時用的，套在切片上會把「五輪回測」砍成「五輪回」。
-    - 沒有中文、而且是 2 個字以上的英文片語重複 3 次以上：整段當成幻覺丟掉。"""
+    - 沒有中文、而且是 2 個字以上的英文片語重複 3 次以上：整段當成幻覺丟掉。
+    - 有中文時，夾在中文之間、全小寫、4 個詞以上的英文片語：拿掉 (_CJK_ISLAND_EN_RE)。"""
     if not text:
         return text
     if not _CJK_RE.search(text) and _WORD_LOOP_RE.search(text + " "):
         return ""
     text = _LETTER_RUN_RE.sub("", text)
+    if _CJK_RE.search(text):
+        text = re.sub(r"\s+(?=[，,、。！？!?])", "", _CJK_ISLAND_EN_RE.sub("", text))
     return collapse_phrase_loops(text).strip()
 
 

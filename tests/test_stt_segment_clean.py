@@ -14,6 +14,12 @@ import voice_pipeline as vp  # noqa: E402
     ("林主任會在 10月21日前提出改善報告ZZZZZZZZZZZZZzZzZzZ", "林主任會在 10月21日前提出改善報告"),
     ("聖珀日，三日中，三日，三日，三日，三日，三日,", "聖珀日，三日中，三日，三日,"),
     ("I'm a little bit of a little bit of a little bit of a little bit of a", ""),     # 沒有中文的英文迴圈：整段丟掉
+    # 夾在中文之間的純小寫英文長片語 (2026-11-09 3 分鐘 digital E2E 逐字稿：「…，w to stop the time for 3 hours，…」)：Whisper 幻覺，整段拿掉
+    ("今天就到這裡，w to stop the time for 3 hours，謝謝大家", "今天就到這裡，謝謝大家"),
+    ("第二題是品質異常，w to stop the time for 3 hours。第三題是", "第二題是品質異常，第三題是"),
+    # 中英夾雜但不符合上述條件 (有大寫、或不到 4 個詞)：不動
+    ("這個 ok sure 好的，謝謝", "這個 ok sure 好的，謝謝"),
+    ("我們先討論 Q3 預算，Please check the schedule before Friday，謝謝", "我們先討論 Q3 預算，Please check the schedule before Friday，謝謝"),
     # 正常內容不動
     ("測試的部分請御經理安排至少要做10輪回 測", "測試的部分請御經理安排至少要做10輪回 測"),
     ("名額30人目前已經報名22人還剩8個名", "名額30人目前已經報名22人還剩8個名"),
