@@ -394,6 +394,18 @@ def test_short_minutes_get_the_closing_recap_todos_and_decisions():
     assert summary_utils.merge_recap_into_minutes(md, "第一個議題是出差，吳副理下個月要去東京。") == md
 
 
+def test_decision_clause_dropped_when_table_has_the_same_item_despite_garbled_owner():
+    # 11-09 3 分鐘 e2e：STT 把負責人聽成「王金」(認不出職稱)，但待辦表已有同一件事 → 只拿掉待辦子句
+    out = summary_utils._drop_listed_todo_clause(
+        ["- 招募方面，決議是12月3日前完成報到待辦事項是王金，主持面試",
+         "- 供應商方面，決議是替代料持續驗證，待辦事項是黃專員週三回報宏遠科技的交期，決議是參加新竹展覽",
+         "- 預算方面，決議是維持原案，待辦事項是盡快送出"],
+        ["| 王金主持面試 | - | - |"])
+    assert out[0] == "- 招募方面，決議是12月3日前完成報到"
+    assert out[1] == "- 供應商方面，決議是替代料持續驗證，待辦事項是黃專員週三回報宏遠科技的交期，決議是參加新竹展覽"
+    assert out[2] == "- 預算方面，決議是維持原案，待辦事項是盡快送出"          # 表上沒有的尾巴照舊保留
+
+
 def test_todo_clause_without_shi_after_shixiang():
     # STT 漏了「是」：「…開課待辦事項十個部門週四前把名單交給吳副理」
     assert summary_utils._todo_parts("決議是簡報技巧課程9月2日開課待辦事項十個部門週四前把名單交給吳副理") == \

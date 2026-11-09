@@ -1228,14 +1228,38 @@ def extract_todos(lines: List[str], max_rows: int = 6) -> List[str]:
     return rows
 
 
+_LISTED_TODO_TAIL_RE = re.compile(r"[，,、；;]?\s*待辦(?:事項)?(?:是|為|：|:)\s*(.+?)(?=[，,、；;]?\s*(?:決議|決定|結論|待辦)|$)")
+
+
+def _drop_todo_clause_listed_by_text(line: str, items: set) -> Optional[str]:
+    """待辦子句的文字 (去掉標點) 與待辦表某列事項互相包含 → 回傳拿掉該子句的條目；否則 None。
+    負責人被 STT 聽錯時 (「王經理」聽成「王金」) 認不出負責人，_clause_in_table 會漏，改以事項文字比對。
+    (11-09 3 分鐘 e2e：「招募方面，決議是12月3日前完成報到待辦事項是王金，主持面試」，待辦表已有「王金主持面試」)"""
+    m = _LISTED_TODO_TAIL_RE.search(line)
+    if not m:
+        return None
+    tail = re.sub(r"[\s，,、。：:；;]", "", m.group(1))
+    if len(tail) < 3 or not any(len(r) >= 3 and (r in tail or tail in r) for r in items):
+        return None
+    head = line[:m.start()].rstrip()
+    rest = line[m.end():].lstrip("，,、；; ")
+    return f"{head}，{rest}" if rest else head
+
+
 def _drop_listed_todo_clause(decisions: List[str], todo_rows: List[str], known=None) -> List[str]:
     """結尾總結的決議條目常是「X方面，決議是…，待辦事項是某人某日前…」。待辦那半句已經寫進待辦表
     (認得出負責人與時間) 時，決議只留前半句，不在兩段重複；待辦表沒收到的照舊整句保留，負責人不會不見。
     known((事項, 負責人, 時間)) 另外判斷這件事是否已在表上 (merge_recap_into_minutes 用，見 _todo_known)。"""
     listed = {r.split("|")[1].strip() for r in todo_rows if r.count("|") >= 4}
     table = [(r.split("|")[1].strip(), r.split("|")[2].strip()) for r in todo_rows if r.count("|") >= 4]
+    items = {re.sub(r"[\s，,、。：:；;]", "", r.split("|")[1]) for r in todo_rows if r.count("|") >= 4}
     out = []
     for line in decisions:
+        cut = _drop_todo_clause_listed_by_text(line, items)
+        if cut is not None:
+            if re.sub(r"[\W_]", "", cut):          # 只剩「-」的條目整條拿掉
+                out.append(cut)
+            continue
         parts = _TODO_MARK_RE.split(line, 1)
         got = (_todo_parts(line) or _recap_timeless_todo(line)) if len(parts) == 2 else None
         if got and known is not None and known(got):
