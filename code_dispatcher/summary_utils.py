@@ -1264,7 +1264,7 @@ def _clause_in_table(seg: str, table: List[tuple]) -> bool:
 
 
 def _topic_key(line: str) -> str:
-    head = re.split(r"[：:]", line, 1)
+    head = re.split(r"[：:]", line, maxsplit=1)
     return head[0].strip() if len(head) == 2 and 1 <= len(head[0].strip()) <= 8 else line[:4]
 
 
@@ -1326,8 +1326,8 @@ def assemble_long_minutes(chunk_notes: List[str], max_summary: int = 8, max_deci
     decisions: List[str] = []
     dup_of_decision = set()
     for l in ordered:          # 同一件事在總結與前段各寫一次 (「總結：決議先簽60臺試單」「訂單：決議先簽60臺試單」) 只留一條
-        body = set(re.sub(r"[\s，,。、：:]", "", re.split(r"[：:]|方面", l, 1)[-1]))
-        if any(len(body & set(re.sub(r"[\s，,。、：:]", "", re.split(r"[：:]|方面", d, 1)[-1]))) >= 0.8 * max(1, len(body))
+        body = set(re.sub(r"[\s，,。、：:]", "", re.split(r"[：:]|方面", l, maxsplit=1)[-1]))
+        if any(len(body & set(re.sub(r"[\s，,。、：:]", "", re.split(r"[：:]|方面", d, maxsplit=1)[-1]))) >= 0.8 * max(1, len(body))
                for d in decisions):
             dup_of_decision.add(l)
             continue
@@ -1433,7 +1433,7 @@ def _recap_timeless_todo_en(line: str, topics=()):
         return None
     action = re.split(r"[,;.]", mo.group(2) or mo.group(3) or "")[0].strip()
     for t in topics:
-        action = re.split(r"\s+" + re.escape(t) + r"\b", action, 1, flags=re.I)[0].strip()
+        action = re.split(r"\s+" + re.escape(t) + r"\b", action, maxsplit=1, flags=re.I)[0].strip()
     return (action[:40], owner, "-") if len(action) >= 3 else None
 
 
@@ -1542,7 +1542,7 @@ def merge_recap_into_minutes(md: str, transcript: str, max_rows: int = 6, max_de
                 if not kept:        # 整條就是表上已有的待辦 (「待辦事項是王經理主持面試」)：不當決議
                     continue
                 d = kept[0]
-                core = _CLAUSE_SPLIT_RE.split(re.split(r"決議\s*(?:是|為|：|:)", d, 1)[-1])[0].strip()
+                core = _CLAUSE_SPLIT_RE.split(re.split(r"決議\s*(?:是|為|：|:)", d, maxsplit=1)[-1])[0].strip()
                 # 「決議是12日前完成報到待辦事項是王經理主持面」：STT 沒斷句時待辦黏在決議後面，比對只看決議本身
                 core = _TODO_MARK_RE.split(core, 1)[0].strip()
             elif not _CJK_RE.search(line) and (md_ := _DECISION_RE.search(line)):     # 英文總結：「we agreed on …」
@@ -1718,7 +1718,7 @@ def _body_action(text: str) -> str:
     # 下一個議題沒斷句、編號也聽壞 (「送到財務部第11個已提是公啊」「交初稿第11」)；句尾語氣詞 (「完成報到好」)
     # 「第」也漏掉、或編號多唸一個字時 (「回覆客戶七個一提是招募」「第六十一一個議題」，5 分鐘 e2e)
     text = re.split(r"第\s*[\d一二三四五六七八九十]{1,4}(?:\s*個?.{0,2}?[題提體]|\s*$)"
-                    r"|(?<![\d一二三四五六七八九十])[\d一二三四五六七八九十]{1,3}\s*個\s*[一議意已][提題體]", text, 1)[0]
+                    r"|(?<![\d一二三四五六七八九十])[\d一二三四五六七八九十]{1,3}\s*個\s*[一議意已][提題體]", text, maxsplit=1)[0]
     text = re.sub(r"(?<=.{3})[好吧啊]$", "", text)
     return re.sub(r"[.。，,、]+$", "", _BODY_LEAD_RE.sub("", text))
 
