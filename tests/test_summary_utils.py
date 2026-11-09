@@ -1124,7 +1124,7 @@ def test_empty_summary_section_does_not_hide_zhao_heading():
 
 
 def test_final_bullet_cut_off_by_token_limit_is_dropped():
-    # 11-10 06:23 1 分鐘數位 E2E 的真實 LLM 原文 (job m_1794259475 的 summary_raw，節錄)：小模型重複「- 產線加一傭一站查」，
+    # 11-10 05:24 1 分鐘數位 E2E 的真實 LLM 原文 (job m_1794259475 的 summary_raw，節錄)：小模型重複「- 產線加一傭一站查」，
     # 直到 num_predict 用盡，最後一行被截成「- 產線加一」。它是前面整條的前綴，不是完整決議，要拿掉；完整的那條要保留。
     from code_dispatcher import summary_utils as su
     raw = ("## 摘要  \n- 招募資訊部職缺面試進度  \n- 產線加開一傭一站檢查  \n- 品質異常客訴改進  \n- 產線加一傭一站查  \n\n"
