@@ -1090,3 +1090,22 @@ def test_truncated_summary_heading_is_recognised():
     assert out.startswith("## 摘要\n- 供應商交期延至10月10日") and su.SECTION_MISSING_NOTE not in out
     # 已有「## 摘要」時其他標題不動
     assert "## 重點" in su.to_internal_sections("## 摘要\n- a\n## 重點\n- b\n")
+
+
+def test_empty_summary_section_does_not_hide_zhao_heading():
+    # 11-09 21:39 3 分鐘數位 E2E 的症狀 (#19)：模型寫了空的「## 摘要」，7 條摘要留在「## 要」底下，
+    # 結果紀要顯示「模型輸出長度不足」佔位。空的「## 摘要」(含只寫「- 無」或「-」) 拿掉後，「## 要」就會被當成摘要。
+    from code_dispatcher import summary_utils as su
+    todo = "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 回報星光交期 | 李協理 | 週五 |\n\n## 決議\n- 替代料持續驗證\n"
+    head = "## 要\n- 供應商交期延至10月10日\n- ERP 2月3日上線\n\n"
+    variants = [
+        head + "## 摘要\n\n" + todo,
+        head + "## 摘要\n- 無\n\n" + todo,
+        "## 摘要\n-\n\n" + head.rstrip("\n") + "\n\n" + todo,
+    ]
+    for md in variants:
+        out = su.ensure_sections(su.clean_summary_markdown(su.to_internal_sections(md)))
+        assert out.startswith("## 摘要\n- 供應商交期延至10月10日\n- ERP 2月3日上線"), out
+        assert su.SECTION_MISSING_NOTE not in out and "## 要" not in out
+    # 「## 摘要」已有內容時，「## 要」不動
+    assert "## 要\n- b" in su.to_internal_sections("## 摘要\n- a\n\n## 要\n- b\n")

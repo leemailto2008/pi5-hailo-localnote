@@ -88,6 +88,12 @@ _EN_HEADING_RE = re.compile(r"^\s*#{1,4}\s*\**\s*(summary|key points|recap|overv
 _EN_TODO_HEADER_RE = re.compile(r"^\|\s*(?:item|task|action(?: item)?)\s*\|\s*(?:owner|assignee|responsible)\s*\|\s*(?:due|deadline|time|date|when)\s*\|\s*$", re.I | re.M)
 
 
+# 摘要標題的同義寫法：模型偶爾寫「## 要」「## 重點」等 (11-06 3 分鐘 e2e)
+_SUMMARY_ALIAS_HEAD_RE = re.compile(r"^[ \t]*#{1,4}[ \t]*\**[ \t]*(?:要|摘|重點|要點|會議摘要|會議重點|摘要重點)[ \t]*\**[ \t]*[:：]?[ \t]*$", re.M)
+# 只有標題、沒有內容 (或只寫「- 無」、單獨一個「-」) 的「## 摘要」，後面緊接另一個標題或文末
+_EMPTY_SUMMARY_RE = re.compile(r"^## 摘要[ \t]*\n+(?:-[ \t]*(?:無[ \t]*)?\n+)?(?=## |\Z)", re.M)
+
+
 def to_internal_sections(md: str) -> str:
     """英文紀要 → 內部格式：段落標題、待辦表頭、「None」佔位換成中文。內容文字不動。"""
     if not md:
@@ -97,9 +103,12 @@ def to_internal_sections(md: str) -> str:
     md = re.sub(r"^[ \t]*#{1,4}[ \t]*\**[ \t]*(摘要|待辦|決議)(?:事項)?[ \t]*\**[ \t]*[:：]?[ \t]*$", r"## \1", md, flags=re.M)
     # 11-06 3 分鐘 e2e：模型把標題寫成「## 要」，摘要段被當成沒寫、補上「未產生」佔位，真正的條目留在認不得的段落裡。
     # 沒有「## 摘要」時，把只剩一個字或常見同義的標題 (要、摘、重點、要點、會議摘要、會議重點) 當成摘要。
+    # 空的「## 摘要」(只有標題，或只寫「- 無」「-」) 而條目留在「## 要」底下 (11-09 3 分鐘數位 E2E 的 summary_no_placeholder 失敗)：
+    # 空段拿掉，「## 要」才會被當成摘要；「## 摘要」已有內容時兩者都不動。
+    if _SUMMARY_ALIAS_HEAD_RE.search(md):
+        md = _EMPTY_SUMMARY_RE.sub("", md, count=1)
     if not re.search(r"^## 摘要[ \t]*$", md, flags=re.M):
-        md = re.sub(r"^[ \t]*#{1,4}[ \t]*\**[ \t]*(?:要|摘|重點|要點|會議摘要|會議重點|摘要重點)[ \t]*\**[ \t]*[:：]?[ \t]*$",
-                    "## 摘要", md, count=1, flags=re.M)
+        md = _SUMMARY_ALIAS_HEAD_RE.sub("## 摘要", md, count=1)
 
     def head(m):
         k = m.group(1).lower()
