@@ -5,6 +5,7 @@ usage (在 Pi 上，app 閒置時):
   run_suite.py --minutes 1 3                      # quick (CI 每次)
   run_suite.py --minutes 1 3 5 10 15 30           # full (nightly)
   run_suite.py --minutes 5 --allow-bypass         # 只測錄音 + STT
+  run_suite.py --en en_short en_long              # 英文會議（fixtures/meeting_<name>.json）
 exit code：任一門檻失敗 → 1 (--no-fail 時一律 0)
 """
 import argparse
@@ -20,6 +21,23 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import e2e      # noqa: E402
 import scoring  # noqa: E402
+
+
+def case_specs(minutes, en, fixtures_dir, data_dir):
+    """組出要跑的案例。數字長度對應 meeting_<N>min.*；英文名稱對應 meeting_<name>.*。
+    英文案例的門檻長度取 fixture 內的 minutes（例如 en_short 為 2.1，門檻查表以 f"{minutes:g}" 為鍵）。"""
+    specs = []
+    for m in minutes:
+        specs.append({"label": f"{m:g}min", "title": f"{m:g} 分", "minutes": m,
+                      "fixture": os.path.join(fixtures_dir, f"meeting_{m:g}min.json"),
+                      "wav": os.path.join(data_dir, f"meeting_{m:g}min.wav")})
+    for name in en:
+        fx = os.path.join(fixtures_dir, f"meeting_{name}.json")
+        with open(fx, encoding="utf-8") as f:
+            mins = float(json.load(f)["minutes"])
+        specs.append({"label": name, "title": f"英文 {name}", "minutes": mins,
+                      "fixture": fx, "wav": os.path.join(data_dir, f"meeting_{name}.wav")})
+    return specs
 
 
 def sha256(path):
@@ -59,13 +77,13 @@ def write_markdown(path, cases, meta):
         ok = "✅" if all(k["passed"] for k in c["checks"]) else "❌"
         npu = f"{r.get('stt_npu_chunks', 0)}/{r.get('stt_npu_chunks', 0) + r.get('stt_cpu_chunks', 0)}"
         rr = s.get('recap_recall', '-') if s.get('recap_recall_rel') is None else f"{s.get('recap_recall')} (逐字稿內 {s.get('recap_recall_rel')})"
-        L.append(f"| {c['minutes']:g} 分 | {ok} | {t.get('cer', '-')} | {t.get('fact_recall', '-')} | {rr} | "
+        L.append(f"| {c['title']} | {ok} | {t.get('cer', '-')} | {t.get('fact_recall', '-')} | {rr} | "
                  f"{s.get('topic_coverage', '-')} | {r.get('summary_latency_s', '-')} s | {npu} | {res.get('rec_cpu_avg', '-')}% | "
                  f"{res.get('cpu_temp_max', '-')} °C | {res.get('ram_peak_mb', '-')} MB |")
     for c in cases:
         bad = [k for k in c["checks"] if not k["passed"]]
         if bad:
-            L += ["", f"## ❌ {c['minutes']:g} 分鐘失敗項目", ""] + [f"- `{k['check']}`：{k['value']}（門檻 {k['limit']}）" for k in bad]
+            L += ["", f"## ❌ {c['title']} 失敗項目", ""] + [f"- `{k['check']}`：{k['value']}（門檻 {k['limit']}）" for k in bad]
             errs = (c.get("result") or {}).get("errors") or []
             if errs:
                 L += ["", "app log 錯誤（前 5 筆）：", ""] + [f"    {e}" for e in errs[:5]]
@@ -75,7 +93,8 @@ def write_markdown(path, cases, meta):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--minutes", nargs="+", type=float, default=[1, 3])
+    ap.add_argument("--minutes", nargs="+", type=float, default=None, help="數字長度案例；只給 --en 時不預設跑 1 3")
+    ap.add_argument("--en", nargs="+", default=[], choices=["en_short", "en_long"], help="英文測試會議")
     ap.add_argument("--data", default=os.environ.get("LN_E2E_DATA", "/home/pi/ln_e2e/data"), help="測試 WAV 目錄")
     ap.add_argument("--fixtures", default=os.path.join(HERE, "fixtures"))
     ap.add_argument("--thresholds", default=os.path.join(HERE, "thresholds.json"))
@@ -91,10 +110,13 @@ def main():
     cfg = json.load(open(a.thresholds, encoding="utf-8"))
     meta = {"started": started, "host": os.uname().nodename, "commit": os.environ.get("CI_COMMIT_SHORT_SHA") or os.environ.get("GITHUB_SHA", "")[:8]}
     cases = []
-    for i, m in enumerate(a.minutes):
-        fx = os.path.join(a.fixtures, f"meeting_{m:g}min.json")
-        wav = os.path.join(a.data, f"meeting_{m:g}min.wav")
-        case = {"minutes": m, "fixture": fx, "wav": wav, "checks": []}
+    minutes = a.minutes if a.minutes is not None else ([] if a.en else [1, 3])
+    specs = case_specs(minutes, a.en, a.fixtures, a.data)
+    if not specs:
+        ap.error("沒有案例可跑：請給 --minutes 或 --en")
+    for i, sp in enumerate(specs):
+        m, fx, wav, label = sp["minutes"], sp["fixture"], sp["wav"], sp["label"]
+        case = {"label": label, "title": sp["title"], "minutes": m, "fixture": fx, "wav": wav, "checks": []}
         th = scoring.thresholds_for(cfg, m)
         if a.allow_bypass:
             th["summary_required"] = False
@@ -107,16 +129,16 @@ def main():
                 raise RuntimeError(f"WAV sha256 與 fixture 不符：{wav}")
             if not e2e.wait_idle():
                 raise RuntimeError("app 一直處於 recording/processing")
-            print(f"[suite] {m:g} min ({meta_fx.get('audio', {}).get('duration_s')} s) ...", flush=True)
-            res = e2e.run_case(wav, fx, f"{m:g}min", bypass_summary=a.allow_bypass, out_dir=out)
+            print(f"[suite] {label} ({meta_fx.get('audio', {}).get('duration_s')} s) ...", flush=True)
+            res = e2e.run_case(wav, fx, label, bypass_summary=a.allow_bypass, out_dir=out)
             case["result"], case["total_s"] = res, res.get("total_s", 0)
             case["checks"] = scoring.evaluate(res, th)
         except Exception as e:
             case["checks"] = [{"check": "case_executed", "value": f"{type(e).__name__}: {e}", "limit": "no exception", "passed": False}]
         nf = sum(not k["passed"] for k in case["checks"])
-        print(f"[suite] {m:g} min → {'PASS' if nf == 0 else f'FAIL ({nf})'}", flush=True)
+        print(f"[suite] {label} → {'PASS' if nf == 0 else f'FAIL ({nf})'}", flush=True)
         cases.append(case)
-        if i + 1 < len(a.minutes):
+        if i + 1 < len(specs):
             time.sleep(a.gap)
     slim = [{k: v for k, v in c.items() if k != "result"} | {"result": {k: v for k, v in (c.get("result") or {}).items()
                                                                           if k not in ("transcript", "summary")}} for c in cases]
