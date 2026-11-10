@@ -1139,3 +1139,16 @@ def test_final_bullet_cut_off_by_token_limit_is_dropped():
     assert "- 預" in su.clean_summary_markdown(su.to_internal_sections("## 摘要\n- 預算編列方式確認\n\n## 決議\n- 預"))
     # 最後一行不是條目：不動
     assert "招募" in su.clean_summary_markdown(su.to_internal_sections("## 決議\n- 招募進度完成\n招募"))
+
+
+
+def test_replacement_char_in_split_heading_does_not_hide_summary():
+    # 11-10 08:25 3 分鐘數位 E2E (job m_1794270342) 的 summary_raw 標題是「## �要」：「摘」的多位元組字在串流中被切斷，
+    # 解碼後變成 U+FFFD。認不出標題 → 「## 要」留著、「## 摘要」由 ensure_sections 補上佔位 (summary_no_placeholder 失敗)。
+    # U+FFFD 不是紀要內容，判斷標題前先去掉。
+    from code_dispatcher import summary_utils as su
+    todo = "## 待辦\n| 事項 | 負責人 | 時間 |\n|---|---|---|\n| 回報星光交期 | 李協理 | 週五 |\n\n## 決議\n- 替代料持續驗證\n"
+    raw = "## �要\n- 供應商交期延至10月10日\n- ERP 2月3日上線\n\n" + todo
+    out = su.ensure_sections(su.clean_summary_markdown(su.to_internal_sections(raw)))
+    assert out.startswith("## 摘要\n- 供應商交期延至10月10日\n- ERP 2月3日上線"), out
+    assert su.SECTION_MISSING_NOTE not in out and "## 要" not in out and "�" not in out

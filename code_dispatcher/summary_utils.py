@@ -98,6 +98,9 @@ def to_internal_sections(md: str) -> str:
     """英文紀要 → 內部格式：段落標題、待辦表頭、「None」佔位換成中文。內容文字不動。"""
     if not md:
         return md or ""
+    # 串流解碼時，多位元組字若被 token 邊界切斷，會留下 U+FFFD (11-10 08:25 3 分鐘 E2E：標題「## 摘要」變成「## U+FFFD要」，
+    # 摘要段認不出、補上「模型輸出長度不足」佔位)。U+FFFD 不是紀要內容，判斷標題前先去掉。
+    md = md.replace("\ufffd", "")
     # 「## ## Summary」(11-05：最近 40 份 en_long 有 4 份)：標題認不出來，ensure_sections 又補一段「Summary：未產生」，畫面上兩個 Summary
     md = re.sub(r"^[ \t]*#{1,4}(?:[ \t]*#{1,4})+[ \t]*", "## ", md, flags=re.M)
     md = re.sub(r"^[ \t]*#{1,4}[ \t]*\**[ \t]*(摘要|待辦|決議)(?:事項)?[ \t]*\**[ \t]*[:：]?[ \t]*$", r"## \1", md, flags=re.M)
