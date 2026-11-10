@@ -24,6 +24,9 @@ import voice_pipeline as vp  # noqa: E402
     ("測試的部分請御經理安排至少要做10輪回 測", "測試的部分請御經理安排至少要做10輪回 測"),
     ("名額30人目前已經報名22人還剩8個名", "名額30人目前已經報名22人還剩8個名"),
     ("對對對，好好好，我們先這樣", "對對對，好好好，我們先這樣"),
+    # 單字 + 逗號的連續重複 (2026-11-10 45 分鐘 digital E2E 逐字稿：「車用的的，的，的，的，的，的，淨室」)：同一字 4 次以上壓成一次
+    ("第九十二個議題是車用的的，的，的，的，的，的，淨室的部分", "第九十二個議題是車用的的，淨室的部分"),
+    ("是，是，是，好", "是，是，是，好"),          # 3 次以下不動 (口語常見)
     ("We need two more engineers to finish the migration", "We need two more engineers to finish the migration"),
     ("no no no, that is not what I said", "no no no, that is not what I said"),
     ("yes yes yes I agree", "yes I agree"),             # 單字重複：壓成一次 (沿用原本的片語規則)，不會整段丟掉
